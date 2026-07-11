@@ -1,0 +1,137 @@
+# =====================================================================
+# Lockverity backend - Python project configuration
+# =====================================================================
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "lockverity"
+version = "0.1.0"
+description = "Evidence-first software supply-chain assurance."
+requires-python = ">=3.12"
+license = { text = "MIT" }
+authors = [
+    { name = "Lockverity Contributors" },
+]
+keywords = ["security", "supply-chain", "sbom", "dependencies", "vulnerabilities"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Information Technology",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Security",
+    "Typing :: Typed",
+]
+dependencies = [
+    "fastapi>=0.110.0",
+    "uvicorn[standard]>=0.27.0",
+    "sqlalchemy>=2.0.27",
+    "alembic>=1.13.1",
+    "pydantic>=2.6.0",
+    "pydantic-settings>=2.2.0",
+    "httpx>=0.27.0",
+    "python-multipart>=0.0.9",
+    "greenlet>=3.0.3",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.23.0",
+    "pytest-cov>=4.1.0",
+    "ruff>=0.4.0",
+    "mypy>=1.8.0",
+    "types-requests",
+    # The current FastAPI/Starlette test client uses ``httpx2`` for its
+    # request/response transport.
+    "httpx2>=0.0.1",
+]
+
+[project.urls]
+Homepage = "https://github.com/lockverity/lockverity"
+Documentation = "https://github.com/lockverity/lockverity/tree/main/docs"
+Issues = "https://github.com/lockverity/lockverity/issues"
+Source = "https://github.com/lockverity/lockverity"
+
+[tool.setuptools]
+package-dir = { "app" = "app" }
+
+[tool.setuptools.packages.find]
+where = ["app"]
+include = ["app*"]
+
+# ---------------------------------------------------------------------
+# Ruff - linting and formatting
+# ---------------------------------------------------------------------
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+src = ["app", "tests"]
+extend-exclude = ["alembic/versions"]
+
+[tool.ruff.lint]
+select = [
+    "E",    # pycodestyle errors
+    "W",    # pycodestyle warnings
+    "F",    # pyflakes
+    "I",    # isort
+    "B",    # flake8-bugbear
+    "UP",   # pyupgrade
+    "N",    # pep8-naming
+    "S",    # flake8-bandit (security)
+    "C4",   # flake8-comprehensions
+    "SIM",  # flake8-simplify
+    "RUF",  # ruff-specific
+]
+ignore = [
+    "E501",  # line length handled by formatter
+    "B008",  # FastAPI uses function calls in defaults
+    "S101",  # asserts are acceptable in tests and defensive code
+    "UP042", # ``class Foo(str, Enum)`` is the SQLAlchemy 2 idiom; StrEnum migration is a future concern
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S101", "S105", "S106", "N802"]
+"alembic/**" = ["E", "F", "N", "UP"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+line-ending = "lf"
+
+# ---------------------------------------------------------------------
+# Pytest
+# ---------------------------------------------------------------------
+[tool.pytest.ini_options]
+minversion = "8.0"
+addopts = [
+    "-ra",
+    "--strict-markers",
+    "--strict-config",
+    "--showlocals",
+    "--tb=short",
+]
+testpaths = ["tests"]
+pythonpath = ["."]
+asyncio_mode = "auto"
+filterwarnings = [
+    "error",
+    "ignore::DeprecationWarning:passlib.*",
+    "ignore::DeprecationWarning:pkg_resources.*",
+]
+markers = [
+    "integration: marks tests that require a real database or external service",
+]
+
+# ---------------------------------------------------------------------
+# MyPy - non-blocking for v0.1, configured but not enforced in CI
+# ---------------------------------------------------------------------
+[tool.mypy]
+python_version = "3.12"
+ignore_missing_imports = true
+warn_unused_ignores = true
+warn_redundant_casts = true
+no_implicit_optional = true
+check_untyped_defs = true

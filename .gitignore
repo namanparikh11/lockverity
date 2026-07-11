@@ -1,0 +1,122 @@
+# =====================================================================
+# Lockverity v0.1 - .gitignore
+# =====================================================================
+# Defensive security product. We never commit secrets, fixtures that
+# could be confused for real data, or environment-specific state.
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+parts/
+svar/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+env.bak/
+venv.bak/
+
+# Test / coverage
+.pytest_cache/
+.coverage
+.coverage.*
+.cache
+htmlcov/
+.tox/
+.nox/
+coverage.xml
+*.cover
+.hypothesis/
+
+# Type checkers
+.mypy_cache/
+.ruff_cache/
+
+# Alembic local artefacts (we keep the script directory under VCS)
+backend/alembic/versions/__pycache__/
+
+# --- Node / Frontend ---
+node_modules/
+.pnp
+.pnp.js
+.npm/
+.eslintcache
+.vite/
+dist/
+dist-ssr/
+*.local
+.parcel-cache
+.next/
+out/
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+backend/logs/
+
+# OS junk
+.DS_Store
+Thumbs.db
+desktop.ini
+ehthumbs.db
+$RECYCLE.BIN/
+
+# IDE / editor
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.fleet/
+.cursor/
+
+# Local environment files
+.env
+.env.local
+.env.*.local
+.env.development
+.env.production
+
+# Lockverity runtime artefacts
+# Workspace and runtime uploads - never commit user-provided archives
+backend/var/
+backend/runtime/
+backend/.lockverity/
+*.lockverity.sqlite
+*.lockverity.sqlite-journal
+*.lockverity.sqlite-wal
+*.lockverity.sqlite-shm
+workspaces/
+uploads/
+tmp/
+tmp.*
+
+# Generated coverage / build reports
+backend/coverage/
+frontend/coverage/
+backend/htmlcov/
+
+# CI-generated noise
+.ci-cache/
