@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from datetime import datetime
 
+from pydantic import Field
+
 from app.schemas.common import SchemaModel
 
 
@@ -24,3 +26,4 @@ class SystemInfoResponse(SchemaModel):
     archive_limits: dict[str, int]
     pagination: dict[str, int]
     provider_safety: dict[str, int | float]
+    intake: dict[str, int | float | bool | str | None] = Field(default_factory=dict)

@@ -48,10 +48,30 @@ class Settings(BaseSettings):
     archive_max_depth: int = Field(default=64)
     archive_suspicious_ratio: int = Field(default=200)
 
-    # --- External provider safety ---
+    # --- External provider safety (shared) ---
     provider_timeout_seconds: float = Field(default=15.0)
     provider_max_response_bytes: int = Field(default=10 * 1024 * 1024)
     provider_retry_limit: int = Field(default=2)
+
+    # --- GitHub intake ---
+    github_api_url: str = Field(default="https://api.github.com")
+    github_token: str | None = Field(default=None)
+    github_timeout_seconds: float = Field(default=15.0)
+    github_max_response_bytes: int = Field(default=10 * 1024 * 1024)
+    github_max_download_bytes: int = Field(default=200 * 1024 * 1024)
+    github_retry_limit: int = Field(default=2)
+    github_user_agent: str = Field(default="lockverity/0.2 (core-intake)")
+
+    # --- Scan worker / executor ---
+    scan_worker_concurrency: int = Field(default=2, ge=1, le=32)
+    scan_heartbeat_seconds: int = Field(default=15, ge=1, le=600)
+    scan_heartbeat_timeout_seconds: int = Field(default=120, ge=10, le=3600)
+    scan_default_failure_summary_max_length: int = Field(default=500, ge=64, le=2048)
+    scan_concurrency_per_repository: int = Field(default=1, ge=1, le=8)
+
+    # --- Provider cache ---
+    provider_cache_max_payload_bytes: int = Field(default=1024 * 1024, ge=4096)
+    provider_cache_default_ttl_seconds: int = Field(default=3600, ge=60, le=7 * 24 * 3600)
 
     # --- Pagination ---
     pagination_default_page_size: int = Field(default=25, ge=1)
@@ -100,6 +120,30 @@ class Settings(BaseSettings):
         if value <= 0:
             raise ValueError("archive_suspicious_ratio must be a positive integer.")
         return value
+
+    @field_validator("github_token")
+    @classmethod
+    def _token_must_not_look_like_url(cls, value: str | None) -> str | None:
+        # Defence in depth: reject values that would obviously break
+        # the transport layer (whitespace, control chars, surrounding
+        # quotes that are sometimes pasted from shells).
+        if value is None:
+            return None
+        if not isinstance(value, str) or not value.strip():
+            return None
+        stripped = value.strip()
+        if any(ch in stripped for ch in ("\n", "\r", "\t", "\x00", " ")):
+            raise ValueError("github_token must not contain whitespace or control characters.")
+        if len(stripped) > 256:
+            raise ValueError("github_token is unreasonably long.")
+        return stripped
+
+    @field_validator("github_api_url")
+    @classmethod
+    def _github_api_url_must_be_https(cls, value: str) -> str:
+        if not isinstance(value, str) or not value.startswith("https://"):
+            raise ValueError("github_api_url must be an https:// URL.")
+        return value.rstrip("/")
 
     @property
     def is_production(self) -> bool:

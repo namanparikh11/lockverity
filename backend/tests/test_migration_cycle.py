@@ -18,11 +18,13 @@ SCRIPT = BACKEND_ROOT / "tests" / "manual_migration_cycle.py"
 
 
 @pytest.mark.integration
-def test_alembic_upgrade_downgrade_reupgrade() -> None:
+def test_alembic_upgrade_downgrade_reupgrade(tmp_path) -> None:
     """Upgrade, downgrade, and re-upgrade against a fresh SQLite file."""
+    db_path = tmp_path / "migration_cycle.sqlite"
     env = os.environ.copy()
     env["PYTHONPATH"] = str(BACKEND_ROOT) + os.pathsep + env.get("PYTHONPATH", "")
-    env["LOCKVERITY_DATABASE_URL"] = "sqlite:///./lockverity.sqlite"
+    env["LOCKVERITY_MIGRATION_DB"] = str(db_path)
+    env["LOCKVERITY_DATABASE_URL"] = f"sqlite:///{db_path}"
     result = subprocess.run(
         [sys.executable, "-m", "tests.manual_migration_cycle"],
         cwd=str(BACKEND_ROOT),
