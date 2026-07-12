@@ -500,7 +500,7 @@ class PyprojectTomlParser:
         s = ref.strip()
         for prefix in ("git+", "https://", "http://", "file://"):
             if s.startswith(prefix):
-                s = s[len(prefix):]
+                s = s[len(prefix) :]
                 break
         if "@" in s and not s.startswith("git@"):
             s = s.split("@", 1)[0]

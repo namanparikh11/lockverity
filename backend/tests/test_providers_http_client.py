@@ -99,7 +99,11 @@ def test_validate_url_rejects_non_string() -> None:
 def test_post_json_with_stub() -> None:
     stub = _StubClient(
         [
-            _StubResponse(status_code=200, body=b'{"results": []}', headers={"content-type": "application/json"}),
+            _StubResponse(
+                status_code=200,
+                body=b'{"results": []}',
+                headers={"content-type": "application/json"},
+            ),
         ]
     )
     install_http_client(stub)

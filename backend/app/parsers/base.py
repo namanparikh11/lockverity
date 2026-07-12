@@ -109,9 +109,7 @@ class ParserRegistry:
         return self._by_type.get(manifest_type)
 
     def all(self) -> tuple[ParserRegistration, ...]:
-        return tuple(
-            self._by_type[m] for m in sorted(self._by_type)
-        )
+        return tuple(self._by_type[m] for m in sorted(self._by_type))
 
     def ecosystems(self) -> frozenset[str]:
         return frozenset(r.ecosystem for r in self._by_type.values())
@@ -140,9 +138,7 @@ def validate_record(record: Mapping[str, Any]) -> None:
     """
     unknown = set(record) - COMPONENT_RECORD_FIELDS
     if unknown:
-        raise ParserError(
-            f"Component record has unknown fields: {sorted(unknown)!r}."
-        )
+        raise ParserError(f"Component record has unknown fields: {sorted(unknown)!r}.")
 
 
 def build_package_url(ecosystem: str, name: str, version: str | None) -> str | None:
@@ -198,7 +194,9 @@ class _Collector:
         self.warnings.append(make_parser_warning(code, message, location))
 
 
-def finalize_parse(collector: _Collector, data: list[dict[str, Any]]) -> ParserResult[list[dict[str, Any]]]:
+def finalize_parse(
+    collector: _Collector, data: list[dict[str, Any]]
+) -> ParserResult[list[dict[str, Any]]]:
     """Return a :class:`ParserResult` for ``data`` and the collected warnings."""
     return ParserResult(
         data=tuple(data),

@@ -182,11 +182,9 @@ def _serialize_json(
 
     serialized = json.dumps(payload, sort_keys=True, separators=(",", ":"))
     body = serialized.encode("utf-8")
-    max_bytes = (limits.max_request_bytes if limits else DEFAULT_MAX_REQUEST_BYTES)
+    max_bytes = limits.max_request_bytes if limits else DEFAULT_MAX_REQUEST_BYTES
     if len(body) > max_bytes:
-        raise HttpClientError(
-            f"Request body is {len(body)} bytes; max is {max_bytes}."
-        )
+        raise HttpClientError(f"Request body is {len(body)} bytes; max is {max_bytes}.")
     return body
 
 

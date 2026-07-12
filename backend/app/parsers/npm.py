@@ -140,9 +140,7 @@ class PackageJsonParser:
                     continue
                 name = raw_name.strip()
                 specifier = raw_spec if isinstance(raw_spec, str) else None
-                is_unsupported, kind, detail = _classify_unsupported_specifier(
-                    specifier or ""
-                )
+                is_unsupported, kind, detail = _classify_unsupported_specifier(specifier or "")
                 version: str | None
                 version_source: str
                 if is_unsupported:
@@ -309,7 +307,7 @@ class PackageLockJsonParser:
                 # Derive the name from the canonical path: "node_modules/<name>".
                 if key == "" or not key.startswith("node_modules/"):
                     continue
-                name = key[len("node_modules/"):]
+                name = key[len("node_modules/") :]
             version = value.get("version") if isinstance(value.get("version"), str) else None
             integrity = value.get("integrity") if isinstance(value.get("integrity"), str) else None
             resolved = value.get("resolved") if isinstance(value.get("resolved"), str) else None
@@ -331,7 +329,9 @@ class PackageLockJsonParser:
                 "scope": scope,
                 "version": version,
                 "version_source": "LOCKFILE" if version else "UNRESOLVED",
-                "package_url": build_package_url(self.ecosystem, name, version) if version else None,
+                "package_url": build_package_url(self.ecosystem, name, version)
+                if version
+                else None,
                 "relationship": relationship,
                 "direct": False,  # populated by dependency_graph from manifest cross-check
                 "development": dev,
@@ -339,7 +339,9 @@ class PackageLockJsonParser:
                 "integrity": integrity,
                 "extras": None,
                 "marker": None,
-                "specifier": value.get("version") if isinstance(value.get("version"), str) else None,
+                "specifier": value.get("version")
+                if isinstance(value.get("version"), str)
+                else None,
                 "is_unsupported": False,
                 "unsupported_kind": None,
                 "unsupported_detail": resolved,
@@ -381,7 +383,9 @@ class PackageLockJsonParser:
                 "scope": scope,
                 "version": version,
                 "version_source": "LOCKFILE" if version else "UNRESOLVED",
-                "package_url": build_package_url(self.ecosystem, name, version) if version else None,
+                "package_url": build_package_url(self.ecosystem, name, version)
+                if version
+                else None,
                 "relationship": relationship,
                 "direct": False,
                 "development": dev,

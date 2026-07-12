@@ -160,9 +160,7 @@ class OsvVulnerabilityProvider:
                     {"content-type": "application/json"},
                 )
             else:
-                http_response = post_json(
-                    OSV_QUERYBATCH_URL, body, limits=self._limits
-                )
+                http_response = post_json(OSV_QUERYBATCH_URL, body, limits=self._limits)
         except HttpClientError as exc:
             return self._unavailable(exc, http_status=None)
         if http_response.status_code >= 400:
@@ -270,9 +268,7 @@ class OsvVulnerabilityProvider:
         return {
             "package": affected.get("package"),
             "ranges": normalized_ranges,
-            "versions": [
-                v for v in (affected.get("versions") or []) if isinstance(v, str)
-            ],
+            "versions": [v for v in (affected.get("versions") or []) if isinstance(v, str)],
         }
 
     def _normalize_severity(self, severity: Mapping[str, Any]) -> dict[str, Any]:

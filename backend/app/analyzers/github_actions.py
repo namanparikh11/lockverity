@@ -245,7 +245,9 @@ def _is_self_hosted(runs_on: Any) -> bool:
 
 
 def _on_keys(workflow: dict[str, Any]) -> list[str]:
-    on_section = workflow.get(True) or workflow.get("on") or workflow.get("On") or workflow.get("ON")
+    on_section = (
+        workflow.get(True) or workflow.get("on") or workflow.get("On") or workflow.get("ON")
+    )
     if on_section is None:
         return []
     if isinstance(on_section, str):
@@ -277,7 +279,9 @@ def _has_filter(on_section: Any, event: str) -> bool:
     inner = on_section.get(event)
     if not isinstance(inner, dict):
         return False
-    return bool(any(key in inner for key in ("branches", "branches-ignore", "paths", "paths-ignore")))
+    return bool(
+        any(key in inner for key in ("branches", "branches-ignore", "paths", "paths-ignore"))
+    )
 
 
 def _scan_untrusted_expressions(text: str) -> list[str]:
@@ -505,7 +509,7 @@ class GitHubActionsAnalyzer:
                 if not isinstance(uses, str) or not uses.startswith("docker://"):
                     continue
                 # docker://image:tag
-                ref = uses[len("docker://"):]
+                ref = uses[len("docker://") :]
                 if ":" not in ref:
                     continue
                 tag = ref.rsplit(":", 1)[1]
@@ -578,9 +582,7 @@ class GitHubActionsAnalyzer:
                         line=line,
                         observed={"permissions": "write-all"},
                         title="Job declares write-all permissions",
-                        summary=(
-                            f"Job {job_name!r} grants every GITHUB_TOKEN scope available."
-                        ),
+                        summary=(f"Job {job_name!r} grants every GITHUB_TOKEN scope available."),
                         severity="high",
                         confidence="high",
                         remediation=(
@@ -668,7 +670,9 @@ class GitHubActionsAnalyzer:
                     )
         return findings
 
-    def _rule_untrusted_checkout_in_privileged(self, ctx: _WorkflowContext) -> list[FindingEvidence]:
+    def _rule_untrusted_checkout_in_privileged(
+        self, ctx: _WorkflowContext
+    ) -> list[FindingEvidence]:
         # Same as 005 in spirit; we only emit a 006 finding if the
         # checkout runs after a ``setup-go`` / ``setup-node`` with
         # credentials and the trigger is ``workflow_run``.
@@ -682,9 +686,7 @@ class GitHubActionsAnalyzer:
                     continue
                 with_ = step.get("with") if isinstance(step.get("with"), dict) else {}
                 ref = with_.get("ref") if isinstance(with_, dict) else None
-                if isinstance(ref, str) and (
-                    "workflow_run.head" in ref or "head_branch" in ref
-                ):
+                if isinstance(ref, str) and ("workflow_run.head" in ref or "head_branch" in ref):
                     yaml_path = f"jobs.{job_name}.steps.{step_index}.with.ref"
                     line = ctx.line_index.lookup(("jobs", job_name, "steps", str(step_index)))
                     findings.append(
@@ -742,7 +744,7 @@ class GitHubActionsAnalyzer:
                         confidence="high",
                         remediation=(
                             "Pass the value through an ``env:`` variable and quote it inside "
-                            "the shell, e.g. ``run: echo \"$BODY\"`` with ``env: { BODY: ${{ "
+                            'the shell, e.g. ``run: echo "$BODY"`` with ``env: { BODY: ${{ '
                             "github.event.comment.body }} }``."
                         ),
                         limitations=(
@@ -881,9 +883,7 @@ class GitHubActionsAnalyzer:
                         "self-hosted is unavoidable, isolate the runner and gate the job "
                         "with strict ``if:`` conditions."
                     ),
-                    limitations=(
-                        "The analyzer does not know the runner's isolation profile."
-                    ),
+                    limitations=("The analyzer does not know the runner's isolation profile."),
                 )
             )
         return findings
@@ -1029,14 +1029,11 @@ class GitHubActionsAnalyzer:
                         observed={"on": event, "filters": list(inner_dict.keys())},
                         title="Broad trigger without branch filter",
                         summary=(
-                            f"The workflow runs on every ``{event}`` event with no branch "
-                            "filter."
+                            f"The workflow runs on every ``{event}`` event with no branch filter."
                         ),
                         severity="low",
                         confidence="high",
-                        remediation=(
-                            f"Add a ``branches:`` filter to ``on.{event}``."
-                        ),
+                        remediation=(f"Add a ``branches:`` filter to ``on.{event}``."),
                         limitations=(
                             "Workflows that legitimately run on every branch (release "
                             "automation) may need to suppress this finding manually."
@@ -1116,9 +1113,7 @@ class GitHubActionsAnalyzer:
                         "strictly gate the job with an ``if:`` condition and isolate the "
                         "self-hosted runner."
                     ),
-                    limitations=(
-                        "The analyzer does not know the runner's network isolation."
-                    ),
+                    limitations=("The analyzer does not know the runner's network isolation."),
                 )
             )
         return findings

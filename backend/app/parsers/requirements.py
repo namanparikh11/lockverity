@@ -307,7 +307,7 @@ class RequirementsTxtParser:
         # -e / --editable
         for prefix in ("-e ", "--editable "):
             if s.startswith(prefix):
-                s = s[len(prefix):].strip()
+                s = s[len(prefix) :].strip()
                 break
         # Strip markers and version-like suffix.
         for sep in (";", "@", "#"):
@@ -316,7 +316,7 @@ class RequirementsTxtParser:
         # Strip URL prefix.
         for prefix in ("git+", "https://", "http://", "file://"):
             if s.startswith(prefix):
-                s = s[len(prefix):]
+                s = s[len(prefix) :]
                 break
         if not s:
             return None

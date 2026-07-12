@@ -153,7 +153,11 @@ class DepsDevEnrichmentProvider:
         ecosystem: str,
         package_name: str,
         version: str,
-    ) -> ProviderSuccess[dict[str, Any]] | ProviderPartialResult[dict[str, Any]] | ProviderUnavailable:
+    ) -> (
+        ProviderSuccess[dict[str, Any]]
+        | ProviderPartialResult[dict[str, Any]]
+        | ProviderUnavailable
+    ):
         """Enrich and walk the transitive tree with bounded depth and node count.
 
         Returns a :class:`ProviderPartialResult` when the traversal was
@@ -170,9 +174,7 @@ class DepsDevEnrichmentProvider:
         truncated = False
         truncated_reasons: list[str] = []
         request_count = 0
-        frontier: list[tuple[str, str, str, int]] = [
-            (ecosystem, package_name, version, 0)
-        ]
+        frontier: list[tuple[str, str, str, int]] = [(ecosystem, package_name, version, 0)]
         while frontier:
             if len(visited) >= self._max_nodes:
                 truncated = True

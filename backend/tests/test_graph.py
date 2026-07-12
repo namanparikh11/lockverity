@@ -52,9 +52,7 @@ def test_max_depth_respected() -> None:
     graph = {chr(c): {} for c in range(ord("a"), ord("a") + 10)}
     for i in range(9):
         graph[chr(ord("a") + i)][chr(ord("a") + i + 1)] = ["1.0.0"]
-    summary = find_paths(
-        graph, "a", target="j", max_depth=3, max_paths=100
-    )
+    summary = find_paths(graph, "a", target="j", max_depth=3, max_paths=100)
     # a -> b -> c -> d is depth 3, target = j requires more
     assert summary.paths == ()
 
@@ -91,9 +89,7 @@ def test_max_paths_per_node_caps_fanin() -> None:
     }
     for i in range(5):
         graph[f"child-{i}"] = {"shared": ["1.0.0"]}
-    summary = find_paths(
-        graph, "a", target="shared", max_depth=4, max_paths_per_node=2
-    )
+    summary = find_paths(graph, "a", target="shared", max_depth=4, max_paths_per_node=2)
     # The cap on per-node passes should kick in. We don't care
     # about the exact number; we just need at least one path and
     # a truncated flag when fan-in is excessive.

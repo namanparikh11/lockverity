@@ -72,9 +72,7 @@ class _AliasLimiter:
     def check(self) -> None:
         self._count += 1
         if self._count > self._limit:
-            raise BoundedYamlError(
-                f"YAML alias expansion exceeded limit of {self._limit}."
-            )
+            raise BoundedYamlError(f"YAML alias expansion exceeded limit of {self._limit}.")
 
 
 def _construct_string_no_yaml_1_1_bool(loader: yaml.SafeLoader, node: yaml.Node) -> str:
@@ -133,9 +131,7 @@ def safe_load_yaml_bytes(
     if not isinstance(data, (bytes, bytearray)):
         raise BoundedYamlError("YAML input must be bytes.")
     if len(data) > max_bytes:
-        raise BoundedYamlError(
-            f"YAML input exceeds max_bytes={max_bytes} (got {len(data)} bytes)."
-        )
+        raise BoundedYamlError(f"YAML input exceeds max_bytes={max_bytes} (got {len(data)} bytes).")
     counter = _AliasLimiter(max_aliases)
     loader_cls = _build_loader(max_aliases)
 

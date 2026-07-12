@@ -94,7 +94,9 @@ def build_dependency_components(
                 "package_name": name,
                 "scope": record.get("scope"),
                 "version": record.get("version"),
-                "version_source": _orm_version_source(str(record.get("version_source") or "UNKNOWN")),
+                "version_source": _orm_version_source(
+                    str(record.get("version_source") or "UNKNOWN")
+                ),
                 "package_url": record.get("package_url"),
                 "relationship": relationship,
                 "direct": direct,

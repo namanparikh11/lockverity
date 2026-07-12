@@ -228,6 +228,11 @@ def test_sarif_exporter_unknown_scan_returns_unavailable(session) -> None:
 
 
 def test_all_exporters_share_protocol() -> None:
-    for cls in (CycloneDxExporter, FindingsCsvExporter, FindingsJsonExporter, SarifStaticFindingsExporter):
+    for cls in (
+        CycloneDxExporter,
+        FindingsCsvExporter,
+        FindingsJsonExporter,
+        SarifStaticFindingsExporter,
+    ):
         assert hasattr(cls, "format")
         assert isinstance(cls.format, str)

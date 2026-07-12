@@ -14,12 +14,8 @@ from tests.fixtures import read_fixture_bytes
 def _envelopes():
     package_json = read_fixture_bytes("npm/clean/package.json")
     package_lock = read_fixture_bytes("npm/clean/package-lock.json")
-    json_records = PackageJsonParser().parse(
-        content=package_json, path="package.json"
-    )
-    lock_records = PackageLockJsonParser().parse(
-        content=package_lock, path="package-lock.json"
-    )
+    json_records = PackageJsonParser().parse(content=package_json, path="package.json")
+    lock_records = PackageLockJsonParser().parse(content=package_lock, path="package-lock.json")
     return [
         {
             "manifest": {
@@ -91,9 +87,7 @@ def test_build_components_dedupes_across_manifests() -> None:
     # lockfile; we keep both records because they encode different
     # evidence. (Dedupe is by (package_name, version, source_path).)
     components, _, _ = build_dependency_components(_envelopes())
-    by_name_version = {
-        (c["package_name"], c["version"]) for c in components
-    }
+    by_name_version = {(c["package_name"], c["version"]) for c in components}
     assert ("lodash", "4.17.21") in by_name_version
     assert ("lodash", None) in by_name_version
 

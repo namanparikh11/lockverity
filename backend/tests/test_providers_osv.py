@@ -33,7 +33,9 @@ def _http_response(status_code: int, body: dict[str, Any]) -> HttpResponse:
     )
 
 
-def _provider_with_response(body: dict[str, Any], *, status_code: int = 200) -> tuple[OsvVulnerabilityProvider, list[dict[str, Any]]]:
+def _provider_with_response(
+    body: dict[str, Any], *, status_code: int = 200
+) -> tuple[OsvVulnerabilityProvider, list[dict[str, Any]]]:
     calls: list[dict[str, Any]] = []
 
     def _request(method: str, url: str, body_bytes: bytes, headers):

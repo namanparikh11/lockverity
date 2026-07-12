@@ -33,9 +33,7 @@ from app.utils.yaml_safe import safe_load_yaml_bytes
 # ``packages`` keys look like ``registry.npmjs.org/foo/1.0.0`` or
 # ``/@scope/foo/1.0.0`` for scoped packages. We accept the second
 # shape too.
-_PKG_KEY_RE = __import__("re").compile(
-    r"^(?P<host>[^/]+)/(?P<rest>.+)$"
-)
+_PKG_KEY_RE = __import__("re").compile(r"^(?P<host>[^/]+)/(?P<rest>.+)$")
 
 
 def _split_scoped_name(name: str) -> tuple[str | None, str]:
@@ -134,7 +132,7 @@ class PnpmLockParser:
                 if "@" in snap_key:
                     at_index = snap_key.rfind("@")
                     name = snap_key[:at_index]
-                    version = snap_key[at_index + 1:]
+                    version = snap_key[at_index + 1 :]
                 else:
                     name = snap_key
                     version = ""

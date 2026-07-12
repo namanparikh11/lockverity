@@ -32,7 +32,9 @@ from app.providers.results import (
 from app.utils.datetime import utcnow
 from app.utils.json_safe import BoundedJsonError, dump_bounded_json
 
-SARIF_SCHEMA = "https://raw.githubusercontent.com/oasis-tcs/sarif-spec/master/Schemata/sarif-schema-2.1.0.json"
+SARIF_SCHEMA = (
+    "https://raw.githubusercontent.com/oasis-tcs/sarif-spec/master/Schemata/sarif-schema-2.1.0.json"
+)
 SARIF_VERSION = "2.1.0"
 
 
@@ -99,14 +101,10 @@ class SarifStaticFindingsExporter:
                             "name": "lockverity",
                             "version": "0.2.0",
                             "informationUri": "https://github.com/lockverity/lockverity",
-                            "rules": sorted(
-                                rules.values(), key=lambda r: r["id"]
-                            ),
+                            "rules": sorted(rules.values(), key=lambda r: r["id"]),
                         }
                     },
-                    "originalUriBaseIds": {
-                        "PROJECTROOT": {"uri": "file:///"}
-                    },
+                    "originalUriBaseIds": {"PROJECTROOT": {"uri": "file:///"}},
                     "properties": {
                         "lockverity:scan_run_id": str(scan.id),
                         "lockverity:scan_status": scan.status.value,
@@ -125,7 +123,9 @@ class SarifStaticFindingsExporter:
             "fullDescription": {"text": finding.summary or ""},
             "helpUri": "https://github.com/lockverity/lockverity/docs",
             "defaultConfiguration": {
-                "level": _severity_to_sarif_level(finding.severity.value if finding.severity else None),
+                "level": _severity_to_sarif_level(
+                    finding.severity.value if finding.severity else None
+                ),
             },
             "properties": {
                 "category": finding.category.value if finding.category else None,
@@ -141,7 +141,10 @@ class SarifStaticFindingsExporter:
             region["endLine"] = finding.location_end_line
         location: dict[str, Any] = {
             "physicalLocation": {
-                "artifactLocation": {"uri": finding.location_path or "", "uriBaseId": "PROJECTROOT"},
+                "artifactLocation": {
+                    "uri": finding.location_path or "",
+                    "uriBaseId": "PROJECTROOT",
+                },
             }
         }
         if region:

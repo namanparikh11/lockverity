@@ -13,7 +13,8 @@ from app.rules.licence import (
 
 def _evidence(component=None, licence_assertions=None, observations=None):
     return {
-        "component": component or {"package_name": "lodash", "version": "4.17.0", "manifest_path": "package.json"},
+        "component": component
+        or {"package_name": "lodash", "version": "4.17.0", "manifest_path": "package.json"},
         "licence_assertions": licence_assertions or [],
         "provider_observations": observations or [],
     }
@@ -21,7 +22,9 @@ def _evidence(component=None, licence_assertions=None, observations=None):
 
 def test_unknown_licence_fires_when_no_assertions() -> None:
     rule = LicenceUnknownRule()
-    findings = list(rule.evaluate(evidence=_evidence(licence_assertions=[]), scan_run_id=1, repository_id=1))
+    findings = list(
+        rule.evaluate(evidence=_evidence(licence_assertions=[]), scan_run_id=1, repository_id=1)
+    )
     assert len(findings) == 1
     assert findings[0].rule_id == "LOCK-LIC-001"
 
@@ -29,7 +32,9 @@ def test_unknown_licence_fires_when_no_assertions() -> None:
 def test_unknown_licence_skips_when_assertions_present() -> None:
     rule = LicenceUnknownRule()
     findings = list(
-        rule.evaluate(evidence=_evidence(licence_assertions=["MIT"]), scan_run_id=1, repository_id=1)
+        rule.evaluate(
+            evidence=_evidence(licence_assertions=["MIT"]), scan_run_id=1, repository_id=1
+        )
     )
     assert not findings
 
@@ -50,7 +55,9 @@ def test_multiple_licence_assertions_fire() -> None:
 def test_multiple_licence_assertions_skip_for_single() -> None:
     rule = LicenceMultipleAssertionsRule()
     findings = list(
-        rule.evaluate(evidence=_evidence(licence_assertions=["MIT"]), scan_run_id=1, repository_id=1)
+        rule.evaluate(
+            evidence=_evidence(licence_assertions=["MIT"]), scan_run_id=1, repository_id=1
+        )
     )
     assert not findings
 
@@ -71,7 +78,9 @@ def test_review_required_licence_fires() -> None:
 def test_review_required_licence_skips_for_mit() -> None:
     rule = LicenceReviewRequiredRule()
     findings = list(
-        rule.evaluate(evidence=_evidence(licence_assertions=["MIT"]), scan_run_id=1, repository_id=1)
+        rule.evaluate(
+            evidence=_evidence(licence_assertions=["MIT"]), scan_run_id=1, repository_id=1
+        )
     )
     assert not findings
 

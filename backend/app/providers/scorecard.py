@@ -119,7 +119,7 @@ class ScorecardImporter:
         prefix = "https://github.com/"
         if not canonical_url.startswith(prefix):
             return None, None, None
-        rest = canonical_url[len(prefix):].strip("/")
+        rest = canonical_url[len(prefix) :].strip("/")
         parts = rest.split("/")
         if len(parts) < 2:
             return None, None, None
@@ -138,7 +138,9 @@ class ScorecardImporter:
             "scorecard_version": data.get("scorecard", {}).get("version")
             if isinstance(data.get("scorecard"), dict)
             else None,
-            "commit": data.get("repo", {}).get("commit") if isinstance(data.get("repo"), dict) else None,
+            "commit": data.get("repo", {}).get("commit")
+            if isinstance(data.get("repo"), dict)
+            else None,
             "date": data.get("date"),
             "checks": checks,
             "source_provenance": "openssf_scorecard",
@@ -217,5 +219,7 @@ def missing_check_names(
     expected: Iterable[str] = scorecard_check_names(),
 ) -> tuple[str, ...]:
     """Return the check names from ``expected`` that are not present in ``scorecard``."""
-    present = {check.get("name") for check in scorecard.get("checks", []) if isinstance(check, dict)}
+    present = {
+        check.get("name") for check in scorecard.get("checks", []) if isinstance(check, dict)
+    }
     return tuple(name for name in expected if name not in present)

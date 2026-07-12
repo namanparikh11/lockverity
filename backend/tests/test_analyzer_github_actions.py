@@ -101,9 +101,7 @@ jobs:
       - uses: some-org/setup@v1
 """
     analyzer = GitHubActionsAnalyzer()
-    result = analyzer.analyze(
-        files=[(".github/workflows/ci.yml", content)], scan_run_id=1
-    )
+    result = analyzer.analyze(files=[(".github/workflows/ci.yml", content)], scan_run_id=1)
     rule_001 = [f for f in result.findings if f.rule_id == "LOCK-WF-001"]
     assert rule_001, "expected at least one LOCK-WF-001 finding"
 
@@ -122,9 +120,7 @@ jobs:
           ref: ${{ github.event.pull_request.head.sha }}
 """
     analyzer = GitHubActionsAnalyzer()
-    result = analyzer.analyze(
-        files=[(".github/workflows/ci.yml", content)], scan_run_id=1
-    )
+    result = analyzer.analyze(files=[(".github/workflows/ci.yml", content)], scan_run_id=1)
     assert any(f.rule_id == "LOCK-WF-005" for f in result.findings)
 
 
@@ -140,9 +136,7 @@ jobs:
       - run: echo
 """
     analyzer = GitHubActionsAnalyzer()
-    result = analyzer.analyze(
-        files=[(".github/workflows/ci.yml", content)], scan_run_id=1
-    )
+    result = analyzer.analyze(files=[(".github/workflows/ci.yml", content)], scan_run_id=1)
     assert any(f.rule_id == "LOCK-WF-010" for f in result.findings)
 
 
@@ -159,9 +153,7 @@ jobs:
         run: 'curl -H "Authorization: ${{ secrets.MY_SECRET }}" https://internal'
 """
     analyzer = GitHubActionsAnalyzer()
-    result = analyzer.analyze(
-        files=[(".github/workflows/ci.yml", content)], scan_run_id=1
-    )
+    result = analyzer.analyze(files=[(".github/workflows/ci.yml", content)], scan_run_id=1)
     rule_011 = [f for f in result.findings if f.rule_id == "LOCK-WF-011"]
     assert rule_011
     # The raw evidence must not contain the secret name value
@@ -183,9 +175,7 @@ jobs:
         run: 'echo "${{ github.event.issue.title }}"'
 """
     analyzer = GitHubActionsAnalyzer()
-    result = analyzer.analyze(
-        files=[(".github/workflows/ci.yml", content)], scan_run_id=1
-    )
+    result = analyzer.analyze(files=[(".github/workflows/ci.yml", content)], scan_run_id=1)
     assert any(f.rule_id == "LOCK-WF-007" for f in result.findings)
 
 
@@ -200,9 +190,7 @@ jobs:
       - run: echo
 """
     analyzer = GitHubActionsAnalyzer()
-    result = analyzer.analyze(
-        files=[(".github/workflows/ci.yml", content)], scan_run_id=1
-    )
+    result = analyzer.analyze(files=[(".github/workflows/ci.yml", content)], scan_run_id=1)
     assert any(f.rule_id == "LOCK-WF-013" for f in result.findings)
 
 
@@ -218,9 +206,7 @@ jobs:
       - run: echo
 """
     analyzer = GitHubActionsAnalyzer()
-    result = analyzer.analyze(
-        files=[(".github/workflows/ci.yml", content)], scan_run_id=1
-    )
+    result = analyzer.analyze(files=[(".github/workflows/ci.yml", content)], scan_run_id=1)
     assert any(f.rule_id == "LOCK-WF-003" for f in result.findings)
 
 
@@ -235,9 +221,7 @@ jobs:
       - run: echo
 """
     analyzer = GitHubActionsAnalyzer()
-    result = analyzer.analyze(
-        files=[(".github/workflows/ci.yml", content)], scan_run_id=1
-    )
+    result = analyzer.analyze(files=[(".github/workflows/ci.yml", content)], scan_run_id=1)
     assert any(f.rule_id == "LOCK-WF-004" for f in result.findings)
 
 
@@ -253,9 +237,7 @@ jobs:
       - run: echo
 """
     analyzer = GitHubActionsAnalyzer()
-    result = analyzer.analyze(
-        files=[(".github/workflows/ci.yml", content)], scan_run_id=1
-    )
+    result = analyzer.analyze(files=[(".github/workflows/ci.yml", content)], scan_run_id=1)
     assert any(f.rule_id == "LOCK-WF-015" for f in result.findings)
 
 
@@ -272,9 +254,7 @@ jobs:
       - run: echo
 """
     analyzer = GitHubActionsAnalyzer()
-    result = analyzer.analyze(
-        files=[(".github/workflows/ci.yml", content)], scan_run_id=1
-    )
+    result = analyzer.analyze(files=[(".github/workflows/ci.yml", content)], scan_run_id=1)
     assert any(f.rule_id == "LOCK-WF-009" for f in result.findings)
 
 
@@ -291,9 +271,7 @@ jobs:
           path: ${{ github.event.pull_request.head.ref }}
 """
     analyzer = GitHubActionsAnalyzer()
-    result = analyzer.analyze(
-        files=[(".github/workflows/ci.yml", content)], scan_run_id=1
-    )
+    result = analyzer.analyze(files=[(".github/workflows/ci.yml", content)], scan_run_id=1)
     assert any(f.rule_id == "LOCK-WF-012" for f in result.findings)
 
 
@@ -310,9 +288,7 @@ jobs:
       - uses: some-org/setup@1234567890abcdef1234567890abcdef12345678
 """
     analyzer = GitHubActionsAnalyzer()
-    result = analyzer.analyze(
-        files=[(".github/workflows/ci.yml", content)], scan_run_id=1
-    )
+    result = analyzer.analyze(files=[(".github/workflows/ci.yml", content)], scan_run_id=1)
     assert not any(f.rule_id == "LOCK-WF-001" for f in result.findings)
     assert not any(f.rule_id == "LOCK-WF-014" for f in result.findings)
 
@@ -329,9 +305,7 @@ jobs:
       - uses: actions/checkout@v4
 """
     analyzer = GitHubActionsAnalyzer()
-    result = analyzer.analyze(
-        files=[(".github/workflows/ci.yml", content)], scan_run_id=1
-    )
+    result = analyzer.analyze(files=[(".github/workflows/ci.yml", content)], scan_run_id=1)
     for finding in result.findings:
         assert finding.raw
         assert "title" in finding.raw

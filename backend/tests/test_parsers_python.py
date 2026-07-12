@@ -118,7 +118,7 @@ def test_yarn_invalid_utf8_raises() -> None:
 
 def test_yarn_empty_block_warns() -> None:
     parser = YarnLockParser()
-    content = b"\"@scope/pkg\":\n  version \"1.0.0\"\n"
+    content = b'"@scope/pkg":\n  version "1.0.0"\n'
     # This block has a specifier with no @version part; we still
     # expect the parser to extract the name and a warning if it
     # can't.
@@ -129,7 +129,9 @@ def test_yarn_empty_block_warns() -> None:
 
 def test_requirements_basic_resolves_packages() -> None:
     parser = RequirementsTxtParser()
-    content = b"requests==2.31.0\nflask>=2.0\ndjango[bcrypt]>=4.2 ; python_version >= '3.10'\n# comment\n"
+    content = (
+        b"requests==2.31.0\nflask>=2.0\ndjango[bcrypt]>=4.2 ; python_version >= '3.10'\n# comment\n"
+    )
     result = parser.parse(content=content, path="requirements.txt")
     by_name = {r["package_name"]: r for r in result.data}
     assert by_name["requests"]["version"] == "2.31.0"

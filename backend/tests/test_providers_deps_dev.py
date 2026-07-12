@@ -77,9 +77,7 @@ def test_enrich_handles_multiple_licences() -> None:
 
 
 def test_enrich_handles_no_licence() -> None:
-    provider, _ = _provider_with_response(
-        read_fixture_json("providers/deps_dev_no_licence.json")
-    )
+    provider, _ = _provider_with_response(read_fixture_json("providers/deps_dev_no_licence.json"))
     result = provider.enrich(ecosystem="npm", package_name="internal-pkg", version="1.0.0")
     assert isinstance(result, ProviderSuccess)
     assert result.data["licenses"] == []
@@ -137,9 +135,7 @@ def test_enrich_with_tree_returns_bounded_graph() -> None:
 
     provider = DepsDevEnrichmentProvider(max_depth=1, max_nodes=10, max_requests=3)
     provider._request = _request  # type: ignore[attr-defined]
-    result = provider.enrich_with_tree(
-        ecosystem="npm", package_name="lodash", version="4.17.21"
-    )
+    result = provider.enrich_with_tree(ecosystem="npm", package_name="lodash", version="4.17.21")
     # No children in the fixture, so the tree contains only the
     # root node and the result is a ProviderSuccess.
     assert isinstance(result, ProviderSuccess)
@@ -167,9 +163,7 @@ def test_enrich_with_tree_detects_truncation() -> None:
 
     provider = DepsDevEnrichmentProvider(max_depth=4, max_nodes=100, max_requests=1)
     provider._request = _request  # type: ignore[attr-defined]
-    result = provider.enrich_with_tree(
-        ecosystem="npm", package_name="root", version="1.0.0"
-    )
+    result = provider.enrich_with_tree(ecosystem="npm", package_name="root", version="1.0.0")
     assert isinstance(result, ProviderPartialResult)
     assert "max_requests_reached" in result.error_summary
 

@@ -211,9 +211,7 @@ class LicenceProviderUnavailableRule(BaseRule):
                     f"Provider {obs.get('provider')} was unavailable; licence assertions "
                     "are incomplete for this scan."
                 ),
-                remediation=(
-                    "Re-run the scan when the provider is available."
-                ),
+                remediation=("Re-run the scan when the provider is available."),
                 limitations=(
                     "Lockverity does not report the licence inventory as 'clean' when the "
                     "licence provider was unavailable."

@@ -24,9 +24,7 @@ def fixture_path(relative: str) -> Path:
     try:
         candidate.relative_to(fixtures_resolved)
     except ValueError as exc:
-        raise ValueError(
-            f"Fixture path {relative!r} escapes the fixtures directory."
-        ) from exc
+        raise ValueError(f"Fixture path {relative!r} escapes the fixtures directory.") from exc
     return candidate
 
 

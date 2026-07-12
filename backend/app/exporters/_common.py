@@ -90,9 +90,17 @@ def _component_to_purl(component: Component) -> str | None:
     if not component.package_name or not component.ecosystem:
         return None
     if component.ecosystem == "npm":
-        return f"pkg:npm/{component.package_name}@{component.version}" if component.version else f"pkg:npm/{component.package_name}"
+        return (
+            f"pkg:npm/{component.package_name}@{component.version}"
+            if component.version
+            else f"pkg:npm/{component.package_name}"
+        )
     if component.ecosystem == "pypi":
-        return f"pkg:pypi/{component.package_name}@{component.version}" if component.version else f"pkg:pypi/{component.package_name}"
+        return (
+            f"pkg:pypi/{component.package_name}@{component.version}"
+            if component.version
+            else f"pkg:pypi/{component.package_name}"
+        )
     return None
 
 
