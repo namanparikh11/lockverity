@@ -1,0 +1,38 @@
+# Synthetic poetry.lock fixture for tests
+version = 1
+package-mode = true
+
+[[package]]
+name = "poetry-fixture"
+version = "0.1.0"
+description = "Synthetic Poetry project for tests"
+category = "main"
+
+[[package]]
+name = "requests"
+version = "2.31.0"
+description = "Python HTTP for Humans."
+category = "main"
+
+[[package]]
+name = "flask"
+version = "2.3.3"
+description = "A simple framework for building complex web applications."
+category = "main"
+
+[[package]]
+name = "pytest"
+version = "8.0.0"
+description = "pytest: simple powerful testing with Python"
+category = "dev"
+
+[[package]]
+name = "ruff"
+version = "0.4.0"
+description = "An extremely fast Python linter, written in Rust."
+category = "dev"
+
+[metadata]
+lock-version = "2.0"
+python-versions = "^3.12"
+content-hash = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"

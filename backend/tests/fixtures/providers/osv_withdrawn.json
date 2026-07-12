@@ -1,0 +1,28 @@
+{
+  "results": [
+    {
+      "vulns": [
+        {
+          "id": "OSV-WITHDRAWN-001",
+          "summary": "Withdrawn advisory",
+          "withdrawn": "2024-02-01T00:00:00Z",
+          "published": "2023-12-01T00:00:00Z",
+          "affected": [
+            {
+              "package": {"name": "left-pad", "ecosystem": "npm"},
+              "ranges": [
+                {
+                  "type": "ECOSYSTEM",
+                  "events": [
+                    {"introduced": "0"},
+                    {"fixed": "1.3.1"}
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

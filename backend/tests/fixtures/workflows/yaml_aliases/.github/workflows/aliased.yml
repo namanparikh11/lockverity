@@ -1,0 +1,18 @@
+name: yaml-aliases-fixture
+on:
+  push:
+    branches: [main]
+permissions:
+  contents: read
+defaults: &shared_defaults
+  run:
+    shell: bash
+    working-directory: ./app
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    defaults: *shared_defaults
+    steps:
+      - uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11
+      - name: Greet
+        run: echo "hello"

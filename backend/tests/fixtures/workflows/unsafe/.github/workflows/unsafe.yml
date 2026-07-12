@@ -1,0 +1,49 @@
+name: unsafe-workflow
+on:
+  pull_request_target:
+  push:
+  workflow_run:
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@main
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: true
+      - uses: docker://alpine:latest
+      - name: Echo
+        run: echo "$BODY"
+        env:
+          BODY: ${{ github.event.issue.body }}
+      - name: Echo inline
+        run: echo "${{ github.event.issue.title }}"
+      - name: Use third-party setup
+        uses: third-party/setup-node@v1
+      - name: Pass secret in command
+        run: 'curl -H "Authorization: ${{ secrets.GITHUB_TOKEN }}" https://internal.example'
+      - name: Upload artifact with bad path
+        uses: actions/upload-artifact@v4
+        with:
+          path: ${{ github.event.pull_request.head.ref }}
+      - uses: actions/checkout@main
+      - name: Self-hosted on untrusted
+        run: echo "hello"
+      - name: Workflow run on self-hosted
+        if: github.event_name == 'workflow_run'
+        uses: actions/checkout@main
+        with:
+          ref: ${{ github.event.workflow_run.head_branch }}
+      - name: Push from job
+        run: git push origin HEAD:main
+  dangerous:
+    runs-on: ubuntu-latest
+    permissions: write-all
+    steps:
+      - run: echo
+  deploy:
+    runs-on: self-hosted
+    permissions:
+      id-token: write
+    steps:
+      - run: echo "deploying"

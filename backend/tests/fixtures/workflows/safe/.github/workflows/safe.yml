@@ -1,0 +1,19 @@
+name: safe-workflow
+on:
+  push:
+    branches: [main]
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11
+      - name: Setup Node
+        uses: actions/setup-node@0a4441c0c1c2bbcf5e6a9b6e2c6b5c7d6e9c1f01
+        with:
+          node-version: "20"
+      - name: Run tests
+        run: npm test
+        env:
+          CI: "true"

@@ -1,0 +1,40 @@
+{
+  "results": [
+    {
+      "vulns": [
+        {
+          "id": "OSV-2023-0001",
+          "summary": "Example advisory with full metadata",
+          "details": "The full advisory body.",
+          "aliases": ["CVE-2023-0001", "GHSA-xxxx-yyyy-zzzz"],
+          "related": ["OSV-2023-0002"],
+          "published": "2023-01-15T10:00:00Z",
+          "modified": "2023-02-01T10:00:00Z",
+          "severity": [
+            {"type": "CVSS_V3", "score": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H"}
+          ],
+          "affected": [
+            {
+              "package": {"name": "lodash", "ecosystem": "npm"},
+              "ranges": [
+                {
+                  "type": "ECOSYSTEM",
+                  "events": [
+                    {"introduced": "0"},
+                    {"fixed": "4.17.22"}
+                  ]
+                }
+              ]
+            }
+          ],
+          "references": [
+            {"type": "ADVISORY", "url": "https://example.com/advisory"}
+          ]
+        }
+      ]
+    },
+    {
+      "vulns": []
+    }
+  ]
+}

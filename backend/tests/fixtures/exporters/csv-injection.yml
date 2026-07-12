@@ -1,0 +1,14 @@
+name: csv-formula-injection-fixture
+on: push
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Echo with formula trigger
+        run: |
+          echo "=cmd|'/c calc'!A1"
+          echo "+1+1"
+          echo "-2+2"
+          echo "@SUM(1+1)*cmd|'/c calc'!A0"

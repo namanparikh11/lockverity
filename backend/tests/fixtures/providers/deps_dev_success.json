@@ -1,0 +1,9 @@
+{
+  "name": "lodash",
+  "version": "4.17.21",
+  "licenses": [
+    {
+      "spdx": {"identifier": "MIT"}
+    }
+  ]
+}
