@@ -121,7 +121,7 @@ backend/htmlcov/
 # CI-generated noise
 .ci-cache/
 
-<<<<<<< HEAD
+
 # Local databases and temporary artifacts
 *.sqlite
 *.sqlite3
@@ -130,7 +130,6 @@ backend/htmlcov/
 *.bak
 __pycache__/
 .pytest_cache/
-=======
 # TypeScript incremental build artifacts
 *.tsbuildinfo
->>>>>>> feat/frontend-product
+
