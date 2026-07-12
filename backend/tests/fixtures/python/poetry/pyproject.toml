@@ -1,0 +1,19 @@
+[project]
+name = "poetry-fixture"
+version = "0.1.0"
+description = "Synthetic Poetry project for tests"
+
+[tool.poetry]
+name = "poetry-fixture"
+version = "0.1.0"
+description = "Synthetic Poetry project for tests"
+authors = ["Lockverity Test <noreply@example.com>"]
+
+[tool.poetry.dependencies]
+python = "^3.12"
+requests = "^2.31"
+flask = ">=2.0"
+
+[tool.poetry.group.dev.dependencies]
+pytest = "^8.0"
+ruff = "^0.4"

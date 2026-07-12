@@ -1,0 +1,25 @@
+{
+  "date": "2024-01-15T00:00:00Z",
+  "score": 7.5,
+  "scorecard": {"version": "1.2.0"},
+  "repo": {"commit": "abc1234567890"},
+  "checks": [
+    {
+      "name": "Code-Review",
+      "score": 9,
+      "reason": "All changes are reviewed by at least one other developer",
+      "source_timestamp": "2024-01-15T00:00:00Z"
+    },
+    {
+      "name": "Pinned-Dependencies",
+      "score": 7,
+      "reason": "Most dependencies are pinned to a SHA",
+      "evidence": ["https://example.com/dependabot.yml"]
+    },
+    {
+      "name": "Dangerous-Workflow",
+      "score": 3,
+      "reason": "Workflow uses pull_request_target without isolation"
+    }
+  ]
+}

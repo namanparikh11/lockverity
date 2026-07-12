@@ -1,0 +1,15 @@
+[project]
+name = "clean-pyproject-fixture"
+version = "0.1.0"
+description = "Synthetic clean pyproject for tests"
+dependencies = [
+  "requests==2.31.0",
+  "flask>=2.0",
+  "django[bcrypt]>=4.2 ; python_version >= '3.10'",
+]
+optional-dependencies.test = [
+  "pytest==8.0.0",
+]
+
+[dependency-groups]
+dev = ["ruff==0.4.0", "mypy==1.8.0"]

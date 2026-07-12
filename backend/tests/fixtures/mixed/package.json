@@ -1,0 +1,8 @@
+{
+  "name": "mixed-ecosystem-fixture",
+  "version": "1.0.0",
+  "private": true,
+  "dependencies": {
+    "requests": "^2.31"
+  }
+}

@@ -1,0 +1,27 @@
+{
+  "results": [
+    {
+      "vulns": [
+        {
+          "id": "OSV-NOSEV-001",
+          "summary": "Advisory without severity",
+          "published": "2024-01-01T00:00:00Z",
+          "affected": [
+            {
+              "package": {"name": "lodash", "ecosystem": "npm"},
+              "ranges": [
+                {
+                  "type": "ECOSYSTEM",
+                  "events": [
+                    {"introduced": "0"},
+                    {"fixed": "4.17.22"}
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
