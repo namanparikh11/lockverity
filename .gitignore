@@ -120,3 +120,6 @@ backend/htmlcov/
 
 # CI-generated noise
 .ci-cache/
+
+# TypeScript incremental build artifacts
+*.tsbuildinfo
