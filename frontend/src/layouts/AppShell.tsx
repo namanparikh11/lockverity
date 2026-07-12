@@ -5,20 +5,26 @@ import {
   LayoutDashboard,
   Menu,
   ScanSearch,
+  ShieldAlert,
   X,
 } from "lucide-react";
 import { useState } from "react";
 import { NavLink, Outlet } from "react-router-dom";
 
-const NAV_ITEMS = [
+interface NavItem {
+  to: string;
+  label: string;
+  icon: typeof LayoutDashboard;
+  end?: boolean;
+}
+
+const PRIMARY_NAV: NavItem[] = [
   { to: "/", label: "Dashboard", icon: LayoutDashboard, end: true },
   { to: "/repositories", label: "Repositories", icon: Box },
+  { to: "/scans", label: "Scans", icon: ScanSearch },
+  { to: "/providers", label: "Providers", icon: ShieldAlert },
   { to: "/about", label: "About", icon: Info },
-] as const;
-
-const SCAN_SUBNAV = [
-  { to: "/scans", label: "Open scans", icon: ScanSearch },
-] as const;
+];
 
 export function AppShell() {
   const [open, setOpen] = useState(false);
@@ -73,7 +79,7 @@ export function AppShell() {
           } w-full shrink-0 border-b border-ink-200 bg-white lg:block lg:w-60 lg:border-b-0 lg:border-r`}
         >
           <ul className="space-y-1 p-3 text-sm">
-            {NAV_ITEMS.map((item) => (
+            {PRIMARY_NAV.map((item) => (
               <li key={item.to}>
                 <NavLink
                   to={item.to}
@@ -93,35 +99,10 @@ export function AppShell() {
               </li>
             ))}
           </ul>
-          <div className="border-t border-ink-100 p-3">
-            <p className="px-3 pb-2 text-xs font-semibold uppercase tracking-wide text-ink-400">
-              Scan
-            </p>
-            <ul className="space-y-1 text-sm">
-              {SCAN_SUBNAV.map((item) => (
-                <li key={item.to}>
-                  <NavLink
-                    to={item.to}
-                    onClick={() => setOpen(false)}
-                    className={({ isActive }) =>
-                      `flex items-center gap-2 rounded-md px-3 py-2 ${
-                        isActive
-                          ? "bg-accent-50 text-accent-800"
-                          : "text-ink-700 hover:bg-ink-100"
-                      }`
-                    }
-                  >
-                    <item.icon aria-hidden="true" className="h-4 w-4" />
-                    {item.label}
-                  </NavLink>
-                </li>
-              ))}
-            </ul>
-          </div>
           <div className="border-t border-ink-100 p-3 text-xs text-ink-500">
             <p className="flex items-center gap-2 px-3">
               <ClipboardList aria-hidden="true" className="h-4 w-4" />
-              v0.1 — architecture baseline
+              v0.2 — professional product
             </p>
             <p className="mt-1 px-3 text-ink-400">
               Defensive only. Source archives are hostile.

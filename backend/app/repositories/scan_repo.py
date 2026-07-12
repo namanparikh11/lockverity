@@ -10,6 +10,26 @@ from sqlalchemy.orm import Session
 from app.models.scan_run import ScanRun, ScanStatus, ScanTriggerType
 
 
+def list_scans_by_status(
+    session: Session,
+    statuses: Sequence[ScanStatus],
+) -> Sequence[ScanRun]:
+    """Return scans whose status is in ``statuses`` (oldest first)."""
+    if not statuses:
+        return ()
+    stmt = select(ScanRun).where(ScanRun.status.in_(list(statuses))).order_by(ScanRun.id.asc())
+    return session.execute(stmt).scalars().all()
+
+
+def count_by_status(session: Session, status: ScanStatus) -> int:
+    return int(
+        session.execute(
+            select(func.count()).select_from(ScanRun).where(ScanRun.status == status)
+        ).scalar_one()
+        or 0
+    )
+
+
 def get_scan_by_id(session: Session, scan_id: int) -> ScanRun | None:
     return session.get(ScanRun, scan_id)
 

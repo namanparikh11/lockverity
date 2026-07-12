@@ -60,15 +60,19 @@ class ArchiveEntry:
     link_target: str | None = None
 
 
-@dataclass(frozen=True, slots=True)
 class ArchiveValidationError(ValueError):
     """Raised when an archive fails validation."""
 
-    code: str
-    message: str
+    def __init__(self, code: str, message: str) -> None:
+        super().__init__(message)
+        self.code = code
+        self.message = message
 
     def __str__(self) -> str:  # pragma: no cover - trivial
         return f"[{self.code}] {self.message}"
+
+    def __repr__(self) -> str:  # pragma: no cover - trivial
+        return f"ArchiveValidationError(code={self.code!r}, message={self.message!r})"
 
 
 class ArchiveValidationCollector:

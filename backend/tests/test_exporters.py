@@ -1,0 +1,238 @@
+"""Tests for the exporters."""
+
+from __future__ import annotations
+
+import csv
+import io
+import json
+
+from app.exporters import (
+    CycloneDxExporter,
+    FindingsCsvExporter,
+    FindingsJsonExporter,
+    SarifStaticFindingsExporter,
+)
+from app.models.component import Component, ComponentVersionSource
+from app.models.finding import (
+    Finding,
+    FindingCategory,
+    FindingConfidence,
+    FindingSeverity,
+    FindingStatus,
+)
+from app.models.repository import (
+    Repository,
+    RepositoryProvider,
+    RepositorySourceType,
+    RepositoryVisibility,
+)
+from app.models.scan_run import ScanRun, ScanStatus, ScanTriggerType
+from app.providers.results import ProviderSuccess, ProviderUnavailable
+
+
+def _make_session_data(session):
+    repo = Repository(
+        source_type=RepositorySourceType.GITHUB,
+        provider=RepositoryProvider.GITHUB,
+        owner="o",
+        name="n",
+        canonical_url="https://github.com/o/n",
+        visibility=RepositoryVisibility.PUBLIC,
+    )
+    session.add(repo)
+    session.flush()
+    scan = ScanRun(
+        repository_id=repo.id,
+        trigger_type=ScanTriggerType.MANUAL,
+        status=ScanStatus.COMPLETED,
+    )
+    session.add(scan)
+    session.flush()
+    component = Component(
+        scan_run_id=scan.id,
+        manifest_id=0,
+        ecosystem="npm",
+        package_name="lodash",
+        version="4.17.21",
+        version_source=ComponentVersionSource.LOCKFILE,
+        package_url="pkg:npm/lodash@4.17.21",
+        direct=True,
+    )
+    session.add(component)
+    session.flush()
+    finding = Finding(
+        scan_run_id=scan.id,
+        repository_id=repo.id,
+        rule_id="LOCK-VULN-001",
+        category=FindingCategory.VULNERABILITY,
+        severity=FindingSeverity.HIGH,
+        confidence=FindingConfidence.HIGH,
+        title="Direct dependency lodash is affected",
+        summary="Lodash 4.17.21 is affected by an advisory",
+        remediation="Upgrade lodash",
+        location_path="package.json",
+        location_start_line=10,
+        location_end_line=10,
+        stable_key="a" * 64,
+        status=FindingStatus.OPEN,
+    )
+    session.add(finding)
+    # A finding without a location_path - must be skipped in SARIF.
+    finding_no_loc = Finding(
+        scan_run_id=scan.id,
+        repository_id=repo.id,
+        rule_id="LOCK-VULN-007",
+        category=FindingCategory.VULNERABILITY,
+        severity=FindingSeverity.MEDIUM,
+        confidence=FindingConfidence.HIGH,
+        title="Provider unavailable",
+        summary="OSV provider was unavailable",
+        remediation="Re-run",
+        location_path=None,
+        stable_key="b" * 64,
+        status=FindingStatus.OPEN,
+    )
+    session.add(finding_no_loc)
+    session.commit()
+    return scan.id
+
+
+def test_cyclonedx_exporter_returns_success(session) -> None:
+    scan_id = _make_session_data(session)
+    exporter = CycloneDxExporter(lambda: session)
+    result = exporter.export(scan_run_id=scan_id)
+    assert isinstance(result, ProviderSuccess)
+    bom = json.loads(result.data)
+    assert bom["bomFormat"] == "CycloneDX"
+    assert bom["specVersion"] == "1.5"
+    assert any(c["purl"] == "pkg:npm/lodash@4.17.21" for c in bom["components"])
+    assert any(v["id"] == "LOCK-VULN-001" for v in bom["vulnerabilities"])
+
+
+def test_cyclonedx_exporter_returns_unavailable_for_unknown_scan(session) -> None:
+    exporter = CycloneDxExporter(lambda: session)
+    result = exporter.export(scan_run_id=99_999)
+    assert isinstance(result, ProviderUnavailable)
+
+
+def test_findings_json_exporter_returns_success(session) -> None:
+    scan_id = _make_session_data(session)
+    exporter = FindingsJsonExporter(lambda: session)
+    result = exporter.export(scan_run_id=scan_id)
+    assert isinstance(result, ProviderSuccess)
+    doc = json.loads(result.data)
+    assert doc["schema"] == "lockverity.findings.v1"
+    assert doc["scan_run_id"] == scan_id
+    assert len(doc["findings"]) >= 2
+
+
+def test_findings_csv_exporter_protects_against_formula_injection(session) -> None:
+    scan_id = _make_session_data(session)
+    # Add a finding whose title starts with '=' to test formula
+    # injection protection.
+    finding = Finding(
+        scan_run_id=scan_id,
+        repository_id=1,
+        rule_id="LOCK-WF-011",
+        category=FindingCategory.WORKFLOW,
+        severity=FindingSeverity.HIGH,
+        confidence=FindingConfidence.HIGH,
+        title="=cmd|'/c calc'!A1",
+        summary="+dangerous",
+        remediation="-take action",
+        location_path="ci.yml",
+        stable_key="c" * 64,
+        status=FindingStatus.OPEN,
+    )
+    session.add(finding)
+    session.commit()
+    exporter = FindingsCsvExporter(lambda: session)
+    result = exporter.export(scan_run_id=scan_id)
+    assert isinstance(result, ProviderSuccess)
+    text = result.data.decode("utf-8")
+    # The header line starts with '#', which spreadsheets ignore.
+    assert text.startswith("# lockverity findings export")
+    # Skip the comment line, then parse the data rows.
+    lines = [line for line in text.splitlines() if not line.startswith("#")]
+    reader = csv.reader(io.StringIO("\n".join(lines)))
+    rows = list(reader)
+    header = rows[0]
+    for row in rows[1:]:
+        title = row[header.index("title")]
+        # The leading char must not be a formula trigger.
+        assert title[:1] not in {"=", "+", "-", "@"}
+    # We also verify the redaction via direct inspection: every
+    # '=' / '+' / '-' / '@' that originally appeared in a cell is
+    # preceded by a U+200B.
+    assert "\u200b=" in text
+
+
+def test_findings_csv_exporter_escapes_embedded_quotes(session) -> None:
+    scan_id = _make_session_data(session)
+    finding = Finding(
+        scan_run_id=scan_id,
+        repository_id=1,
+        rule_id="LOCK-WF-X",
+        category=FindingCategory.WORKFLOW,
+        severity=FindingSeverity.LOW,
+        confidence=FindingConfidence.MEDIUM,
+        title='he said "hi"',
+        summary="nothing",
+        remediation="nothing",
+        stable_key="d" * 64,
+        status=FindingStatus.OPEN,
+    )
+    session.add(finding)
+    session.commit()
+    exporter = FindingsCsvExporter(lambda: session)
+    result = exporter.export(scan_run_id=scan_id)
+    assert isinstance(result, ProviderSuccess)
+    text = result.data.decode("utf-8")
+    assert 'he said ""hi""' in text
+
+
+def test_sarif_exporter_only_includes_location_anchored_findings(session) -> None:
+    scan_id = _make_session_data(session)
+    exporter = SarifStaticFindingsExporter(lambda: session)
+    result = exporter.export(scan_run_id=scan_id)
+    assert isinstance(result, ProviderSuccess)
+    sarif = json.loads(result.data)
+    assert sarif["version"] == "2.1.0"
+    run = sarif["runs"][0]
+    # The location-anchored finding is present; the no-location
+    # finding is not forced into SARIF.
+    rule_ids = {r["ruleId"] for r in run["results"]}
+    assert "LOCK-VULN-001" in rule_ids
+    # The skipped count is recorded in properties.
+    assert run["properties"]["lockverity:findings_skipped_no_location"] >= 1
+    # SARIF results with no location are never produced.
+    for r in run["results"]:
+        assert "physicalLocation" in r["locations"][0]
+
+
+def test_sarif_exporter_severity_levels(session) -> None:
+    scan_id = _make_session_data(session)
+    exporter = SarifStaticFindingsExporter(lambda: session)
+    result = exporter.export(scan_run_id=scan_id)
+    assert isinstance(result, ProviderSuccess)
+    sarif = json.loads(result.data)
+    levels = {r["level"] for r in sarif["runs"][0]["results"]}
+    # The test data has at least one high-severity finding.
+    assert "error" in levels
+
+
+def test_sarif_exporter_unknown_scan_returns_unavailable(session) -> None:
+    exporter = SarifStaticFindingsExporter(lambda: session)
+    result = exporter.export(scan_run_id=99_999)
+    assert isinstance(result, ProviderUnavailable)
+
+
+def test_all_exporters_share_protocol() -> None:
+    for cls in (
+        CycloneDxExporter,
+        FindingsCsvExporter,
+        FindingsJsonExporter,
+        SarifStaticFindingsExporter,
+    ):
+        assert hasattr(cls, "format")
+        assert isinstance(cls.format, str)

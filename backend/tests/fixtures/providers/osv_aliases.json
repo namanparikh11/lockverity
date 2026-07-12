@@ -1,0 +1,32 @@
+{
+  "results": [
+    {
+      "vulns": [
+        {
+          "id": "OSV-ALIAS-001",
+          "summary": "Advisory with multiple aliases and related records",
+          "aliases": ["CVE-2022-0001", "GHSA-aaaa-bbbb-cccc", "GHSA-dddd-eeee-ffff"],
+          "related": ["OSV-ALIAS-002"],
+          "published": "2022-01-01T00:00:00Z",
+          "severity": [
+            {"type": "CVSS_V3", "score": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H"}
+          ],
+          "affected": [
+            {
+              "package": {"name": "minimist", "ecosystem": "npm"},
+              "ranges": [
+                {
+                  "type": "ECOSYSTEM",
+                  "events": [
+                    {"introduced": "0"},
+                    {"fixed": "1.2.6"}
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

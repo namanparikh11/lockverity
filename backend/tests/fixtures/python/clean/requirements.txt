@@ -1,0 +1,11 @@
+requests==2.31.0
+flask>=2.0
+django[bcrypt]>=4.2 ; python_version >= "3.10"
+-e git+https://github.com/example/local-dev.git#egg=local-dev
+click==8.1.7
+# This is a comment line and should be ignored
+-r other-requirements.txt
+numpy==1.26.0
+sqlalchemy>=2.0,<2.1
+fake-pkg @ https://example.com/fake-pkg-1.0.0.tar.gz
+./local/path-pkg

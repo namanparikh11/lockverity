@@ -25,10 +25,10 @@ export function ScansIndexPage() {
     const controller = new AbortController();
     (async () => {
       try {
-        const repos = await api.listRepositories(1, 50);
+        const repos = await api.listRepositories({ page: 1, page_size: 50 });
         const results = await Promise.all(
           repos.items.map((repo) =>
-            api.listScansForRepository(repo.id, 1, 5).catch(() => null)
+            api.listScansForRepository(repo.id, { page: 1, page_size: 5 }).catch(() => null)
           )
         );
         const flat: Scan[] = [];

@@ -1,0 +1,11 @@
+{
+  "name": "vulnerable-npm-fixture",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Synthetic vulnerable npm manifest for tests",
+  "dependencies": {
+    "left-pad": "1.3.0",
+    "minimist": "^1.2.6",
+    "internal-git-pkg": "git+https://github.com/example/internal.git"
+  }
+}

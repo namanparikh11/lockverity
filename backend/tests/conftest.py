@@ -20,7 +20,6 @@ from collections.abc import Iterator
 import pytest
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import Session, sessionmaker
-from sqlalchemy.pool import StaticPool
 
 # Configure environment *before* importing the application, otherwise
 # :func:`app.core.get_settings` would have already cached a value.
@@ -28,6 +27,7 @@ os.environ.setdefault("LOCKVERITY_ENV", "test")
 os.environ.setdefault("LOCKVERITY_DATABASE_URL", "sqlite:///:memory:")
 os.environ.setdefault("LOCKVERITY_WORKSPACE_ROOT", "./var/workspace-test")
 
+import app.models  # noqa: F401  - ensures every model is registered on Base.metadata
 from app.core.config import get_settings
 from app.db.base import Base
 
@@ -40,19 +40,19 @@ def settings():
 
 
 @pytest.fixture(scope="session")
-def engine(settings):
-    """Build a session-wide in-memory SQLite engine.
+def engine(settings, tmp_path_factory):
+    """Build a session-wide SQLite engine.
 
-    ``StaticPool`` keeps a single shared connection so multiple
-    sessions see the same in-memory database. ``check_same_thread``
-    is disabled because pytest-xdist and the application share the
-    same connection.
+    We use a temp-file-backed SQLite database so the FastAPI
+    TestClient, which may run in a worker thread, sees the same
+    schema as the test thread.
     """
+    db_path = tmp_path_factory.mktemp("lockverity-db") / "test.sqlite"
     test_engine = create_engine(
-        "sqlite:///:memory:",
+        f"sqlite:///{db_path}",
         future=True,
         connect_args={"check_same_thread": False},
-        poolclass=StaticPool,
+        pool_pre_ping=False,
     )
     Base.metadata.create_all(test_engine)
     yield test_engine
@@ -100,31 +100,43 @@ def app_config(settings, engine):
 
     The FastAPI ``get_db`` dependency opens sessions against
     :data:`app.db.session.engine`. For tests we want it to open
-    against the in-memory test engine. This fixture keeps a
-    reference to the original engine and restores it at teardown.
+    against the test engine. This fixture keeps a reference to
+    the original engine and restores it at teardown.
+
+    Both :mod:`app.db.session` and the re-exports in
+    :mod:`app.db` are rebound. The ``__init__`` re-export happens
+    at import time, so without the second rebind any code that
+    does ``from app.db import SessionLocal`` would still talk to
+    the original engine - which is exactly the gap the scan
+    executor used to fall into.
     """
+    import app.db as db_pkg
     from app.db import session as db_session
 
-    original = db_session.engine
-    db_session.engine = engine
-    db_session.SessionLocal = sessionmaker(
+    original_engine = db_session.engine
+    original_sessionlocal = db_session.SessionLocal
+    original_pkg_sessionlocal = db_pkg.SessionLocal
+    original_pkg_engine = db_pkg.engine
+
+    new_sessionlocal = sessionmaker(
         bind=engine,
         autoflush=False,
         autocommit=False,
         expire_on_commit=False,
         future=True,
     )
+
+    db_session.engine = engine
+    db_session.SessionLocal = new_sessionlocal
+    db_pkg.SessionLocal = new_sessionlocal
+    db_pkg.engine = engine
     try:
         yield settings
     finally:
-        db_session.engine = original
-        db_session.SessionLocal = sessionmaker(
-            bind=original,
-            autoflush=False,
-            autocommit=False,
-            expire_on_commit=False,
-            future=True,
-        )
+        db_session.engine = original_engine
+        db_session.SessionLocal = original_sessionlocal
+        db_pkg.SessionLocal = original_pkg_sessionlocal
+        db_pkg.engine = original_pkg_engine
 
 
 @pytest.fixture
@@ -142,7 +154,7 @@ def _reset_db_state(engine):
     API tests bind :data:`app.db.session.engine` to the in-memory test
     engine for their duration. The transaction in the ``session``
     fixture covers the per-session case. For API tests that use
-    :data:`app.db.session.SessionLocal` directly (which talks to the
+    :data:`app.db.session.SessionLocal`` directly (which talks to the
     global engine), we additionally truncate between tests so that
     state from a previous test cannot leak.
     """

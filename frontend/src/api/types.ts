@@ -1,6 +1,13 @@
 // API response type definitions. Kept narrow on purpose - the
 // frontend never assumes a field is present unless the backend
 // guarantees it in the OpenAPI schema.
+//
+// The v0.1 backend already exposes repositories, scans, stages,
+// findings, and provider observations. The additional types below
+// are forward-compatible declarations for the v0.2+/v0.3+ endpoints
+// the frontend pages already use. The frontend gracefully renders
+// "not yet available" empty states when a backend endpoint is not
+// yet implemented (HTTP 404 or 501 is mapped to an empty list).
 
 export type ScanStatus =
   | "queued"
@@ -71,6 +78,21 @@ export type RepositorySourceType = "github" | "uploaded_archive";
 export type RepositoryProvider = "github" | "local_upload";
 export type RepositoryVisibility = "public" | "private" | "unknown";
 
+export type ComponentVersionSource =
+  | "manifest"
+  | "lockfile"
+  | "override"
+  | "unresolved"
+  | "unknown";
+
+export type ComponentScope = "runtime" | "development" | "build" | "test" | "optional" | "unknown";
+
+export type DependencyScopeFilter = "all" | "direct" | "transitive";
+export type DevelopmentScopeFilter = "all" | "production" | "development";
+export type VulnerableOnlyFilter = "all" | "vulnerable";
+
+// ---- System ----
+
 export interface HealthResponse {
   status: "ok" | "degraded";
   database: "ok" | "unavailable";
@@ -90,6 +112,8 @@ export interface SystemInfoResponse {
   provider_safety: Record<string, number>;
 }
 
+// ---- Repositories ----
+
 export interface Repository {
   id: number;
   source_type: RepositorySourceType;
@@ -105,6 +129,13 @@ export interface Repository {
   created_at: string;
   updated_at: string;
 }
+
+export interface RepositoryCreatePayload {
+  canonical_url: string;
+  requested_ref?: string;
+}
+
+// ---- Scans ----
 
 export interface Scan {
   id: number;
@@ -122,6 +153,11 @@ export interface Scan {
   updated_at: string;
 }
 
+export interface ScanCreatePayload {
+  trigger_type?: ScanTriggerType;
+  requested_ref?: string;
+}
+
 export interface ScanStage {
   id: number;
   scan_run_id: number;
@@ -137,6 +173,8 @@ export interface ScanStage {
   created_at: string;
   updated_at: string;
 }
+
+// ---- Findings ----
 
 export interface Finding {
   id: number;
@@ -159,6 +197,8 @@ export interface Finding {
   updated_at: string;
 }
 
+// ---- Provider observations ----
+
 export interface ProviderObservation {
   id: number;
   scan_run_id: number;
@@ -176,6 +216,223 @@ export interface ProviderObservation {
   created_at: string;
   updated_at: string;
 }
+
+// ---- Components / dependencies (forward-compatible) ----
+
+export interface Component {
+  id: number;
+  scan_run_id: number;
+  manifest_id: number;
+  ecosystem: string | null;
+  package_name: string;
+  version: string | null;
+  version_source: ComponentVersionSource;
+  package_url: string | null;
+  scope: string | null;
+  relationship: string | null;
+  direct: boolean;
+  development: boolean;
+  optional: boolean;
+  integrity: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface DependencyEdge {
+  id: number;
+  scan_run_id: number;
+  parent_component_id: number;
+  child_component_id: number;
+  depth: number;
+  resolved: boolean;
+}
+
+export interface DependencyPath {
+  components: Component[];
+  edges: DependencyEdge[];
+  truncated: boolean;
+}
+
+// ---- Advisories / vulnerabilities (forward-compatible) ----
+
+export interface Advisory {
+  id: number;
+  source: string;
+  source_advisory_id: string;
+  canonical_id: string | null;
+  summary: string | null;
+  details_url: string | null;
+  published_at: string | null;
+  modified_at: string | null;
+  withdrawn_at: string | null;
+  raw_payload_sha256: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ComponentAdvisory {
+  id: number;
+  component_id: number;
+  advisory_id: number;
+  fixed_versions: string[];
+  severity_source: string | null;
+  confidence: FindingConfidence;
+  dependency_paths: DependencyPath[];
+  withdrawn: boolean;
+}
+
+// ---- Workflow findings (forward-compatible) ----
+
+export interface WorkflowFinding {
+  id: number;
+  scan_run_id: number;
+  repository_id: number;
+  rule_id: string;
+  severity: FindingSeverity;
+  confidence: FindingConfidence;
+  workflow_path: string;
+  workflow_name: string;
+  title: string;
+  summary: string;
+  remediation: string | null;
+  permissions: string[];
+  triggers: string[];
+  unpinned_actions: string[];
+  yaml_path: string | null;
+  start_line: number | null;
+  end_line: number | null;
+  stable_key: string;
+  limitations: string[];
+  created_at: string;
+  updated_at: string;
+}
+
+// ---- OpenSSF posture (forward-compatible) ----
+
+export interface OpenSSFCheck {
+  id: number;
+  scan_run_id: number;
+  repository_id: number;
+  check_id: string;
+  name: string;
+  score: number | null;
+  reason: string | null;
+  details_url: string | null;
+  source: string;
+  created_at: string;
+  updated_at: string;
+}
+
+// ---- Licence inventory (forward-compatible) ----
+
+export type LicenceReviewStatus = "unreviewed" | "review_required" | "approved" | "rejected" | "unknown";
+
+export interface LicenceAssertion {
+  id: number;
+  scan_run_id: number;
+  component_id: number;
+  package_name: string;
+  version: string | null;
+  licence: string;
+  direct: boolean;
+  provider: string;
+  review_status: LicenceReviewStatus;
+  unknown_licence: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+// ---- Scan comparison (forward-compatible) ----
+
+export type DiffVerdict = "added" | "removed" | "updated" | "persisting" | "resolved" | "new";
+
+export interface ScanComparisonComponentRow {
+  package_name: string;
+  ecosystem: string | null;
+  verdict: DiffVerdict;
+  version_base: string | null;
+  version_head: string | null;
+  direct_base: boolean | null;
+  direct_head: boolean | null;
+  dependency_path_changed: boolean;
+}
+
+export interface ScanComparisonFindingRow {
+  stable_key: string;
+  rule_id: string;
+  title: string;
+  verdict: DiffVerdict;
+  severity_base: FindingSeverity | null;
+  severity_head: FindingSeverity | null;
+  confidence_base: FindingConfidence | null;
+  confidence_head: FindingConfidence | null;
+  provider_attribution_base: string[];
+  provider_attribution_head: string[];
+  unable_to_determine: boolean;
+}
+
+export interface ScanComparisonManifestChange {
+  manifest_path: string;
+  base_hash: string | null;
+  head_hash: string | null;
+  change: "added" | "removed" | "updated" | "unchanged";
+}
+
+export interface ScanComparisonWorkflowChange {
+  workflow_path: string;
+  change: "added" | "removed" | "updated" | "unchanged";
+}
+
+export interface ScanComparisonProviderDiff {
+  provider: string;
+  base_status: ProviderStatus | null;
+  head_status: ProviderStatus | null;
+  unable_to_determine: boolean;
+}
+
+export interface ScanComparison {
+  base_scan_id: number;
+  head_scan_id: number;
+  repository_id: number;
+  generated_at: string;
+  components: ScanComparisonComponentRow[];
+  findings: ScanComparisonFindingRow[];
+  manifests: ScanComparisonManifestChange[];
+  workflows: ScanComparisonWorkflowChange[];
+  providers: ScanComparisonProviderDiff[];
+  unable_to_determine: string[];
+}
+
+// ---- Provider health rollup (forward-compatible) ----
+
+export type ProviderName = "github" | "osv" | "deps_dev" | "openssf";
+
+export interface ProviderHealthEntry {
+  provider: ProviderName;
+  status: ProviderStatus;
+  last_retrieved_at: string | null;
+  records_returned: number;
+  cache_status: string | null;
+  redacted_failure_summary: string | null;
+  last_error_code: string | null;
+  scans_with_observations: number;
+}
+
+// ---- Exports ----
+
+export type ExportFormat = "cyclonedx_json" | "findings_json" | "findings_csv" | "sarif_json";
+
+export interface ExportDescriptor {
+  format: ExportFormat;
+  label: string;
+  description: string;
+  supported: boolean;
+  not_supported_reason: string | null;
+  content_type: string;
+  filename_hint: string;
+}
+
+// ---- Pagination ----
 
 export interface PageMeta {
   page: number;

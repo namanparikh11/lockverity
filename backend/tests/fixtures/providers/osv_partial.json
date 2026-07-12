@@ -1,0 +1,24 @@
+{
+  "results": [
+    {
+      "vulns": [
+        {
+          "id": "OSV-PARTIAL-001",
+          "summary": "Partial advisory without fixed versions",
+          "published": "2024-01-01T00:00:00Z",
+          "affected": [
+            {
+              "package": {"name": "minimist", "ecosystem": "npm"},
+              "ranges": [
+                {
+                  "type": "ECOSYSTEM",
+                  "events": [{"introduced": "0"}]
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

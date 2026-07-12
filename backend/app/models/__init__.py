@@ -18,6 +18,7 @@ from app.models.finding import (
     FindingStatus,
 )
 from app.models.manifest import Manifest, ManifestParseStatus
+from app.models.provider_cache import ProviderCacheEntry
 from app.models.provider_observation import (
     ProviderObservation,
     ProviderStatus,
@@ -28,8 +29,10 @@ from app.models.repository import (
     RepositorySourceType,
     RepositoryVisibility,
 )
+from app.models.scan_job import ScanJob, ScanJobState
 from app.models.scan_run import ScanRun, ScanStatus, ScanTriggerType
 from app.models.scan_stage import ScanStage, StageStatus, StageType
+from app.models.workspace import Workspace, WorkspaceKind, WorkspaceState
 
 __all__ = [
     "Advisory",
@@ -44,16 +47,22 @@ __all__ = [
     "FindingStatus",
     "Manifest",
     "ManifestParseStatus",
+    "ProviderCacheEntry",
     "ProviderObservation",
     "ProviderStatus",
     "Repository",
     "RepositoryProvider",
     "RepositorySourceType",
     "RepositoryVisibility",
+    "ScanJob",
+    "ScanJobState",
     "ScanRun",
     "ScanStage",
     "ScanStatus",
     "ScanTriggerType",
     "StageStatus",
     "StageType",
+    "Workspace",
+    "WorkspaceKind",
+    "WorkspaceState",
 ]

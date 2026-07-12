@@ -1,0 +1,13 @@
+name: malformed-workflow
+on: push
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@main
+        with:
+          ref: ${{ github.event.pull_request.head.sha
+          extra: [unclosed list
+      - run: echo "this won't parse"
+        env:
+          BAD: { unclosed mapping

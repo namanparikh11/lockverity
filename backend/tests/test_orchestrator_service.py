@@ -1,0 +1,166 @@
+"""Tests for the ScanOrchestrator.
+
+The orchestrator is exercised against a real test database
+constructed by the shared fixtures. The intake step is bypassed
+in most tests; a workspace row is created manually so the
+``manifest_discovery`` stage has something to find.
+"""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+import pytest
+from app.db import session as _db_session
+from app.models.provider_observation import ProviderStatus
+from app.models.scan_run import ScanStatus, ScanTriggerType
+from app.models.scan_stage import StageStatus, StageType
+from app.models.workspace import WorkspaceKind, WorkspaceState
+from app.services import repository_service, scan_service
+from app.services.orchestrator_service import (
+    ScanOrchestrator,
+    _CancellationToken,
+)
+from app.services.workspace_service import WorkspaceService
+from app.utils.errors import ApiError, ApiErrorCode
+
+
+def _setup_scan_with_zip(session, workspace_root: Path):
+    repo = repository_service.create_repository_from_url(
+        session, "https://github.com/octocat/Hello-World"
+    )
+    scan = scan_service.create_scan(
+        session, repository_id=repo.id, trigger_type=ScanTriggerType.MANUAL
+    )
+    workspaces = WorkspaceService(session)
+    workspace = workspaces.create_for_scan(scan, kind=WorkspaceKind.GITHUB)
+    paths = workspaces.paths_for(workspace.workspace_key)
+    paths.contents_dir.mkdir(parents=True, exist_ok=True)
+    (paths.contents_dir / "package.json").write_text(
+        '{"name":"sample","version":"1.0.0"}', encoding="utf-8"
+    )
+    (paths.contents_dir / "src").mkdir(parents=True, exist_ok=True)
+    (paths.contents_dir / "src" / "index.js").write_text("console.log('hi')", encoding="utf-8")
+    workspaces.transition(workspace, target=WorkspaceState.VALIDATING)
+    workspaces.transition(
+        workspace,
+        target=WorkspaceState.READY,
+        archive_sha256="a" * 64,
+        archive_size=100,
+        file_count=2,
+        uncompressed_size=80,
+    )
+    return scan.id
+
+
+def _orchestrator() -> ScanOrchestrator:
+
+    return ScanOrchestrator(_db_session.SessionLocal)
+
+
+def test_run_completes_local_stages_and_marks_others_skipped(app_config, workspace_root) -> None:
+
+    with _db_session.SessionLocal() as s:
+        scan_id = _setup_scan_with_zip(s, workspace_root)
+        s.commit()
+    orchestrator = _orchestrator()
+    outcome = orchestrator.run(scan_id)
+    assert outcome.final_status == ScanStatus.COMPLETED
+    assert len(outcome.stage_records) == 10
+    types = [r.stage for r in outcome.stage_records]
+    assert types[0] == StageType.REPOSITORY_INTAKE
+    assert types[1] == StageType.ARCHIVE_VALIDATION
+    assert types[2] == StageType.MANIFEST_DISCOVERY
+    for record in outcome.stage_records:
+        if record.stage in {
+            StageType.DEPENDENCY_PARSING,
+            StageType.DEPENDENCY_ENRICHMENT,
+            StageType.VULNERABILITY_QUERY,
+            StageType.WORKFLOW_ANALYSIS,
+            StageType.REPOSITORY_POSTURE,
+            StageType.FINDING_RECONCILIATION,
+            StageType.EXPORT_GENERATION,
+        }:
+            assert record.status == StageStatus.SKIPPED
+            assert record.provider_status == ProviderStatus.NOT_REQUESTED.value
+        else:
+            assert record.status == StageStatus.COMPLETED
+
+
+def test_manifest_discovery_records_known_manifests(app_config, workspace_root) -> None:
+
+    with _db_session.SessionLocal() as s:
+        scan_id = _setup_scan_with_zip(s, workspace_root)
+        s.commit()
+    orchestrator = _orchestrator()
+    orchestrator.run(scan_id)
+    with _db_session.SessionLocal() as session:
+        stages = scan_service.list_stages_for_scan(session, scan_id)
+        manifest_stage = next(s for s in stages if s.stage_type == StageType.MANIFEST_DISCOVERY)
+        assert manifest_stage.records_processed >= 1
+        assert manifest_stage.status == StageStatus.COMPLETED
+
+
+def test_observations_are_recorded_per_stage(app_config, workspace_root) -> None:
+
+    with _db_session.SessionLocal() as s:
+        scan_id = _setup_scan_with_zip(s, workspace_root)
+        s.commit()
+    orchestrator = _orchestrator()
+    orchestrator.run(scan_id)
+    with _db_session.SessionLocal() as session:
+        from app.repositories import observation_repo
+
+        items, total = observation_repo.list_observations_for_scan(
+            session, scan_id, page=1, page_size=100
+        )
+        assert total >= 10
+        providers = {item.provider for item in items}
+        assert "github-or-upload" in providers
+        assert "filesystem" in providers
+        for stage in [
+            StageType.DEPENDENCY_PARSING,
+            StageType.VULNERABILITY_QUERY,
+        ]:
+            matching = [obs for obs in items if obs.provider == stage.value]
+            assert matching
+            assert matching[0].status == ProviderStatus.NOT_REQUESTED
+
+
+def test_cancellation_token_short_circuits_orchestrator(app_config, workspace_root) -> None:
+
+    with _db_session.SessionLocal() as s:
+        scan_id = _setup_scan_with_zip(s, workspace_root)
+        s.commit()
+    orchestrator = _orchestrator()
+    token = _CancellationToken()
+    token.cancel()
+    outcome = orchestrator.run(scan_id, cancellation=token)
+    assert outcome.final_status == ScanStatus.CANCELLED
+    assert outcome.failure_code == "cancelled"
+
+
+def test_cancel_running_scan_is_idempotent(app_config, workspace_root) -> None:
+
+    with _db_session.SessionLocal() as s:
+        scan_id = _setup_scan_with_zip(s, workspace_root)
+        s.commit()
+    orchestrator = _orchestrator()
+    # Cancelling a queued scan succeeds.
+    assert orchestrator.cancel(scan_id) is True
+    # Cancelling an already-cancelled scan is a no-op.
+    assert orchestrator.cancel(scan_id) is True
+
+
+def test_run_is_idempotent_for_completed_scans(app_config, workspace_root) -> None:
+
+    with _db_session.SessionLocal() as s:
+        scan_id = _setup_scan_with_zip(s, workspace_root)
+        s.commit()
+    orchestrator = _orchestrator()
+    first = orchestrator.run(scan_id)
+    assert first.final_status == ScanStatus.COMPLETED
+    # Re-running a completed scan is rejected.
+    with pytest.raises(ApiError) as exc:
+        orchestrator.run(scan_id)
+    assert exc.value.code == ApiErrorCode.ILLEGAL_TRANSITION.value

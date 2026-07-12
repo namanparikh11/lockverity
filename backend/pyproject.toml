@@ -34,6 +34,11 @@ dependencies = [
     "httpx>=0.27.0",
     "python-multipart>=0.0.9",
     "greenlet>=3.0.3",
+    # Safe YAML loader for GitHub Actions workflow analysis. The SafeLoader
+    # in PyYAML already rejects code execution, but we also enforce alias and
+    # depth limits in ``app.utils.yaml_safe`` to defend against billion-laughs
+    # and stack-overflow attacks via hostile workflow files.
+    "pyyaml>=6.0.1",
 ]
 
 [project.optional-dependencies]
