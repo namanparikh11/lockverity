@@ -1,0 +1,177 @@
+"""Tests for the v0.2 scan API endpoints (run, cancel, providers, stages)."""
+
+from __future__ import annotations
+
+import io
+import zipfile
+
+import pytest
+from app.db import session as _db_session
+from app.main import app
+from app.models.scan_run import ScanStatus
+from app.services import scan_service
+from app.singletons import get_executor, reset_executor_for_tests
+from fastapi.testclient import TestClient
+
+
+@pytest.fixture(autouse=True)
+def _reset_executor():
+    """Always run the orchestrator inline in API tests."""
+    reset_executor_for_tests()
+    yield
+    get_executor().shutdown(wait=True)
+
+
+@pytest.fixture
+def client(app_config):
+    return TestClient(app)
+
+
+def _build_zip_with_manifest() -> bytes:
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as zf:
+        zf.writestr("package.json", '{"name":"sample","version":"1.0.0"}')
+        zf.writestr("src/index.js", "console.log('hi')")
+    return buf.getvalue()
+
+
+def _create_scan_with_workspace(client) -> int:
+    """Create a repository, a scan, and a ready workspace with a manifest."""
+    r = client.post(
+        "/api/v1/repositories",
+        json={"canonical_url": "https://github.com/octocat/Hello-World"},
+    )
+    repo_id = r.json()["id"]
+    r2 = client.post(f"/api/v1/repositories/{repo_id}/scans")
+    scan_id = r2.json()["id"]
+    with _db_session.SessionLocal() as s:
+        from app.models.workspace import WorkspaceKind, WorkspaceState
+        from app.services.workspace_service import WorkspaceService
+
+        workspaces = WorkspaceService(s)
+        scan = scan_service.get_scan_or_404(s, scan_id)
+        workspace = workspaces.create_for_scan(
+            scan, kind=WorkspaceKind.GITHUB, archive_filename="x.tar.gz"
+        )
+        paths = workspaces.paths_for(workspace.workspace_key)
+        paths.contents_dir.mkdir(parents=True, exist_ok=True)
+        (paths.contents_dir / "package.json").write_text(
+            '{"name":"x","version":"1"}', encoding="utf-8"
+        )
+        workspaces.transition(workspace, target=WorkspaceState.VALIDATING)
+        workspaces.transition(
+            workspace,
+            target=WorkspaceState.READY,
+            archive_sha256="a" * 64,
+            archive_size=10,
+            file_count=1,
+            uncompressed_size=10,
+        )
+        s.commit()
+    return scan_id
+
+
+def test_create_scan_still_works(client) -> None:
+    r = client.post(
+        "/api/v1/repositories",
+        json={"canonical_url": "https://github.com/octocat/Hello-World"},
+    )
+    repo_id = r.json()["id"]
+    r2 = client.post(f"/api/v1/repositories/{repo_id}/scans")
+    assert r2.status_code == 201
+
+
+def test_run_endpoint_advances_scan_to_completed(client) -> None:
+    scan_id = _create_scan_with_workspace(client)
+    r3 = client.post(f"/api/v1/scans/{scan_id}/run")
+    assert r3.status_code == 200
+    r4 = client.get(f"/api/v1/scans/{scan_id}")
+    body = r4.json()
+    assert body["status"] == "completed"
+    r5 = client.get(f"/api/v1/scans/{scan_id}/stages")
+    assert len(r5.json()["items"]) == 10
+
+
+def test_run_endpoint_rejects_running_scan(client) -> None:
+    r = client.post(
+        "/api/v1/repositories",
+        json={"canonical_url": "https://github.com/octocat/Hello-World"},
+    )
+    repo_id = r.json()["id"]
+    r2 = client.post(f"/api/v1/repositories/{repo_id}/scans")
+    scan_id = r2.json()["id"]
+    with _db_session.SessionLocal() as s:
+        scan_service.transition_scan(s, scan_id, target=ScanStatus.RUNNING)
+    r3 = client.post(f"/api/v1/scans/{scan_id}/run")
+    assert r3.status_code == 409
+    assert r3.json()["error"]["code"] == "illegal_transition"
+
+
+def test_cancel_endpoint_cancels_queued_scan(client) -> None:
+    r = client.post(
+        "/api/v1/repositories",
+        json={"canonical_url": "https://github.com/octocat/Hello-World"},
+    )
+    repo_id = r.json()["id"]
+    r2 = client.post(f"/api/v1/repositories/{repo_id}/scans")
+    scan_id = r2.json()["id"]
+    r3 = client.post(f"/api/v1/scans/{scan_id}/cancel")
+    assert r3.status_code == 200
+    r4 = client.get(f"/api/v1/scans/{scan_id}")
+    assert r4.json()["status"] == "cancelled"
+
+
+def test_cancel_endpoint_rejects_terminal_scan(client) -> None:
+    r = client.post(
+        "/api/v1/repositories",
+        json={"canonical_url": "https://github.com/octocat/Hello-World"},
+    )
+    repo_id = r.json()["id"]
+    r2 = client.post(f"/api/v1/repositories/{repo_id}/scans")
+    scan_id = r2.json()["id"]
+    with _db_session.SessionLocal() as s:
+        scan_service.transition_scan(s, scan_id, target=ScanStatus.RUNNING)
+        scan_service.transition_scan(s, scan_id, target=ScanStatus.COMPLETED)
+    r3 = client.post(f"/api/v1/scans/{scan_id}/cancel")
+    assert r3.status_code == 409
+
+
+def test_providers_endpoint_records_observations(client) -> None:
+    scan_id = _create_scan_with_workspace(client)
+    client.post(f"/api/v1/scans/{scan_id}/run")
+    r3 = client.get(f"/api/v1/scans/{scan_id}/providers")
+    body = r3.json()
+    assert body["pagination"]["total"] >= 10
+    statuses = [item["status"] for item in body["items"]]
+    assert "not_requested" in statuses
+
+
+def test_stages_endpoint_returns_pipeline(client) -> None:
+    r = client.post(
+        "/api/v1/repositories",
+        json={"canonical_url": "https://github.com/octocat/Hello-World"},
+    )
+    repo_id = r.json()["id"]
+    r2 = client.post(f"/api/v1/repositories/{repo_id}/scans")
+    scan_id = r2.json()["id"]
+    r3 = client.get(f"/api/v1/scans/{scan_id}/stages")
+    assert r3.status_code == 200
+    types = [s["stage_type"] for s in r3.json()["items"]]
+    assert types[0] == "repository_intake"
+    assert types[-1] == "export_generation"
+
+
+def test_system_provider_limits_endpoint(client) -> None:
+    r = client.get("/api/v1/system/provider-limits")
+    assert r.status_code == 200
+    body = r.json()
+    assert "github" in body
+    assert isinstance(body["github"], list)
+
+
+def test_system_workspaces_cleanup_endpoint(client) -> None:
+    r = client.post("/api/v1/system/workspaces/cleanup")
+    assert r.status_code == 200
+    body = r.json()
+    assert "removed" in body
+    assert "removed_workspaces" in body

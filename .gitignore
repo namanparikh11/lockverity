@@ -120,3 +120,12 @@ backend/htmlcov/
 
 # CI-generated noise
 .ci-cache/
+
+# Local databases and temporary artifacts
+*.sqlite
+*.sqlite3
+*.sqlite*
+*.db
+*.bak
+__pycache__/
+.pytest_cache/

@@ -15,6 +15,7 @@ deployment will.
 
 from __future__ import annotations
 
+import os
 import sqlite3
 import sys
 from pathlib import Path
@@ -30,11 +31,22 @@ MIGRATIONS_DIR = BACKEND_ROOT / "alembic"
 def _build_config() -> Config:
     cfg = Config(str(ALEMBIC_INI))
     cfg.set_main_option("script_location", str(MIGRATIONS_DIR))
-    cfg.set_main_option(
-        "sqlalchemy.url",
-        "sqlite:///./lockverity.sqlite",
-    )
+    db_url = os.environ.get("LOCKVERITY_DATABASE_URL")
+    if not db_url:
+        db_url = "sqlite:///./lockverity.sqlite"
+    cfg.set_main_option("sqlalchemy.url", db_url)
     return cfg
+
+
+def _db_path_from_url(url: str) -> Path:
+    # ``sqlite:///./foo.sqlite`` -> ``./foo.sqlite``
+    if not url.startswith("sqlite"):
+        raise ValueError(f"Unsupported database URL for the cycle: {url!r}")
+    if url.startswith("sqlite:////"):
+        return Path(url[len("sqlite:////") :])
+    if url.startswith("sqlite:///"):
+        return Path(url[len("sqlite:///") :])
+    return Path(url)
 
 
 def _current_version(db_path: Path) -> str | None:
@@ -58,8 +70,8 @@ def _tables(db_path: Path) -> list[str]:
 
 
 def main() -> int:
-    db_path = BACKEND_ROOT / "lockverity.sqlite"
     cfg = _build_config()
+    db_path = _db_path_from_url(cfg.get_main_option("sqlalchemy.url"))
 
     if db_path.exists():
         print(f"Removing existing database at {db_path}")
