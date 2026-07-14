@@ -24,6 +24,7 @@ from typing import Any
 
 from sqlalchemy.orm import Session, sessionmaker
 
+from app._version import __version__
 from app.exporters._common import (
     ScanNotFoundError,
     component_purl,
@@ -57,6 +58,7 @@ class CycloneDxExporter:
         session_factory: sessionmaker[Session] | Callable[[], Session],
     ) -> None:
         self._session_factory = session_factory
+        self._app_version = __version__
 
     def export(self, *, scan_run_id: int) -> ProviderSuccess[bytes] | ProviderUnavailable:
         session = self._session_factory()
@@ -118,7 +120,7 @@ class CycloneDxExporter:
                     {
                         "vendor": "Lockverity",
                         "name": "lockverity",
-                        "version": "0.2.0",
+                        "version": self._app_version,
                     }
                 ],
                 "component": {

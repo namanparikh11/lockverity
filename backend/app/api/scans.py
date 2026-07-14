@@ -16,7 +16,7 @@ from app.api.mappers import (
 from app.models.finding import FindingCategory, FindingSeverity
 from app.models.provider_observation import ProviderStatus
 from app.models.scan_job import ScanJobState
-from app.models.scan_run import ScanStatus
+from app.models.scan_run import ScanStatus, ScanTriggerType
 from app.schemas.common import SchemaModel
 from app.schemas.intake import ScanCancelRequest, ScanRunRequest
 from app.schemas.scan import (
@@ -126,6 +126,45 @@ def list_scans_for_repository(
 def get_scan(scan_id: int, session: DBSession) -> ScanRead:
     scan = scan_service.get_scan_or_404(session, scan_id)
     return scan_to_read(scan)
+
+
+@scans.get(
+    "",
+    response_model=PaginatedScans,
+    summary="List scans across all repositories (cross-repo rollup).",
+)
+def list_scans(
+    session: DBSession,
+    page_params: PageParamsDep,
+    status_filter: ScanStatus | None = Query(
+        default=None,
+        alias="status",
+        description="Filter by scan status.",
+    ),
+    trigger_type: ScanTriggerType | None = Query(default=None),
+) -> PaginatedScans:
+    """Cross-repository scan listing for the dashboard rollup.
+
+    The per-repository listing on ``/repositories/{id}/scans`` is
+    unchanged. This endpoint exists for product surfaces that need
+    a global view, such as the dashboard "scans" summary card and
+    the operator's "all scans" panel.
+    """
+    items, total = scan_service.list_all_scans(
+        session,
+        page=page_params.page,
+        page_size=page_params.page_size,
+        status=status_filter,
+        trigger_type=trigger_type,
+    )
+    return PaginatedScans(
+        items=[scan_to_read(item) for item in items],
+        pagination=pagination(
+            page=page_params.page,
+            page_size=page_params.page_size,
+            total=total,
+        ).model_dump(),
+    )
 
 
 @scans.get(

@@ -22,6 +22,7 @@ from datetime import datetime
 
 from sqlalchemy.orm import Session, sessionmaker
 
+from app._version import __version__
 from app.exporters._common import (
     ScanNotFoundError,
     fetch_findings,
@@ -65,6 +66,7 @@ class FindingsCsvExporter:
     ) -> None:
         self._session_factory = session_factory
         self._max_cell_length = max_cell_length
+        self._app_version = __version__
 
     def export(self, *, scan_run_id: int) -> ProviderSuccess[bytes] | ProviderUnavailable:
         session = self._session_factory()
@@ -91,7 +93,7 @@ class FindingsCsvExporter:
     def _render_csv(self, scan, findings) -> str:
         lines: list[str] = []
         lines.append(
-            f"# lockverity findings export, tool=lockverity, version=0.2.0, "
+            f"# lockverity findings export, tool=lockverity, version={self._app_version}, "
             f"scan_run_id={scan.id}, repository_id={scan.repository_id}, "
             f"exported_at={isoformat_utc(utcnow())}"
         )

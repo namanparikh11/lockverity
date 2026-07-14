@@ -59,6 +59,36 @@ def list_scans_for_repository(
     return items, int(total or 0)
 
 
+def list_scans(
+    session: Session,
+    *,
+    page: int,
+    page_size: int,
+    status: ScanStatus | None = None,
+    trigger_type: ScanTriggerType | None = None,
+) -> tuple[Sequence[ScanRun], int]:
+    """List scans across all repositories, paginated.
+
+    Used by the cross-repository dashboard rollup. The query is
+    intentionally simple: ``(status, trigger_type)`` are optional
+    filters, results are ordered newest-first so the dashboard
+    can show "the most recent scans across everything".
+    """
+    if page < 1:
+        raise ValueError("page must be >= 1")
+    if page_size < 1:
+        raise ValueError("page_size must be >= 1")
+    base = select(ScanRun)
+    if status is not None:
+        base = base.where(ScanRun.status == status)
+    if trigger_type is not None:
+        base = base.where(ScanRun.trigger_type == trigger_type)
+    total = session.execute(select(func.count()).select_from(base.subquery())).scalar_one()
+    stmt = base.order_by(ScanRun.id.desc()).limit(page_size).offset((page - 1) * page_size)
+    items = session.execute(stmt).scalars().all()
+    return items, int(total or 0)
+
+
 def create_scan(
     session: Session,
     *,

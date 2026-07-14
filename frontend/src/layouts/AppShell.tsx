@@ -8,8 +8,10 @@ import {
   ShieldAlert,
   X,
 } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { NavLink, Outlet } from "react-router-dom";
+
+import { api } from "@/api/api";
 
 interface NavItem {
   to: string;
@@ -28,6 +30,26 @@ const PRIMARY_NAV: NavItem[] = [
 
 export function AppShell() {
   const [open, setOpen] = useState(false);
+  const [version, setVersion] = useState<string | null>(null);
+
+  // The product version is read from the backend so the UI can
+  // never drift from the API surface. The fetch is best-effort:
+  // if the backend is unreachable, the footer simply omits the
+  // version instead of alarming the user.
+  useEffect(() => {
+    const controller = new AbortController();
+    api
+      .systemInfo()
+      .then((info) => {
+        if (controller.signal.aborted) return;
+        setVersion(info.version);
+      })
+      .catch(() => {
+        if (controller.signal.aborted) return;
+        setVersion(null);
+      });
+    return () => controller.abort();
+  }, []);
   return (
     <div className="min-h-screen bg-ink-50">
       <a
@@ -102,7 +124,7 @@ export function AppShell() {
           <div className="border-t border-ink-100 p-3 text-xs text-ink-500">
             <p className="flex items-center gap-2 px-3">
               <ClipboardList aria-hidden="true" className="h-4 w-4" />
-              v0.2 — professional product
+              {version ? `v${version}` : "Lockverity"}
             </p>
             <p className="mt-1 px-3 text-ink-400">
               Defensive only. Source archives are hostile.

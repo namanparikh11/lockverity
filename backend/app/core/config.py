@@ -13,6 +13,8 @@ from typing import Literal
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from app._version import __version__
+
 Environment = Literal["development", "test", "production"]
 
 
@@ -79,7 +81,11 @@ class Settings(BaseSettings):
 
     # --- Application identity ---
     app_name: str = Field(default="Lockverity")
-    app_version: str = Field(default="0.1.0")
+    # The version is read from the package's single source of truth
+    # (``app._version``) so the API responses, the startup log, and
+    # the export metadata never drift apart. See ``app/_version.py``
+    # for the rationale.
+    app_version: str = Field(default_factory=lambda: __version__)
     app_tagline: str = Field(
         default="Evidence-first software supply-chain assurance",
     )
