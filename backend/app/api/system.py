@@ -14,8 +14,9 @@ from app.schemas.intake import (
     SystemWorkspaceCleanupResponse,
     WorkspaceRead,
 )
+from app.schemas.provider_health import ProviderHealthResponse
 from app.schemas.system import HealthResponse, SystemInfoResponse
-from app.services import cache_service
+from app.services import cache_service, observation_service
 from app.services.workspace_service import WorkspaceService
 from app.utils.datetime import utcnow
 
@@ -117,6 +118,25 @@ def system_provider_limits(session: DBSession) -> SystemProviderLimitsResponse:
             session, settings=settings
         )._settings.provider_cache_max_payload_bytes,  # type: ignore[attr-defined]
     )
+
+
+@router.get(
+    "/provider-health",
+    response_model=ProviderHealthResponse,
+    summary="Per-provider availability rollup across all scans.",
+)
+def provider_health(session: DBSession) -> ProviderHealthResponse:
+    """Return the per-provider availability rollup.
+
+    This is the single source of truth for the "Provider health"
+    panel on the dashboard and the top-level /providers page. It
+    is intentionally narrow: one entry per known provider, with
+    the most recent observation's status, record count, cache
+    status, and redacted failure summary. Providers that have
+    never been queried are still returned with
+    ``status=not_requested``.
+    """
+    return ProviderHealthResponse.model_validate(observation_service.provider_health(session))
 
 
 @router.post(

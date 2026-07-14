@@ -192,6 +192,28 @@ def list_scans_for_repository(
     )
 
 
+def list_all_scans(
+    session: Session,
+    *,
+    page: int,
+    page_size: int,
+    status: ScanStatus | None = None,
+    trigger_type: ScanTriggerType | None = None,
+) -> tuple[Sequence[ScanRun], int]:
+    """List scans across every repository, paginated.
+
+    Used by the dashboard rollup; the per-repository listing keeps
+    its narrower contract on ``/repositories/{id}/scans``.
+    """
+    return scan_repo.list_scans(
+        session,
+        page=page,
+        page_size=page_size,
+        status=status,
+        trigger_type=trigger_type,
+    )
+
+
 def list_stages_for_scan(session: Session, scan_id: int) -> Sequence[ScanStage]:
     get_scan_or_404(session, scan_id)
     return stage_repo.list_stages_for_scan(session, scan_id)

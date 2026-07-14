@@ -12,4 +12,6 @@ Never return an ORM instance directly from a route handler.
 
 from __future__ import annotations
 
-__all__: list[str] = []
+from app.schemas.provider_health import ProviderHealthEntry, ProviderHealthResponse
+
+__all__ = ["ProviderHealthEntry", "ProviderHealthResponse"]

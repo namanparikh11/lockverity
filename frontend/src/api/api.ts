@@ -135,7 +135,7 @@ export const api = {
     return apiClient.post<Repository>("/repositories", body);
   },
   createRepositoryUpload: (file: File | Blob) =>
-    apiClient.upload<Repository>("/repositories/uploads", file),
+    apiClient.upload<Repository>("/repositories/upload", file),
 
   // ---- Scans ----
   listScansForRepository: (
