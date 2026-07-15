@@ -161,7 +161,8 @@ export const api = {
     }),
   createScan: (repositoryId: number, payload: ScanCreatePayload = {}) =>
     apiClient.post<Scan>(`/repositories/${repositoryId}/scans`, payload),
-  getScan: (scanId: number) => apiClient.get<Scan>(`/scans/${scanId}`),
+  getScan: (scanId: number, options: { signal?: AbortSignal } = {}) =>
+    apiClient.get<Scan>(`/scans/${scanId}`, { signal: options.signal }),
   listStages: (scanId: number) =>
     apiClient.get<{ items: ScanStage[] }>(`/scans/${scanId}/stages`),
 
