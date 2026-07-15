@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 
 import { api } from "@/api/api";
+import { usePolling } from "@/api/hooks";
 import type { FindingCategory, Scan, ScanStage } from "@/api/types";
 import { CopyableIdentifier } from "@/components/CopyableIdentifier";
 import { DataCompletenessNotice } from "@/components/DataCompletenessNotice";
@@ -15,34 +16,66 @@ import { Timestamp } from "@/components/Timestamp";
 import { findingCategoryLabel, scanStatusLabel, scanTriggerLabel } from "@/utils/labels";
 import { formatTimestamp } from "@/utils/time";
 
+/**
+ * Terminal scan states. The polling hook stops the moment a
+ * scan enters one of these states; the page renders a
+ * "live" badge while the scan is still in flight.
+ */
+const TERMINAL_SCAN_STATUSES: ReadonlySet<Scan["status"]> = new Set([
+  "completed",
+  "partial",
+  "failed",
+  "cancelled",
+]);
+
 export function ScanDetailsPage() {
   const { scanId } = useParams<{ scanId: string }>();
   const sid = Number.parseInt(scanId ?? "", 10);
-  const [scan, setScan] = useState<Scan | null>(null);
+  const valid = Number.isFinite(sid);
+  // The scan object is polled. We keep a separate ``stages``
+  // cache that is refreshed once per poll. The stages are not
+  // polled separately because the orchestrator updates both
+  // rows in the same transaction; the scan poll is the
+  // single source of truth for "is the work done yet?".
+  const {
+    data: scan,
+    error: pollError,
+    polls,
+  } = usePolling<Scan>(
+    (signal) => api.getScan(sid, signal ? { signal } : undefined),
+    [sid],
+    {
+      intervalMs: 2000,
+      maxPolls: 300,
+      isTerminal: (value) => TERMINAL_SCAN_STATUSES.has(value.status),
+    }
+  );
   const [stages, setStages] = useState<ScanStage[] | null>(null);
-  const [error, setError] = useState<unknown>(null);
+  const [stagesError, setStagesError] = useState<unknown>(null);
+  const error = valid ? pollError || stagesError : new Error("Invalid scan id.");
 
   useEffect(() => {
-    if (!Number.isFinite(sid)) {
-      setError(new Error("Invalid scan id."));
-      return;
-    }
+    if (!valid) return;
+    if (!scan) return;
     const controller = new AbortController();
-    setError(null);
-    setScan(null);
-    setStages(null);
-    Promise.all([api.getScan(sid), api.listStages(sid)])
-      .then(([s, st]) => {
+    api
+      .listStages(scan.id)
+      .then((st) => {
         if (controller.signal.aborted) return;
-        setScan(s);
         setStages(st.items);
       })
       .catch((err) => {
         if (controller.signal.aborted) return;
-        setError(err);
+        setStagesError(err);
       });
     return () => controller.abort();
-  }, [sid]);
+    // We intentionally depend on ``polls`` (not ``scan``) so
+    // the effect re-runs whenever the polling hook reports a
+    // new poll, but does not re-run for every scan field
+    // change. The lint rule is satisfied by listing the
+    // individual stable dependency.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [valid, scan?.id, polls]);
 
   if (error) {
     return (

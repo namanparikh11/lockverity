@@ -76,3 +76,108 @@ class ProviderObservationRead(TimestampMixin):
     retry_after: datetime | None = None
     error_code: str | None = None
     error_summary: str | None = None
+
+
+class ComponentRead(SchemaModel):
+    id: int
+    scan_run_id: int
+    manifest_id: int
+    ecosystem: str | None = None
+    package_name: str
+    version: str | None = None
+    version_source: str
+    package_url: str | None = None
+    scope: str | None = None
+    relationship: str | None = None
+    direct: bool
+    development: bool
+    optional: bool
+    integrity: str | None = None
+
+
+class DependencyPathEntry(SchemaModel):
+    id: int
+    package_name: str
+    version: str | None = None
+    version_source: str
+    ecosystem: str | None = None
+    direct: bool
+    development: bool
+
+
+class DependencyPathRead(SchemaModel):
+    components: list[DependencyPathEntry]
+    edges: list[dict]
+    truncated: bool
+
+
+class AdvisoryRead(SchemaModel):
+    id: int
+    source: str
+    source_advisory_id: str
+    canonical_id: str | None = None
+    summary: str | None = None
+    details_url: str | None = None
+    published_at: datetime | None = None
+    modified_at: datetime | None = None
+    withdrawn_at: datetime | None = None
+    raw_payload_sha256: str | None = None
+
+
+class ComponentAdvisoryRead(SchemaModel):
+    id: int
+    component_id: int
+    advisory_id: int
+    fixed_versions: list[str]
+    severity_source: str | None = None
+    confidence: str
+    dependency_paths: list[dict]
+    withdrawn: bool
+    # Enriched join fields for the frontend.
+    package_name: str | None = None
+    package_version: str | None = None
+    ecosystem: str | None = None
+    direct: bool | None = None
+    advisory_source: str | None = None
+    advisory_external_id: str | None = None
+    advisory_canonical_id: str | None = None
+    advisory_summary: str | None = None
+    advisory_details_url: str | None = None
+    affected: bool
+    severity_label: str | None = None
+    severity_score: int | None = None
+
+
+class WorkflowFindingRead(SchemaModel):
+    id: int
+    scan_run_id: int
+    repository_id: int
+    rule_id: str
+    severity: str
+    confidence: str
+    workflow_path: str
+    workflow_name: str
+    title: str
+    summary: str
+    remediation: str | None = None
+    permissions: list[str]
+    triggers: list[str]
+    unpinned_actions: list[str]
+    yaml_path: str | None = None
+    start_line: int | None = None
+    end_line: int | None = None
+    stable_key: str
+    limitations: list[str]
+
+
+class ScanComparisonRead(SchemaModel):
+    base_scan_id: int
+    head_scan_id: int
+    repository_id: int
+    generated_at: datetime
+    components: list[dict]
+    findings: list[dict]
+    manifests: list[dict]
+    workflows: list[dict]
+    providers: list[dict]
+    unable_to_determine: list[str]

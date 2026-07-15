@@ -61,17 +61,26 @@ _LOCAL_STAGES: frozenset[StageType] = frozenset(
     }
 )
 
-# Stages v0.2 records as ``not_requested``. The stage is marked
-# ``skipped`` and a provider observation is written so the
-# frontend can render the truth.
-_REMOTE_STAGES: frozenset[StageType] = frozenset(
+# Stages v0.3 runs locally. v0.2 recorded these as
+# ``not_requested``; v0.3 invokes the analysis pipeline so a scan
+# produces real components, dependency edges, workflow findings,
+# and rule-based findings.
+_LOCAL_V03_STAGES: frozenset[StageType] = frozenset(
     {
         StageType.DEPENDENCY_PARSING,
+        StageType.WORKFLOW_ANALYSIS,
+        StageType.FINDING_RECONCILIATION,
+    }
+)
+
+# Stages that are still recorded as ``not_requested`` in v0.3.
+# The stage is marked ``skipped`` and a provider observation is
+# written so the frontend can render the truth.
+_REMOTE_STAGES: frozenset[StageType] = frozenset(
+    {
         StageType.DEPENDENCY_ENRICHMENT,
         StageType.VULNERABILITY_QUERY,
-        StageType.WORKFLOW_ANALYSIS,
         StageType.REPOSITORY_POSTURE,
-        StageType.FINDING_RECONCILIATION,
         StageType.EXPORT_GENERATION,
     }
 )
@@ -157,27 +166,25 @@ class ScanOrchestrator:
         overall_failure_summary: str | None = None
         partial = False
         try:
+            # In v0.3, we run the analysis pipeline for the
+            # stages that do real local work. The pipeline owns
+            # its own per-stage state transitions; the orchestrator
+            # reads the resulting stage rows at the end.
+            self._run_local_pipeline(scan_id, cancellation=cancellation)
             for stage_type in _stage_pipeline():
+                # Refresh the per-stage state after the pipeline ran.
+                record = self._read_stage_record(scan_id, stage_type, cancellation=cancellation)
+                records.append(record)
                 if cancellation.is_set():
                     overall_failure_code = "cancelled"
                     overall_failure_summary = "Scan cancelled before stage started."
                     break
-                record = self._run_stage(
-                    scan_id,
-                    stage_type,
-                    cancellation=cancellation,
-                )
-                records.append(record)
                 if record.status == StageStatus.FAILED:
                     overall_failure_code = record.failure_code or "stage_failed"
                     overall_failure_summary = record.failure_summary or "Stage failed."
                     break
                 if record.status == StageStatus.PARTIAL:
                     partial = True
-            else:
-                # Only execute when the loop completes without
-                # ``break`` - i.e. no stage failed.
-                pass
         except Exception as exc:
             overall_failure_code = "orchestrator_internal_error"
             overall_failure_summary = str(exc)[
@@ -229,6 +236,216 @@ class ScanOrchestrator:
     # ------------------------------------------------------------------
     # Stages
     # ------------------------------------------------------------------
+    def _run_local_pipeline(
+        self,
+        scan_id: int,
+        *,
+        cancellation: _CancellationToken,
+    ) -> None:
+        """Run the v0.3 analysis pipeline for the local stages.
+
+        v0.2 ran each stage as its own atomic transition. v0.3
+        delegates the local work to :class:`AnalysisPipeline` and
+        then walks the stage rows to build a record for the
+        caller. Cancellation is honoured before each stage: a
+        cancelled scan stops at the next stage boundary.
+        """
+        from app.services.analysis_pipeline import AnalysisPipeline
+
+        pipeline = AnalysisPipeline(
+            session_factory=self._session_factory,
+            settings=self._settings,
+        )
+
+        # First, run the three v0.2 local stages in the original
+        # way. They were the only stages v0.2 did real work for,
+        # and the analysis pipeline assumes they have run.
+        for stage_type in _LOCAL_STAGES:
+            if cancellation.is_set():
+                return
+            self._mark_stage_running(scan_id, stage_type)
+            record = self._run_v02_stage(scan_id, stage_type, cancellation=cancellation)
+            # Mirror the record back into the stage row.
+            with self._session_factory() as session:
+                stage = stage_repo.get_stage(session, scan_id, stage_type)
+                if stage is not None:
+                    stage.status = record.status
+                    stage.provider = record.provider
+                    stage.provider_status = record.provider_status
+                    stage.records_processed = record.records_processed
+                    stage.failure_code = record.failure_code
+                    stage.failure_summary = record.failure_summary
+                    stage.completed_at = record.completed_at
+                    session.commit()
+            if record.status == StageStatus.FAILED:
+                return
+
+        # Mark every v0.3 local stage RUNNING so the UI reflects
+        # the work, then run the v0.3 pipeline as one batch. The
+        # pipeline itself records the v0.2 remote stages (vuln,
+        # posture, etc.) as ``skipped`` with the appropriate
+        # provider observations, so we do not pre-mark them
+        # here. The two stages the pipeline does not touch at
+        # all (DEPENDENCY_ENRICHMENT and EXPORT_GENERATION) are
+        # marked SKIPPED here so the UI sees a complete stage
+        # history.
+        for stage_type in _stage_pipeline():
+            if cancellation.is_set():
+                return
+            if stage_type in _LOCAL_STAGES:
+                continue
+            if stage_type not in _LOCAL_V03_STAGES:
+                if stage_type in {
+                    StageType.DEPENDENCY_ENRICHMENT,
+                    StageType.EXPORT_GENERATION,
+                }:
+                    self._complete_not_requested(
+                        scan_id,
+                        stage_type,
+                        cancellation=cancellation,
+                    )
+                continue
+            self._mark_stage_running(scan_id, stage_type)
+
+        if not cancellation.is_set():
+            try:
+                summary = pipeline.run(scan_id)
+            except Exception as exc:
+                logger.exception("analysis pipeline crashed for scan %s", scan_id)
+                # Mark all local-v0.3 stages as failed.
+                for stage_type in _LOCAL_V03_STAGES:
+                    self._fail_stage(
+                        scan_id,
+                        stage_type,
+                        failure_code="pipeline_internal_error",
+                        failure_summary=str(exc)[:512],
+                        cancellation=cancellation,
+                    )
+                return
+            self._apply_pipeline_outcome(scan_id, summary)
+
+    def _run_v02_stage(
+        self,
+        scan_id: int,
+        stage_type: StageType,
+        *,
+        cancellation: _CancellationToken,
+    ) -> StageRecord:
+        """Run a single v0.2 local stage and return its record.
+
+        The v0.2 stages are the only ones that pre-date the
+        analysis pipeline. They run in the orchestrator because
+        their work is small and the failure modes are well
+        understood.
+        """
+        if stage_type == StageType.REPOSITORY_INTAKE:
+            return self._stage_repository_intake(scan_id, cancellation=cancellation)
+        if stage_type == StageType.ARCHIVE_VALIDATION:
+            return self._stage_archive_validation(scan_id, cancellation=cancellation)
+        if stage_type == StageType.MANIFEST_DISCOVERY:
+            return self._stage_manifest_discovery(scan_id, cancellation=cancellation)
+        return self._fail_stage(
+            scan_id,
+            stage_type,
+            failure_code="orchestrator_unknown_stage",
+            failure_summary=f"Stage {stage_type.value} is not handled by the orchestrator.",
+            cancellation=cancellation,
+        )
+
+    def _apply_pipeline_outcome(
+        self,
+        scan_id: int,
+        summary: app.services.analysis_pipeline.PipelineSummary,  # noqa: F821
+    ) -> None:
+        # Stages that were never started (no workspace, no
+        # workflow files, no analysis needed) stay in PENDING; we
+        # only mark them SKIPPED if they were never transitioned
+        # to RUNNING. RUNNING -> SKIPPED is an illegal transition
+        # in the state machine, so this is the honest shape.
+        for outcome in summary.stages:
+            try:
+                stage_type = StageType(outcome.stage)
+            except ValueError:
+                continue
+            with self._session_factory() as session:
+                stage = stage_repo.get_stage(session, scan_id, stage_type)
+                if stage is None:
+                    continue
+                if outcome.status == "completed":
+                    assert_legal_stage_transition(stage.status, StageStatus.COMPLETED)
+                    stage.status = StageStatus.COMPLETED
+                elif outcome.status == "partial":
+                    assert_legal_stage_transition(stage.status, StageStatus.PARTIAL)
+                    stage.status = StageStatus.PARTIAL
+                elif outcome.status == "failed":
+                    assert_legal_stage_transition(stage.status, StageStatus.FAILED)
+                    stage.status = StageStatus.FAILED
+                else:
+                    # "skipped": for the v0.2 remote stages, we
+                    # never marked them RUNNING (the pipeline
+                    # only touches the v0.3 local stages), so the
+                    # legal transition is PENDING -> SKIPPED.
+                    # For the v0.3 local stages, we marked them
+                    # RUNNING, and a "skipped" outcome means the
+                    # pipeline had nothing to do - we transition
+                    # through COMPLETED to satisfy the state
+                    # machine.
+                    if stage.status == StageStatus.PENDING:
+                        assert_legal_stage_transition(stage.status, StageStatus.SKIPPED)
+                        stage.status = StageStatus.SKIPPED
+                        stage.provider_status = ProviderStatus.NOT_REQUESTED.value
+                    else:
+                        assert_legal_stage_transition(stage.status, StageStatus.COMPLETED)
+                        stage.status = StageStatus.COMPLETED
+                stage.records_processed = outcome.records_processed
+                stage.failure_code = outcome.failure_code
+                if outcome.failure_summary is not None:
+                    stage.failure_summary = outcome.failure_summary[:2048]
+                stage.completed_at = utcnow()
+                session.commit()
+
+    def _mark_stage_running(
+        self,
+        scan_id: int,
+        stage_type: StageType,
+    ) -> None:
+        with self._session_factory() as session:
+            stage = stage_repo.get_stage(session, scan_id, stage_type)
+            if stage is None:
+                return
+            try:
+                assert_legal_stage_transition(stage.status, StageStatus.RUNNING)
+            except ApiError:
+                # The stage is already in a terminal state; the
+                # caller will treat the run as a no-op.
+                return
+            stage.status = StageStatus.RUNNING
+            stage.started_at = utcnow()
+            session.commit()
+
+    def _read_stage_record(
+        self,
+        scan_id: int,
+        stage_type: StageType,
+        *,
+        cancellation: _CancellationToken,
+    ) -> StageRecord:
+        with self._session_factory() as session:
+            stage = stage_repo.get_stage(session, scan_id, stage_type)
+            if stage is None:
+                return StageRecord(
+                    stage=stage_type,
+                    status=StageStatus.FAILED,
+                    provider=None,
+                    provider_status=None,
+                    records_processed=0,
+                    failure_code="stage_missing",
+                    failure_summary="Stage row not found.",
+                    started_at=None,
+                    completed_at=utcnow(),
+                )
+            return _to_record(stage)
+
     def _run_stage(
         self,
         scan_id: int,
@@ -663,30 +880,33 @@ def scan_service_get_or_404(session: Session, scan_id: int) -> ScanRun:
 
 
 _MANIFEST_NAMES: dict[str, tuple[str, str | None]] = {
-    "package.json": ("npm", "npm"),
-    "package-lock.json": ("npm", "npm"),
-    "yarn.lock": ("npm", "npm"),
-    "pnpm-lock.yaml": ("npm", "npm"),
-    "requirements.txt": ("pip", "pypi"),
-    "requirements.in": ("pip", "pypi"),
-    "pyproject.toml": ("pip", "pypi"),
-    "Pipfile": ("pip", "pypi"),
-    "Pipfile.lock": ("pip", "pypi"),
-    "go.mod": ("go", "go"),
-    "go.sum": ("go", "go"),
-    "Cargo.toml": ("cargo", "crates"),
-    "Cargo.lock": ("cargo", "crates"),
-    "pom.xml": ("maven", "maven"),
+    # ``manifest_type`` matches the parser-registry key
+    # (``app.parsers.build_default_registry``); the
+    # ``ecosystem`` is the canonical deps.dev ecosystem name.
+    "package.json": ("package_json", "npm"),
+    "package-lock.json": ("package_lock", "npm"),
+    "yarn.lock": ("yarn_lock", "npm"),
+    "pnpm-lock.yaml": ("pnpm_lock", "npm"),
+    "requirements.txt": ("requirements_txt", "pypi"),
+    "requirements.in": ("requirements_txt", "pypi"),
+    "pyproject.toml": ("pyproject_toml", "pypi"),
+    "Pipfile": ("pipfile", "pypi"),
+    "Pipfile.lock": ("pipfile_lock", "pypi"),
+    "go.mod": ("go_mod", "go"),
+    "go.sum": ("go_sum", "go"),
+    "Cargo.toml": ("cargo_toml", "crates"),
+    "Cargo.lock": ("cargo_lock", "crates"),
+    "pom.xml": ("pom_xml", "maven"),
     "build.gradle": ("gradle", "maven"),
-    "build.gradle.kts": ("gradle", "maven"),
-    "composer.json": ("composer", "packagist"),
-    "composer.lock": ("composer", "packagist"),
-    "Gemfile": ("bundler", "rubygems"),
-    "Gemfile.lock": ("bundler", "rubygems"),
-    "poetry.lock": ("poetry", "pypi"),
-    "renv.lock": ("renv", "cran"),
-    "Package.resolved": ("swiftpm", "swift"),
-    "Package.swift": ("swiftpm", "swift"),
+    "build.gradle.kts": ("gradle_kts", "maven"),
+    "composer.json": ("composer_json", "packagist"),
+    "composer.lock": ("composer_lock", "packagist"),
+    "Gemfile": ("gemfile", "rubygems"),
+    "Gemfile.lock": ("gemfile_lock", "rubygems"),
+    "poetry.lock": ("poetry_lock", "pypi"),
+    "renv.lock": ("renv_lock", "cran"),
+    "Package.resolved": ("package_resolved", "swift"),
+    "Package.swift": ("package_swift", "swift"),
 }
 
 
