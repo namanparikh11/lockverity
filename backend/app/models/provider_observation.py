@@ -18,6 +18,7 @@ from sqlalchemy import (
     Index,
     Integer,
     String,
+    Text,
 )
 from sqlalchemy import (
     Enum as SAEnum,
@@ -47,12 +48,30 @@ class ProviderObservation(Base, TimestampMixin):
             "provider",
         ),
         Index("ix_provider_observations_status", "status"),
+        Index(
+            "ix_provider_observations_scan_run_id_provider_component_id",
+            "scan_run_id",
+            "provider",
+            "component_id",
+        ),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     scan_run_id: Mapped[int] = mapped_column(
         ForeignKey("scan_runs.id", ondelete="CASCADE"),
         nullable=False,
+    )
+    # v0.4: nullable FK to the component this observation
+    # belongs to. Per-component observations (OSV lookups,
+    # deps.dev enrichments) set this; scan-level
+    # observations (Scorecard) leave it ``null``. The
+    # endpoint that joins observations to components
+    # filters on this column so a per-component
+    # "missing version" reason cannot leak to a different
+    # component in the same scan.
+    component_id: Mapped[int | None] = mapped_column(
+        ForeignKey("components.id", ondelete="CASCADE"),
+        nullable=True,
     )
     provider: Mapped[str] = mapped_column(String(64), nullable=False)
     operation: Mapped[str] = mapped_column(String(128), nullable=False)
@@ -69,3 +88,11 @@ class ProviderObservation(Base, TimestampMixin):
     retry_after: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     error_code: Mapped[str | None] = mapped_column(String(64), nullable=True)
     error_summary: Mapped[str | None] = mapped_column(String(2048), nullable=True)
+    # v0.4: structured evidence envelope for successful
+    # provider responses. Bounded at 8 KiB; the application
+    # validator rejects oversized payloads and the column is
+    # always ``null`` for error / unavailable observations.
+    # ``error_summary`` continues to carry redacted error
+    # text; the two columns are independent and are never
+    # mixed.
+    evidence_json: Mapped[str | None] = mapped_column(Text, nullable=True)

@@ -73,21 +73,35 @@ def test_run_completes_local_stages_and_marks_others_skipped(app_config, workspa
     assert types[2] == StageType.MANIFEST_DISCOVERY
     # v0.3 runs the dependency, workflow, and finding
     # reconciliation stages locally; they should all be
-    # COMPLETED. The v0.2 remote stages (enrichment, vuln,
-    # posture, export) stay SKIPPED.
+    # COMPLETED. v0.4 promotes the provider-backed stages
+    # (dependency_enrichment, vulnerability_query,
+    # repository_posture) to local execution as well; they
+    # complete successfully when the providers return data
+    # (or the cache hits) and otherwise remain SKIPPED. The
+    # only stage that is still SKIPPED is export_generation,
+    # which the pipeline does not touch - the API exposes
+    # exports on demand.
     for record in outcome.stage_records:
         if record.stage in {
             StageType.DEPENDENCY_PARSING,
+            StageType.DEPENDENCY_ENRICHMENT,
             StageType.WORKFLOW_ANALYSIS,
             StageType.FINDING_RECONCILIATION,
         }:
             assert record.status == StageStatus.COMPLETED
         elif record.stage in {
-            StageType.DEPENDENCY_ENRICHMENT,
             StageType.VULNERABILITY_QUERY,
             StageType.REPOSITORY_POSTURE,
-            StageType.EXPORT_GENERATION,
         }:
+            # The provider-backed stages are honest: they
+            # may complete (when the provider returns data
+            # or the cache hits) or be skipped (when the
+            # provider is unavailable or not applicable).
+            assert record.status in {
+                StageStatus.COMPLETED,
+                StageStatus.SKIPPED,
+            }
+        elif record.stage == StageType.EXPORT_GENERATION:
             assert record.status == StageStatus.SKIPPED
             assert record.provider_status == ProviderStatus.NOT_REQUESTED.value
         else:
@@ -121,14 +135,13 @@ def test_observations_are_recorded_per_stage(app_config, workspace_root) -> None
         items, total = observation_repo.list_observations_for_scan(
             session, scan_id, page=1, page_size=100
         )
-        # v0.3 records at least one observation per pipeline
-        # stage. The local stages contribute one each (intake,
-        # archive, manifest, dependency_parsing, finding_reconciliation).
-        # The remote stages (vulnerability, posture) each
-        # contribute one ``not_requested`` observation. We assert
-        # ``>= 6`` to leave room for additional per-file
-        # observations without coupling the test to the exact
-        # number.
+        # v0.4 records at least one observation per real
+        # provider call plus the structural stage
+        # observations. The local stages contribute one each
+        # (intake, archive, manifest, dependency_parsing,
+        # finding_reconciliation, workflow_analysis). The
+        # provider-backed stages (OSV, deps.dev, Scorecard)
+        # contribute at least one observation each.
         assert total >= 6
         providers = {item.provider for item in items}
         assert "github-or-upload" in providers
@@ -138,13 +151,21 @@ def test_observations_are_recorded_per_stage(app_config, workspace_root) -> None
         dep_parsing = [obs for obs in items if obs.provider == "dependency_parsing"]
         assert dep_parsing
         assert dep_parsing[0].status == ProviderStatus.AVAILABLE
-        # The vulnerability_query stage is still remote; its
-        # observation is ``not_requested``. The pipeline records
-        # it under the ``osv`` provider name because that is the
-        # upstream we would call in a later milestone.
+        # The vulnerability_query stage now drives OSV
+        # directly. The observation is recorded under the
+        # ``osv`` provider name; the status may be
+        # ``available``, ``partial``, ``unavailable``, or
+        # ``not_requested`` depending on whether the scan
+        # had matching components and whether the provider
+        # responded.
         vuln_obs = [obs for obs in items if obs.provider == "osv"]
         assert vuln_obs
-        assert vuln_obs[0].status == ProviderStatus.NOT_REQUESTED
+        assert vuln_obs[0].status in {
+            ProviderStatus.AVAILABLE,
+            ProviderStatus.PARTIAL,
+            ProviderStatus.UNAVAILABLE,
+            ProviderStatus.NOT_REQUESTED,
+        }
 
 
 def test_cancellation_token_short_circuits_orchestrator(app_config, workspace_root) -> None:

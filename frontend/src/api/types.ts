@@ -253,6 +253,29 @@ export interface DependencyPath {
   truncated: boolean;
 }
 
+// ---- Component enrichments (v0.4) ----
+
+export interface ComponentEnrichment {
+  component_id: number;
+  ecosystem: string | null;
+  package_name: string;
+  version: string | null;
+  fetched_at: string | null;
+  cache_status: string;
+  provider_url: string | null;
+  source_provenance: string | null;
+  license_observations: string[];
+  dependency_count: number | null;
+  provider_status: ProviderStatus | null;
+  unavailable_reason: string | null;
+  // v0.4 honesty fix: the structured evidence envelope
+  // from the underlying provider_observations row.
+  // ``null`` for failed / never-queried rows; a JSON
+  // object with ``licences`` and ``dependency_count`` for
+  // successful rows. The UI never fabricates values.
+  evidence: Record<string, unknown> | null;
+}
+
 // ---- Advisories / vulnerabilities (forward-compatible) ----
 
 export interface Advisory {
@@ -276,9 +299,39 @@ export interface ComponentAdvisory {
   advisory_id: number;
   fixed_versions: string[];
   severity_source: string | null;
-  confidence: FindingConfidence;
+  // v0.4 honesty fix: confidence is now nullable. The
+  // previous v0.4 implementation substituted ``medium``
+  // or ``high``; that was removed because the upstream
+  // provider (OSV) does not supply a confidence. The
+  // UI renders the ``null`` case as "Not supplied".
+  confidence: FindingConfidence | null;
   dependency_paths: DependencyPath[];
   withdrawn: boolean;
+  // v0.4 additions. The provider_provenance always
+  // names a real upstream; ``local`` indicates a
+  // rule-engine finding. Aliases cover the canonical
+  // CVE / GHSA cross-references the provider
+  // publishes. Fetched_at is the UTC ISO timestamp of
+  // the provider call; ``null`` means the row was
+  // written before v0.4 (legacy).
+  provider_provenance?: string | null;
+  aliases?: string[];
+  fetched_at?: string | null;
+  // The v0.3 read-side fields stay available for
+  // backwards compatibility; new code can read the
+  // renamed fields below.
+  package_name?: string | null;
+  package_version?: string | null;
+  ecosystem?: string | null;
+  direct?: boolean | null;
+  advisory_source?: string | null;
+  advisory_external_id?: string | null;
+  advisory_canonical_id?: string | null;
+  advisory_summary?: string | null;
+  advisory_details_url?: string | null;
+  affected: boolean;
+  severity_label?: string | null;
+  severity_score?: number | null;
 }
 
 // ---- Workflow findings (forward-compatible) ----

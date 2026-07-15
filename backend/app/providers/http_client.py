@@ -22,6 +22,7 @@ pins it, but every other module imports through
 
 from __future__ import annotations
 
+import contextlib
 import time
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
@@ -127,9 +128,20 @@ def get_http_client() -> httpx.Client:
 
 
 def install_http_client(client: httpx.Client | None) -> None:
-    """Replace the process-wide client (used by tests)."""
+    """Replace the process-wide client (used by tests).
+
+    The previous client, if any, is closed before the
+    substitution. ``httpx.Client.close()`` releases the
+    underlying connection pool, which prevents an
+    ``ResourceWarning`` for an unclosed SSL socket in
+    long-running test suites.
+    """
     global _CLIENT
+    previous = _CLIENT
     _CLIENT = client
+    if previous is not None and previous is not client:
+        with contextlib.suppress(Exception):
+            previous.close()
 
 
 _CLIENT: httpx.Client | None = None

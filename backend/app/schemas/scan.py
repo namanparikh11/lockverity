@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+from dataclasses import field
 from datetime import datetime
+from typing import Any
 
 from app.models.scan_run import ScanStatus, ScanTriggerType
 from app.schemas.common import NonEmptyStr, SchemaModel, TimestampMixin
@@ -95,6 +97,37 @@ class ComponentRead(SchemaModel):
     integrity: str | None = None
 
 
+class ComponentEnrichment(SchemaModel):
+    """Provider enrichment metadata attached to a component.
+
+    The fields are always present; ``null`` means the
+    provider was not queried (e.g. unsupported ecosystem or
+    no concrete version). The frontend can render a "never
+    queried" empty state without falling back to fixtures.
+    """
+
+    component_id: int
+    ecosystem: str | None
+    package_name: str
+    version: str | None
+    fetched_at: str | None
+    cache_status: str
+    provider_url: str | None
+    source_provenance: str | None
+    license_observations: list[str]
+    dependency_count: int | None
+    provider_status: str | None
+    unavailable_reason: str | None
+    # v0.4 honesty fix: the structured evidence envelope
+    # persisted on the underlying ``provider_observations``
+    # row. The column is the single source of truth for
+    # successful provider data; ``error_summary`` is never
+    # used to transport evidence. ``None`` means the
+    # observation did not return a structured envelope
+    # (failure, unsupported ecosystem, never queried).
+    evidence: dict[str, Any] | None = None
+
+
 class DependencyPathEntry(SchemaModel):
     id: int
     package_name: str
@@ -130,7 +163,15 @@ class ComponentAdvisoryRead(SchemaModel):
     advisory_id: int
     fixed_versions: list[str]
     severity_source: str | None = None
-    confidence: str
+    # v0.4 honesty fix: confidence is a free-form string so
+    # we can return ``None`` when the upstream provider did
+    # not supply one. Lockverity never infers a confidence
+    # value from severity, the presence of an advisory, or
+    # the upstream name. The previous v0.4 implementation
+    # substituted ``medium`` / ``high`` here; that was
+    # removed. The frontend renders the ``None`` case as
+    # "Not supplied" / "Unknown".
+    confidence: str | None = None
     dependency_paths: list[dict]
     withdrawn: bool
     # Enriched join fields for the frontend.
@@ -145,7 +186,15 @@ class ComponentAdvisoryRead(SchemaModel):
     advisory_details_url: str | None = None
     affected: bool
     severity_label: str | None = None
-    severity_score: int | None = None
+    severity_score: float | None = None
+    # v0.4 additions: explicit provider provenance, aliases,
+    # and freshness. A row is added to ``component_advisories``
+    # only when the underlying provider returned data;
+    # ``provider_provenance`` therefore always names a real
+    # upstream.
+    provider_provenance: str | None = None
+    aliases: list[str] = field(default_factory=list)
+    fetched_at: str | None = None
 
 
 class WorkflowFindingRead(SchemaModel):

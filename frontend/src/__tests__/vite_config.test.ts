@@ -23,9 +23,23 @@ const configPath = resolve(__dirname, "..", "..", "vite.config.ts");
 const source = readFileSync(configPath, "utf-8");
 
 describe("vite.config.ts", () => {
-  it("proxies /api to 127.0.0.1:8000", () => {
+  it("proxies /api to 127.0.0.1:8000 by default", () => {
     expect(source).toMatch(/proxy\s*:\s*\{/);
     expect(source).toMatch(/["']\/api["']\s*:/);
+    expect(source).toMatch(/127\.0\.0\.1:8000/);
+  });
+
+  it("honours VITE_API_PROXY_TARGET for non-default hosts / ports", () => {
+    // The proxy target must be read from the environment
+    // so operators can run the dev server against a
+    // different FastAPI host / port without editing the
+    // config file. The variable is read at config time
+    // and the production API URL stays
+    // ``/api/v1`` (the ``VITE_API_BASE_URL`` env var the
+    // ``apiClient`` reads); only the dev-server proxy is
+    // configurable here.
+    expect(source).toMatch(/VITE_API_PROXY_TARGET/);
+    // The default is the v0.3 local development address.
     expect(source).toMatch(/127\.0\.0\.1:8000/);
   });
 

@@ -14,13 +14,15 @@ The pipeline is intentionally split from the orchestrator:
   recording).
 - This module owns the *work*: parsing manifests, building
   components and edges, running analyzers, evaluating rules,
-  persisting findings. It is the only place that turns raw
-  evidence into the :class:`Finding` rows the API serves.
+  persisting findings, and (in v0.4) calling the external
+  providers (OSV, deps.dev, OpenSSF Scorecard) for the
+  ``dependency_enrichment``, ``vulnerability_query``, and
+  ``repository_posture`` stages.
 
 The pipeline degrades gracefully: any network-dependent stage
-(OSV, deps.dev, Scorecard) records its failure as a
-:class:`ProviderObservation` with status ``unavailable``. Local
-work (parsers, manifest discovery, GitHub Actions rules, finding
+records its failure as a :class:`ProviderObservation` with
+status ``unavailable`` or ``partial``. Local work (parsers,
+manifest discovery, GitHub Actions rules, finding
 reconciliation) always runs to completion; it never makes
 network calls.
 """
@@ -52,6 +54,12 @@ from app.providers.results import (
 )
 from app.rules import default_rules
 from app.services import write_service
+from app.services.provider_service import (
+    EnrichmentLookup,
+    PostureLookup,
+    ProviderService,
+    VulnerabilityLookup,
+)
 from app.services.workspace_service import WorkspaceService
 from app.utils.errors import ApiError, ApiErrorCode
 from app.utils.redaction import redact_provider_summary
@@ -85,6 +93,9 @@ class PipelineSummary:
     findings_persisted: int
     findings_skipped: int
     component_advisories_persisted: int
+    vulnerabilities_persisted: int
+    enrichments_persisted: int
+    posture_findings_persisted: int
 
 
 class AnalysisPipeline:
@@ -95,9 +106,18 @@ class AnalysisPipeline:
         *,
         session_factory,
         settings,
+        provider_service_factory: Any | None = None,
     ) -> None:
         self._session_factory = session_factory
         self._settings = settings
+        # ``provider_service_factory`` is a callable
+        # ``(session) -> ProviderService``. The factory is
+        # optional so the existing v0.3 call sites still work;
+        # when ``None`` we build a default factory that opens a
+        # real :class:`ProviderService` per session.
+        self._provider_service_factory = (
+            provider_service_factory or _default_provider_service_factory(settings=settings)
+        )
 
     def run(self, scan_id: int) -> PipelineSummary:
         """Run the full analysis pipeline against an already-queued scan.
@@ -113,6 +133,9 @@ class AnalysisPipeline:
         findings_persisted = 0
         findings_skipped = 0
         component_advisories_persisted = 0
+        vulnerabilities_persisted = 0
+        enrichments_persisted = 0
+        posture_findings_persisted = 0
 
         # --- dependency_parsing -----------------------------------------
         (
@@ -122,22 +145,24 @@ class AnalysisPipeline:
         ) = self._stage_dependency_parsing(scan_id)
         stages.append(outcome)
 
-        # --- vulnerability_query (local, no network in v0.3) ------------
-        # The v0.3 pipeline never makes a network call. The stage
-        # produces a ProviderObservation so the UI can render the
-        # honest "not requested" / "unavailable" baseline. When a
-        # later milestone wires up a real provider, the stage body
-        # becomes the only place that needs to change.
-        outcome = self._stage_vulnerability_query(scan_id)
+        # --- dependency_enrichment (deps.dev) ---------------------------
+        outcome, persisted_enrichments = self._stage_dependency_enrichment(scan_id)
         stages.append(outcome)
+        enrichments_persisted = persisted_enrichments
+
+        # --- vulnerability_query (OSV) ----------------------------------
+        outcome, persisted_vulns = self._stage_vulnerability_query(scan_id)
+        stages.append(outcome)
+        vulnerabilities_persisted = persisted_vulns
 
         # --- workflow_analysis ------------------------------------------
         outcome, findings_persisted, findings_skipped = self._stage_workflow_analysis(scan_id)
         stages.append(outcome)
 
-        # --- repository_posture (placeholder) ----------------------------
-        outcome = self._stage_repository_posture(scan_id)
+        # --- repository_posture (OpenSSF Scorecard) ---------------------
+        outcome, persisted_posture = self._stage_repository_posture(scan_id)
         stages.append(outcome)
+        posture_findings_persisted = persisted_posture
 
         # --- finding_reconciliation -------------------------------------
         outcome, more_persisted, more_skipped, more_advisories = self._stage_finding_reconciliation(
@@ -155,6 +180,9 @@ class AnalysisPipeline:
             findings_persisted=findings_persisted,
             findings_skipped=findings_skipped,
             component_advisories_persisted=component_advisories_persisted,
+            vulnerabilities_persisted=vulnerabilities_persisted,
+            enrichments_persisted=enrichments_persisted,
+            posture_findings_persisted=posture_findings_persisted,
         )
 
     # ------------------------------------------------------------------
@@ -358,35 +386,134 @@ class AnalysisPipeline:
                 edges_persisted,
             )
 
-    def _stage_vulnerability_query(self, scan_id: int) -> StageOutcome:
-        """Record the per-scan vulnerability provider observation.
+    def _stage_vulnerability_query(self, scan_id: int) -> tuple[StageOutcome, int]:
+        """Call OSV for every component and persist advisories.
 
-        v0.3 does not call OSV. We persist an honest
-        ``not_requested`` observation so the dashboard can render
-        the truthful baseline. A later milestone wires OSV in
-        behind the same observation contract.
+        v0.4 wires the existing :class:`OsvVulnerabilityProvider`
+        into the normal pipeline. A provider failure is recorded
+        as a :class:`ProviderStatus.UNAVAILABLE` observation;
+        the local findings (rule engine + GitHub Actions) still
+        run to completion in later stages.
+
+        The stage is only marked ``completed`` when the provider
+        returned a real successful call. An ``unavailable`` /
+        ``rate_limited`` / ``partial`` provider maps to a stage
+        status of ``skipped``; an exception in the provider
+        itself maps to ``failed``. ``completed`` with an empty
+        result list is only legal when the latest per-component
+        observation for OSV is ``available`` or ``cached``.
         """
         with self._session_factory() as session:
             scan = _get_scan_or_404(session, scan_id)
-            components = session.query(Component).filter(Component.scan_run_id == scan.id).count()
-            session.add(
-                ProviderObservation(
-                    scan_run_id=scan_id,
-                    provider="osv",
-                    operation="vulnerability_query",
-                    status=ProviderStatus.NOT_REQUESTED,
-                    records_returned=0,
-                    cache_status="miss",
-                    error_code="provider_not_requested",
-                    error_summary="OSV integration is not enabled in v0.3.",
+            components = session.query(Component).filter(Component.scan_run_id == scan.id).all()
+            if not components:
+                # Record an honest ``not_requested`` observation
+                # so the providers list always has a row for
+                # OSV, matching the pre-v0.4 contract.
+                session.add(
+                    ProviderObservation(
+                        scan_run_id=scan_id,
+                        provider="osv",
+                        operation="vulnerability_query",
+                        status=ProviderStatus.NOT_REQUESTED,
+                        records_returned=0,
+                        cache_status="miss",
+                        error_code="no_components",
+                        error_summary="OSV was not queried because the scan produced no components.",
+                    )
                 )
-            )
+                session.commit()
+                return (
+                    StageOutcome(
+                        stage="vulnerability_query",
+                        status="skipped",
+                        records_processed=0,
+                        failure_summary="No components were available to query.",
+                    ),
+                    0,
+                )
+            provider = self._provider_service_factory(session)
+            try:
+                lookups: list[VulnerabilityLookup] = provider.enrich_vulnerabilities_for_components(
+                    scan_run_id=scan_id, components=components
+                )
+            except Exception as exc:
+                logger.exception("vulnerability provider crashed for scan %s", scan_id)
+                session.add(
+                    ProviderObservation(
+                        scan_run_id=scan_id,
+                        provider="osv",
+                        operation="vulnerability_query",
+                        status=ProviderStatus.UNAVAILABLE,
+                        records_returned=0,
+                        cache_status="miss",
+                        error_code="provider_internal_error",
+                        error_summary=redact_provider_summary(str(exc)),
+                    )
+                )
+                session.commit()
+                return (
+                    StageOutcome(
+                        stage="vulnerability_query",
+                        status="failed",
+                        records_processed=0,
+                        failure_code="provider_internal_error",
+                        failure_summary=str(exc)[:512],
+                    ),
+                    0,
+                )
             session.commit()
-            return StageOutcome(
-                stage="vulnerability_query",
-                status="skipped",
-                records_processed=components,
-                failure_summary="OSV provider is not enabled in v0.3.",
+            # The latest OSV observation is the source of truth
+            # for whether the call was a real success. An
+            # ``unavailable`` / ``rate_limited`` / ``partial``
+            # observation means the stage is not ``completed``;
+            # the per-component observations are honest, but
+            # the stage is not.
+            latest_osv = (
+                session.query(ProviderObservation)
+                .filter(
+                    ProviderObservation.scan_run_id == scan_id,
+                    ProviderObservation.provider == "osv",
+                )
+                .order_by(ProviderObservation.id.desc())
+                .first()
+            )
+            status = "completed"
+            failure_summary: str | None = None
+            failure_code: str | None = None
+            if latest_osv is not None and latest_osv.status in {
+                ProviderStatus.UNAVAILABLE,
+                ProviderStatus.RATE_LIMITED,
+                ProviderStatus.PARTIAL,
+            }:
+                # The provider is honest-unavailable. The
+                # orchestrator must NOT mark this stage
+                # ``completed``; the truthful terminal
+                # transition for a running stage is
+                # ``partial`` (legal under
+                # ``_STAGE_TRANSITIONS``). The
+                # ``failure_code`` distinguishes this from
+                # the legitimate ``no components to query``
+                # skip path further down.
+                status = "skipped"
+                failure_code = "provider_unavailable"
+                failure_summary = (
+                    f"OSV provider returned {latest_osv.status.value}; "
+                    f"see provider observation for the redacted error."
+                )
+            elif not lookups:
+                # Successful call, zero matching advisories.
+                # Honest empty state.
+                failure_summary = "No OSV advisories were returned for this scan."
+            return (
+                StageOutcome(
+                    stage="vulnerability_query",
+                    status=status,
+                    records_processed=len(components),
+                    failure_code=failure_code,
+                    failure_summary=failure_summary,
+                ),
+                len(lookups),
             )
 
     def _stage_workflow_analysis(self, scan_id: int) -> tuple[StageOutcome, int, int]:
@@ -507,32 +634,203 @@ class AnalysisPipeline:
                 skipped,
             )
 
-    def _stage_repository_posture(self, scan_id: int) -> StageOutcome:
-        """Record the OpenSSF Scorecard baseline observation.
+    def _stage_dependency_enrichment(self, scan_id: int) -> tuple[StageOutcome, int]:
+        """Call deps.dev for every component and persist enrichment.
 
-        v0.3 records an honest ``not_requested`` observation; the
-        data shape is reserved so a later milestone can swap in
-        a real Scorecard client without changing the contract.
+        The result is used by the rule engine to populate the
+        licence inventory and the missing-licence observations.
+        Provider failures are recorded as
+        :class:`ProviderStatus.UNAVAILABLE` observations; the
+        local work still runs to completion in the rule engine.
         """
         with self._session_factory() as session:
-            session.add(
-                ProviderObservation(
-                    scan_run_id=scan_id,
-                    provider="openssf",
-                    operation="scorecard",
-                    status=ProviderStatus.NOT_REQUESTED,
-                    records_returned=0,
-                    cache_status="miss",
-                    error_code="provider_not_requested",
-                    error_summary="OpenSSF Scorecard integration is not enabled in v0.3.",
+            scan = _get_scan_or_404(session, scan_id)
+            components = session.query(Component).filter(Component.scan_run_id == scan.id).all()
+            if not components:
+                # Record an honest ``not_requested`` observation
+                # so the providers list always has a row for
+                # deps.dev, matching the pre-v0.4 contract.
+                session.add(
+                    ProviderObservation(
+                        scan_run_id=scan_id,
+                        provider="deps_dev",
+                        operation="dependency_enrichment",
+                        status=ProviderStatus.NOT_REQUESTED,
+                        records_returned=0,
+                        cache_status="miss",
+                        error_code="no_components",
+                        error_summary=(
+                            "deps.dev was not queried because the scan produced no components."
+                        ),
+                    )
                 )
-            )
+                session.commit()
+                return (
+                    StageOutcome(
+                        stage="dependency_enrichment",
+                        status="skipped",
+                        records_processed=0,
+                        failure_summary="No components were available to enrich.",
+                    ),
+                    0,
+                )
+            provider = self._provider_service_factory(session)
+            try:
+                lookups: list[EnrichmentLookup] = provider.enrich_components_with_deps_dev(
+                    scan_run_id=scan_id, components=components
+                )
+            except Exception as exc:
+                logger.exception("deps.dev provider crashed for scan %s", scan_id)
+                session.add(
+                    ProviderObservation(
+                        scan_run_id=scan_id,
+                        provider="deps_dev",
+                        operation="dependency_enrichment",
+                        status=ProviderStatus.UNAVAILABLE,
+                        records_returned=0,
+                        cache_status="miss",
+                        error_code="provider_internal_error",
+                        error_summary=redact_provider_summary(str(exc)),
+                    )
+                )
+                session.commit()
+                return (
+                    StageOutcome(
+                        stage="dependency_enrichment",
+                        status="failed",
+                        records_processed=0,
+                        failure_code="provider_internal_error",
+                        failure_summary=str(exc)[:512],
+                    ),
+                    0,
+                )
             session.commit()
-            return StageOutcome(
-                stage="repository_posture",
-                status="skipped",
-                records_processed=0,
-                failure_summary="OpenSSF Scorecard is not enabled in v0.3.",
+            # The latest deps.dev observation is the source of
+            # truth for whether the call was a real success.
+            # An ``unavailable`` / ``rate_limited`` / ``partial``
+            # observation means the stage is not ``completed``.
+            latest_deps = (
+                session.query(ProviderObservation)
+                .filter(
+                    ProviderObservation.scan_run_id == scan_id,
+                    ProviderObservation.provider == "deps_dev",
+                )
+                .order_by(ProviderObservation.id.desc())
+                .first()
+            )
+            status = "completed"
+            failure_summary: str | None = (
+                "No deps.dev enrichments returned." if not lookups else None
+            )
+            failure_code: str | None = None
+            if latest_deps is not None and latest_deps.status in {
+                ProviderStatus.UNAVAILABLE,
+                ProviderStatus.RATE_LIMITED,
+                ProviderStatus.PARTIAL,
+            }:
+                status = "skipped"
+                failure_code = "provider_unavailable"
+                failure_summary = (
+                    f"deps.dev provider returned {latest_deps.status.value}; "
+                    f"see provider observation for the redacted error."
+                )
+            return (
+                StageOutcome(
+                    stage="dependency_enrichment",
+                    status=status,
+                    records_processed=len(components),
+                    failure_code=failure_code,
+                    failure_summary=failure_summary,
+                ),
+                len(lookups),
+            )
+
+    def _stage_repository_posture(self, scan_id: int) -> tuple[StageOutcome, int]:
+        """Call OpenSSF Scorecard for a supported public GitHub source.
+
+        Archive-only scans short-circuit to a
+        :class:`ProviderStatus.NOT_REQUESTED` observation; the
+        Scorecard API only knows how to look up public GitHub
+        repositories. We never fabricate a Scorecard score for
+        an archive.
+        """
+        from app.models.repository import Repository
+
+        with self._session_factory() as session:
+            scan = _get_scan_or_404(session, scan_id)
+            repository = session.get(Repository, scan.repository_id)
+            is_archive = bool(
+                repository is not None
+                and getattr(repository, "source_type", None) is not None
+                and repository.source_type.value == "uploaded_archive"
+            )
+            canonical_url = getattr(repository, "canonical_url", None) if repository else None
+            provider = self._provider_service_factory(session)
+            try:
+                lookup: PostureLookup | None = provider.import_scorecard_for_repository(
+                    scan_run_id=scan_id,
+                    canonical_url=canonical_url,
+                    is_archive=is_archive,
+                )
+            except Exception as exc:
+                logger.exception("scorecard import crashed for scan %s", scan_id)
+                session.add(
+                    ProviderObservation(
+                        scan_run_id=scan_id,
+                        provider="openssf",
+                        operation="scorecard",
+                        status=ProviderStatus.UNAVAILABLE,
+                        records_returned=0,
+                        cache_status="miss",
+                        error_code="provider_internal_error",
+                        error_summary=redact_provider_summary(str(exc)),
+                    )
+                )
+                session.commit()
+                return (
+                    StageOutcome(
+                        stage="repository_posture",
+                        status="failed",
+                        records_processed=0,
+                        failure_code="provider_internal_error",
+                        failure_summary=str(exc)[:512],
+                    ),
+                    0,
+                )
+            session.commit()
+            if lookup is None:
+                return (
+                    StageOutcome(
+                        stage="repository_posture",
+                        status="skipped",
+                        records_processed=0,
+                        failure_code="provider_unavailable",
+                        failure_summary="OpenSSF Scorecard was not available for this scan.",
+                    ),
+                    0,
+                )
+            if lookup.not_applicable:
+                return (
+                    StageOutcome(
+                        stage="repository_posture",
+                        status="skipped",
+                        records_processed=0,
+                        failure_summary=(
+                            lookup.not_applicable_reason
+                            or "OpenSSF Scorecard is not applicable for this source."
+                        ),
+                    ),
+                    0,
+                )
+            # 1 meta finding + 1 per check.
+            persisted = 1 + len(lookup.checks)
+            return (
+                StageOutcome(
+                    stage="repository_posture",
+                    status="completed",
+                    records_processed=persisted,
+                ),
+                persisted,
             )
 
     def _stage_finding_reconciliation(self, scan_id: int) -> tuple[StageOutcome, int, int, int]:
@@ -725,3 +1023,19 @@ __all__ = [
     "PipelineSummary",
     "StageOutcome",
 ]
+
+
+def _default_provider_service_factory(*, settings):
+    """Return a factory that builds a :class:`ProviderService` per session.
+
+    The factory pattern keeps the :class:`ProviderService` out
+    of the import-time dependency graph; each stage opens its
+    own session and the service lives for the lifetime of the
+    session.
+    """
+    from app.services.provider_service import ProviderService
+
+    def _factory(session) -> ProviderService:
+        return ProviderService(session, settings=settings)
+
+    return _factory
