@@ -141,9 +141,20 @@ def test_providers_endpoint_records_observations(client) -> None:
     client.post(f"/api/v1/scans/{scan_id}/run")
     r3 = client.get(f"/api/v1/scans/{scan_id}/providers")
     body = r3.json()
-    assert body["pagination"]["total"] >= 10
+    # v0.4 records one observation per real provider call
+    # plus the structural stage observations. A scan with no
+    # components still has at least 6 structural rows
+    # (intake, archive_validation, manifest_discovery,
+    # dependency_parsing, rule_engine, export_generation)
+    # plus 2 from the workflow and scorecard providers.
+    assert body["pagination"]["total"] >= 8
     statuses = [item["status"] for item in body["items"]]
     assert "not_requested" in statuses
+    providers = {item["provider"] for item in body["items"]}
+    # The v0.4 wiring ensures the structural providers are
+    # always present, even when the scan has no components.
+    assert "filesystem" in providers
+    assert "rule_engine" in providers
 
 
 def test_stages_endpoint_returns_pipeline(client) -> None:

@@ -3,6 +3,7 @@ import type {
   Advisory,
   Component,
   ComponentAdvisory,
+  ComponentEnrichment,
   DependencyPath,
   ExportDescriptor,
   ExportFormat,
@@ -237,6 +238,20 @@ export const api = {
     }),
   listAdvisories: (scanId: number) =>
     apiClient.get<Paginated<Advisory>>(`/scans/${scanId}/advisories`),
+
+  // ---- Component enrichments (v0.4) ----
+  listEnrichments: (
+    scanId: number,
+    filters: { page?: number; page_size?: number; ecosystem?: string; source_provenance?: string } = {}
+  ) =>
+    apiClient.get<Paginated<ComponentEnrichment>>(`/scans/${scanId}/enrichments`, {
+      query: buildQuery({
+        page: filters.page ?? 1,
+        page_size: filters.page_size ?? 50,
+        ecosystem: filters.ecosystem,
+        source_provenance: filters.source_provenance,
+      }),
+    }),
 
   // ---- Workflow findings ----
   listWorkflowFindings: (scanId: number, filters: ListWorkflowFindingsFilters = {}) =>

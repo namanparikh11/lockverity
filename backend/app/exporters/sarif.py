@@ -14,6 +14,7 @@ findings in the ``properties`` block.
 
 from __future__ import annotations
 
+import json
 from collections.abc import Callable
 from typing import Any
 
@@ -111,6 +112,28 @@ class SarifStaticFindingsExporter:
                         "lockverity:scan_run_id": str(scan.id),
                         "lockverity:scan_status": scan.status.value,
                         "lockverity:findings_skipped_no_location": skipped_count,
+                        # v0.4: surface the provider
+                        # provenance for every finding that
+                        # carries a non-local rule id. The
+                        # SARIF run stays a single
+                        # ``lockverity`` driver; the
+                        # ``properties`` block names the
+                        # upstream that supplied the
+                        # evidence so downstream tooling
+                        # can tell an OSV-derived
+                        # vulnerability finding from a
+                        # rule-engine finding.
+                        "lockverity:providers": sorted(
+                            {
+                                (
+                                    json.loads(f.evidence_json).get("provider")
+                                    if f.evidence_json
+                                    else None
+                                )
+                                or "local"
+                                for f in findings
+                            }
+                        ),
                     },
                     "results": sarif_results,
                 }
@@ -151,6 +174,22 @@ class SarifStaticFindingsExporter:
         }
         if region:
             location["physicalLocation"]["region"] = region
+        # v0.4: extract the provider name from the
+        # ``evidence_json`` envelope when present. A
+        # finding without one is local (rule engine) and
+        # we set ``provider="local"`` so downstream tools
+        # can tell a rule engine finding from a provider
+        # observation.
+        provider = "local"
+        if finding.evidence_json:
+            try:
+                envelope = json.loads(finding.evidence_json)
+            except (ValueError, TypeError):
+                envelope = None
+            if isinstance(envelope, dict):
+                raw_provider = envelope.get("provider")
+                if isinstance(raw_provider, str) and raw_provider:
+                    provider = raw_provider
         return {
             "ruleId": finding.rule_id,
             "level": _severity_to_sarif_level(finding.severity.value if finding.severity else None),
@@ -159,6 +198,7 @@ class SarifStaticFindingsExporter:
             "properties": {
                 "lockverity:stable_key": finding.stable_key,
                 "lockverity:remediation": finding.remediation or "",
+                "lockverity:provider": provider,
             },
         }
 

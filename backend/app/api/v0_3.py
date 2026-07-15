@@ -47,6 +47,7 @@ from app.schemas.intake import ScanRunRequest
 from app.schemas.scan import (
     AdvisoryRead,
     ComponentAdvisoryRead,
+    ComponentEnrichment,
     ComponentRead,
     DependencyPathEntry,
     DependencyPathRead,
@@ -91,6 +92,11 @@ class PaginatedOpenSSF(SchemaModel):
 
 class PaginatedLicences(SchemaModel):
     items: list[dict[str, Any]]
+    pagination: dict
+
+
+class PaginatedEnrichments(SchemaModel):
+    items: list[ComponentEnrichment]
     pagination: dict
 
 
@@ -210,6 +216,32 @@ def _parse_extras(evidence_json: str | None) -> dict[str, Any]:
     except (ValueError, TypeError):
         return {}
     return data if isinstance(data, dict) else {}
+
+
+def _parse_observation_evidence(
+    raw: str | None,
+) -> dict[str, Any] | None:
+    """Parse the structured evidence envelope on a ProviderObservation.
+
+    v0.4 stores successful provider payload metadata
+    (licence observations, dependency counts, package
+    identity, fetched_at) in a dedicated bounded JSON column
+    on ``provider_observations``. The endpoint never has to
+    parse ``error_summary`` to recover it; ``error_summary``
+    is reserved for redacted error text on failed calls.
+
+    Returns the parsed envelope (or ``None`` when the column
+    is empty, malformed, or unparseable). Malformed values
+    are reported as a parse failure to the caller; we never
+    guess the contents of a corrupt envelope.
+    """
+    if not raw:
+        return None
+    try:
+        parsed = json.loads(raw)
+    except (ValueError, TypeError):
+        return None
+    return parsed if isinstance(parsed, dict) else None
 
 
 # ----------------------------------------------------------------------
@@ -472,13 +504,38 @@ def _component_advisory_to_read(
             parsed = [fixed]
     else:
         parsed = []
+    # v0.4: pull aliases + fetched_at from the evidence_json
+    # payload the provider service attached when it persisted
+    # the row. The evidence envelope is a small JSON document;
+    # a missing field is treated as a missing record, never
+    # as a fabricated value.
+    aliases: list[str] = []
+    fetched_at: str | None = None
+    if ca.evidence_json:
+        try:
+            evidence = json.loads(ca.evidence_json)
+        except (ValueError, TypeError):
+            evidence = None
+        if isinstance(evidence, dict):
+            raw_aliases = evidence.get("aliases")
+            if isinstance(raw_aliases, list):
+                aliases = [a for a in raw_aliases if isinstance(a, str)]
+            fetched_at_value = evidence.get("fetched_at")
+            if isinstance(fetched_at_value, str):
+                fetched_at = fetched_at_value
     return ComponentAdvisoryRead(
         id=ca.id,
         component_id=ca.component_id,
-        advisory_id=ca.advisory_id,
+        advisory_id=advisory.id,
         fixed_versions=parsed if isinstance(parsed, list) else [],
         severity_source=ca.severity_source,
-        confidence=ca.confidence,
+        # v0.4 honesty fix: ComponentAdvisory does not carry a
+        # confidence field, and we must never infer one from
+        # the severity score, the upstream provider, or the
+        # existence of the advisory. OSV does not supply a
+        # confidence value, so the response carries ``None``
+        # and the frontend renders "Not supplied" / "Unknown".
+        confidence=None,
         dependency_paths=[],
         withdrawn=False,
         # Enriched from the joined row:
@@ -494,6 +551,10 @@ def _component_advisory_to_read(
         affected=ca.affected,
         severity_label=ca.severity_label,
         severity_score=ca.severity_score,
+        # v0.4 additions
+        provider_provenance=advisory.source,
+        aliases=aliases,
+        fetched_at=fetched_at,
     )
 
 
@@ -719,6 +780,150 @@ def _rule_filter_for_licence_review(status: str) -> tuple[str, ...] | None:
     if status == "unreviewed":
         return ("LOCK-LIC-001", "LOCK-LIC-002", "LOCK-LIC-004")
     return None
+
+
+# ----------------------------------------------------------------------
+# ----------------------------------------------------------------------
+# Component enrichments (deps.dev / v0.4)
+# ----------------------------------------------------------------------
+@router.get(
+    "/{scan_id}/enrichments",
+    response_model=PaginatedEnrichments,
+    summary="Per-component enrichment observations for a scan.",
+)
+def list_enrichments(
+    scan_id: int,
+    session: DBSession,
+    page_params: PageParamsDep,
+    ecosystem: str | None = Query(default=None),
+    source_provenance: str | None = Query(default=None),
+) -> PaginatedEnrichments:
+    """List the per-component enrichment observations recorded for a scan.
+
+    The endpoint surfaces the v0.4 deps.dev-backed enrichments
+    and pairs them with their ``provider_observations`` row
+    (status, fetched_at, cache_status, unavailable_reason).
+    Components that were never enriched (e.g. unsupported
+    ecosystem, no concrete version) are still included with
+    ``provider_status=null`` and ``unavailable_reason``
+    describing why; the frontend renders them as honest
+    empty states, not as fabricated results.
+    """
+    _get_scan_or_404(session, scan_id)
+    stmt = select(Component).where(Component.scan_run_id == scan_id).order_by(Component.id.asc())
+    count_stmt = select(func.count()).select_from(Component).where(Component.scan_run_id == scan_id)
+    if ecosystem is not None:
+        stmt = stmt.where(Component.ecosystem == ecosystem)
+        count_stmt = count_stmt.where(Component.ecosystem == ecosystem)
+    total = session.execute(count_stmt).scalar_one() or 0
+    stmt = stmt.limit(page_params.page_size).offset((page_params.page - 1) * page_params.page_size)
+    components = session.execute(stmt).scalars().all()
+    items = [_component_to_enrichment(session, c) for c in components]
+    if source_provenance is not None:
+        items = [i for i in items if (i.source_provenance or "") == source_provenance]
+    return PaginatedEnrichments(
+        items=items,
+        pagination=pagination(
+            page=page_params.page,
+            page_size=page_params.page_size,
+            total=int(total),
+        ).model_dump(),
+    )
+
+
+def _component_to_enrichment(session: Session, component: Component) -> ComponentEnrichment:
+    """Project a Component into its enrichment view.
+
+    The shape is intentionally narrow: the frontend uses it
+    to render the freshness indicator and the licence
+    provenance, not the full component record.
+    """
+    # The latest ``deps_dev`` observation **for this
+    # component** is the canonical enrichment record.
+    # Earlier versions of the read path selected the
+    # latest per-(scan, provider) row, which leaked
+    # per-component error reasons to other components in
+    # the same scan (a component with a concrete normalised
+    # version would receive the "missing concrete version"
+    # reason from a different component whose deps.dev
+    # lookup failed). The v0.4 fix binds every per-component
+    # ``ProviderObservation`` to ``component_id`` and the
+    # endpoint filters on that key.
+    from app.models.provider_observation import ProviderObservation
+
+    obs = (
+        session.query(ProviderObservation)
+        .filter(
+            ProviderObservation.scan_run_id == component.scan_run_id,
+            ProviderObservation.provider == "deps_dev",
+            ProviderObservation.component_id == component.id,
+        )
+        .order_by(ProviderObservation.id.desc())
+        .first()
+    )
+    license_observations: list[str] = []
+    dependency_count: int | None = None
+    fetched_at: str | None = None
+    cache_status = "miss"
+    provider_status: str | None = None
+    unavailable_reason: str | None = None
+    provider_url: str | None = None
+    source_provenance: str | None = None
+    if obs is not None:
+        provider_status = obs.status.value if hasattr(obs.status, "value") else str(obs.status)
+        cache_status = obs.cache_status or "miss"
+        if obs.completed_at is not None:
+            fetched_at = obs.completed_at.isoformat().replace("+00:00", "Z")
+        # v0.4 honesty fix: read the structured evidence
+        # envelope from the dedicated ``evidence_json``
+        # column. ``error_summary`` is for redacted error
+        # text only; we never recover a successful payload
+        # by parsing it. When the column is empty (legacy
+        # rows, or an unconfigured observation) the
+        # licence / dependency count simply stay empty.
+        if obs.evidence_json:
+            envelope = _parse_observation_evidence(obs.evidence_json)
+            if envelope is not None:
+                raw_licences = envelope.get("licences")
+                if isinstance(raw_licences, list):
+                    license_observations = [str(x) for x in raw_licences if x is not None]
+                raw_dep = envelope.get("dependency_count")
+                if isinstance(raw_dep, int):
+                    dependency_count = raw_dep
+        if obs.error_summary:
+            unavailable_reason = obs.error_summary
+        # The provider URL we *would* have queried. The
+        # frontend uses it to surface a "View at provider"
+        # link, never as evidence of a successful call.
+        if component.ecosystem and component.package_name:
+            provider_url = (
+                f"https://api.deps.dev/v3/systems/{component.ecosystem}"
+                f"/packages/{component.package_name}/versions/"
+                f"{component.version or ''}"
+            )
+        if obs.status.value in {"available", "partial", "cached"}:
+            source_provenance = "deps.dev"
+    return ComponentEnrichment(
+        component_id=component.id,
+        ecosystem=component.ecosystem,
+        package_name=component.package_name,
+        version=component.version,
+        fetched_at=fetched_at,
+        cache_status=cache_status,
+        provider_url=provider_url,
+        source_provenance=source_provenance,
+        license_observations=license_observations,
+        dependency_count=dependency_count,
+        provider_status=provider_status,
+        unavailable_reason=unavailable_reason,
+        # The structured evidence envelope from the
+        # ``provider_observations.evidence_json`` column.
+        # ``None`` for failed / never-queried rows; a JSON
+        # object with ``licences`` and ``dependency_count``
+        # for successful rows. The endpoint never fabricates
+        # values.
+        evidence=(_parse_observation_evidence(obs.evidence_json) if obs is not None else None),
+    )
 
 
 # ----------------------------------------------------------------------

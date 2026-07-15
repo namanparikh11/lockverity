@@ -64,23 +64,30 @@ _LOCAL_STAGES: frozenset[StageType] = frozenset(
 # Stages v0.3 runs locally. v0.2 recorded these as
 # ``not_requested``; v0.3 invokes the analysis pipeline so a scan
 # produces real components, dependency edges, workflow findings,
-# and rule-based findings.
+# and rule-based findings. v0.4 expands the local set to the
+# provider-backed stages (dependency_enrichment,
+# vulnerability_query, repository_posture); the pipeline still
+# owns their execution, but a single stage failure does not
+# erase the local analysis.
 _LOCAL_V03_STAGES: frozenset[StageType] = frozenset(
     {
         StageType.DEPENDENCY_PARSING,
+        StageType.DEPENDENCY_ENRICHMENT,
+        StageType.VULNERABILITY_QUERY,
         StageType.WORKFLOW_ANALYSIS,
+        StageType.REPOSITORY_POSTURE,
         StageType.FINDING_RECONCILIATION,
     }
 )
 
-# Stages that are still recorded as ``not_requested`` in v0.3.
+# Stages that are still recorded as ``not_requested`` in v0.4.
 # The stage is marked ``skipped`` and a provider observation is
-# written so the frontend can render the truth.
+# written so the frontend can render the truth. Export
+# generation is still a local convenience: the export routes
+# build the artefact on demand rather than as part of the
+# pipeline.
 _REMOTE_STAGES: frozenset[StageType] = frozenset(
     {
-        StageType.DEPENDENCY_ENRICHMENT,
-        StageType.VULNERABILITY_QUERY,
-        StageType.REPOSITORY_POSTURE,
         StageType.EXPORT_GENERATION,
     }
 )
@@ -282,13 +289,12 @@ class ScanOrchestrator:
 
         # Mark every v0.3 local stage RUNNING so the UI reflects
         # the work, then run the v0.3 pipeline as one batch. The
-        # pipeline itself records the v0.2 remote stages (vuln,
-        # posture, etc.) as ``skipped`` with the appropriate
+        # pipeline itself records the v0.2 remote stages (export
+        # generation) as ``skipped`` with the appropriate
         # provider observations, so we do not pre-mark them
-        # here. The two stages the pipeline does not touch at
-        # all (DEPENDENCY_ENRICHMENT and EXPORT_GENERATION) are
-        # marked SKIPPED here so the UI sees a complete stage
-        # history.
+        # here. The single stage the pipeline does not touch at
+        # all (EXPORT_GENERATION) is marked SKIPPED here so the
+        # UI sees a complete stage history.
         for stage_type in _stage_pipeline():
             if cancellation.is_set():
                 return
@@ -296,7 +302,6 @@ class ScanOrchestrator:
                 continue
             if stage_type not in _LOCAL_V03_STAGES:
                 if stage_type in {
-                    StageType.DEPENDENCY_ENRICHMENT,
                     StageType.EXPORT_GENERATION,
                 }:
                     self._complete_not_requested(
@@ -371,6 +376,25 @@ class ScanOrchestrator:
                 stage = stage_repo.get_stage(session, scan_id, stage_type)
                 if stage is None:
                     continue
+                # For provider-backed stages the
+                # ``provider_status`` column is the truthful
+                # independent record of whether the call
+                # succeeded. We read the latest observation
+                # for the matching provider and copy the
+                # status onto the stage row so the UI does
+                # not have to join ``ProviderObservation``
+                # at render time. The column was always
+                # nullable; we only set it when we actually
+                # have a value to report.
+                if stage_type in {
+                    StageType.VULNERABILITY_QUERY,
+                    StageType.DEPENDENCY_ENRICHMENT,
+                    StageType.REPOSITORY_POSTURE,
+                }:
+                    stage.provider = self._provider_name_for_stage(stage_type)
+                    stage.provider_status = self._latest_provider_status(
+                        session, scan_id, stage.provider
+                    )
                 if outcome.status == "completed":
                     assert_legal_stage_transition(stage.status, StageStatus.COMPLETED)
                     stage.status = StageStatus.COMPLETED
@@ -381,25 +405,50 @@ class ScanOrchestrator:
                     assert_legal_stage_transition(stage.status, StageStatus.FAILED)
                     stage.status = StageStatus.FAILED
                 else:
-                    # "skipped": for the v0.2 remote stages, we
-                    # never marked them RUNNING (the pipeline
-                    # only touches the v0.3 local stages), so the
-                    # legal transition is PENDING -> SKIPPED.
-                    # For the v0.3 local stages, we marked them
-                    # RUNNING, and a "skipped" outcome means the
-                    # pipeline had nothing to do - we transition
-                    # through COMPLETED to satisfy the state
-                    # machine.
+                    # "skipped".
+                    #
+                    # Two cases:
+                    #
+                    # 1. The stage was never started (PENDING).
+                    #    This is the v0.2 remote-stage path;
+                    #    EXPORT_GENERATION is the canonical
+                    #    example. The legal transition is
+                    #    PENDING -> SKIPPED.
+                    #
+                    # 2. The stage was started (RUNNING) and the
+                    #    pipeline reports a skip. The previous
+                    #    v0.4 implementation laundered this
+                    #    through COMPLETED; that is incorrect
+                    #    when the skip is because a provider was
+                    #    unavailable, because the UI / API
+                    #    would then expose the stage as a
+                    #    successful verified-clean provider
+                    #    call. The truthful terminal transition
+                    #    for a RUNNING stage is PARTIAL, which
+                    #    is already legal under
+                    #    ``_STAGE_TRANSITIONS``. We use
+                    #    ``outcome.failure_code == "provider_unavailable"``
+                    #    to distinguish the provider failure
+                    #    from the legitimate ``no work to do``
+                    #    skip (e.g. zero components, no
+                    #    workflow files); the latter keeps the
+                    #    RUNNING -> COMPLETED mapping because
+                    #    no provider work was attempted.
                     if stage.status == StageStatus.PENDING:
                         assert_legal_stage_transition(stage.status, StageStatus.SKIPPED)
                         stage.status = StageStatus.SKIPPED
                         stage.provider_status = ProviderStatus.NOT_REQUESTED.value
+                    elif outcome.failure_code == "provider_unavailable":
+                        assert_legal_stage_transition(stage.status, StageStatus.PARTIAL)
+                        stage.status = StageStatus.PARTIAL
+                        if outcome.failure_summary is not None:
+                            stage.failure_summary = outcome.failure_summary[:2048]
                     else:
                         assert_legal_stage_transition(stage.status, StageStatus.COMPLETED)
                         stage.status = StageStatus.COMPLETED
                 stage.records_processed = outcome.records_processed
                 stage.failure_code = outcome.failure_code
-                if outcome.failure_summary is not None:
+                if outcome.failure_summary is not None and stage.failure_summary is None:
                     stage.failure_summary = outcome.failure_summary[:2048]
                 stage.completed_at = utcnow()
                 session.commit()
@@ -422,6 +471,55 @@ class ScanOrchestrator:
             stage.status = StageStatus.RUNNING
             stage.started_at = utcnow()
             session.commit()
+
+    @staticmethod
+    def _provider_name_for_stage(stage_type: StageType) -> str:
+        """Map a v0.4 provider-backed stage to the provider name.
+
+        Used by :meth:`_apply_pipeline_outcome` to populate
+        the truthful ``provider_status`` column on the
+        ``ScanStage`` row. The mapping is intentionally
+        narrow: only the three provider-backed stages have
+        a ``provider`` value.
+        """
+        if stage_type == StageType.VULNERABILITY_QUERY:
+            return "osv"
+        if stage_type == StageType.DEPENDENCY_ENRICHMENT:
+            return "deps_dev"
+        if stage_type == StageType.REPOSITORY_POSTURE:
+            return "openssf"
+        return ""
+
+    @staticmethod
+    def _latest_provider_status(session: Session, scan_id: int, provider: str) -> str | None:
+        """Read the latest ``ProviderObservation.status`` for ``provider``.
+
+        Returns the string value of the latest observation's
+        status (``"available"``, ``"unavailable"``,
+        ``"rate_limited"``, ``"partial"``,
+        ``"not_requested"``, ``"cached"``) or ``None`` if
+        no observation was recorded. The result is
+        independent of the ``ScanStage`` status: a stage
+        may be ``PARTIAL`` because the provider was
+        ``unavailable``, and the UI uses the
+        ``provider_status`` column to render the truthful
+        "unavailable" pill.
+        """
+        if not provider:
+            return None
+        row = (
+            session.query(ProviderObservation)
+            .filter(
+                ProviderObservation.scan_run_id == scan_id,
+                ProviderObservation.provider == provider,
+            )
+            .order_by(ProviderObservation.id.desc())
+            .first()
+        )
+        if row is None:
+            return None
+        status = row.status
+        return status.value if hasattr(status, "value") else str(status)
 
     def _read_stage_record(
         self,

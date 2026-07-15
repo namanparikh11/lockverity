@@ -19,6 +19,7 @@ The exporter is read-only; it never mutates the database.
 
 from __future__ import annotations
 
+import json
 from collections.abc import Callable
 from typing import Any
 
@@ -211,6 +212,24 @@ class CycloneDxExporter:
                     "source": {"name": "lockverity"},
                     "severity": finding.severity.value,
                 }
+            # v0.4: surface the provider name and the
+            # external advisory id from the evidence
+            # envelope when present. A CycloneDX consumer
+            # that only sees this SBOM can tell an
+            # OSV-derived vulnerability finding from a
+            # rule-engine finding.
+            properties: list[dict[str, Any]] = []
+            provider = "local"
+            if finding.evidence_json:
+                try:
+                    envelope = json.loads(finding.evidence_json)
+                except (ValueError, TypeError):
+                    envelope = None
+                if isinstance(envelope, dict):
+                    raw_provider = envelope.get("provider")
+                    if isinstance(raw_provider, str) and raw_provider:
+                        provider = raw_provider
+            properties.append({"name": "lockverity:provider", "value": provider})
             out.append(
                 {
                     "id": finding.rule_id,
@@ -222,6 +241,7 @@ class CycloneDxExporter:
                             "ref": f"finding-{finding.stable_key[:16]}",
                         }
                     ],
+                    "properties": properties,
                 }
             )
         return out

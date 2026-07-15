@@ -3,16 +3,23 @@ import { useParams } from "react-router-dom";
 
 import { api } from "@/api/api";
 import { isNotImplemented } from "@/api/fallback";
-import type { LicenceAssertion, PageMeta } from "@/api/types";
+import type {
+  ComponentEnrichment,
+  LicenceAssertion,
+  PageMeta,
+  ProviderStatus,
+} from "@/api/types";
 import { DataCompletenessNotice } from "@/components/DataCompletenessNotice";
 import { EmptyState } from "@/components/EmptyState";
 import { ErrorState } from "@/components/ErrorState";
 import { FilterBar, SelectFilter } from "@/components/FilterBar";
 import { PageHeader } from "@/components/PageHeader";
 import { Pagination } from "@/components/Pagination";
+import { ProviderStatusBadge } from "@/components/ProviderStatusBadge";
 import { ResponsiveTable } from "@/components/ResponsiveTable";
 import { Skeleton } from "@/components/Skeleton";
 import { StatusBadge } from "@/components/StatusBadge";
+import { formatTimestamp } from "@/utils/time";
 
 const SCOPE_OPTIONS = [
   { value: "all", label: "All" },
@@ -194,8 +201,90 @@ export function LicenceInventoryPage() {
           <div className="mt-4">
             <Pagination meta={meta} onPageChange={setPage} />
           </div>
+          <div className="mt-4">
+            <EnrichmentSummary scanId={sid} />
+          </div>
         </>
       )}
     </>
+  );
+}
+
+function EnrichmentSummary({ scanId }: { scanId: number }) {
+  const [items, setItems] = useState<ComponentEnrichment[] | null>(null);
+  const [error, setError] = useState<unknown>(null);
+  useEffect(() => {
+    const controller = new AbortController();
+    setItems(null);
+    setError(null);
+    api
+      .listEnrichments(scanId, { page: 1, page_size: 200 })
+      .then((r) => {
+        if (controller.signal.aborted) return;
+        setItems(r.items);
+      })
+      .catch((err) => {
+        if (controller.signal.aborted) return;
+        if (!isNotImplemented(err)) {
+          setError(err);
+        } else {
+          setItems([]);
+        }
+      });
+    return () => controller.abort();
+  }, [scanId]);
+  if (error) {
+    return (
+      <DataCompletenessNotice
+        title="Could not load enrichment metadata"
+        description="The deps.dev enrichment endpoint did not respond. The licence inventory above still reflects the rule engine's findings; the missing enrichment data is logged on the provider status page."
+        tone="warn"
+      />
+    );
+  }
+  if (items === null) {
+    return <Skeleton rows={2} />;
+  }
+  if (items.length === 0) {
+    return (
+      <DataCompletenessNotice
+        title="No deps.dev enrichment for this scan"
+        description="This scan's components were not enriched. The licence inventory above still reflects the rule engine's findings; provider status is on the provider page."
+        tone="info"
+      />
+    );
+  }
+  const fresh = items.filter((i) => i.provider_status === "available");
+  const cached = items.filter((i) => i.provider_status === "cached");
+  const unavailable = items.filter(
+    (i) => i.provider_status === "unavailable" || i.provider_status === "partial"
+  );
+  return (
+    <div className="rounded-md border border-ink-200 bg-ink-50 p-3 text-sm text-ink-700">
+      <p className="font-semibold">deps.dev enrichment summary</p>
+      <p className="mt-1 text-xs text-ink-500">
+        {items.length} components observed · {fresh.length} fresh · {cached.length} cached ·{" "}
+        {unavailable.length} unavailable
+      </p>
+      <ul className="mt-2 space-y-1 text-xs">
+        {items.slice(0, 5).map((i) => (
+          <li key={i.component_id} className="flex flex-wrap items-center gap-2">
+            <span className="font-mono text-ink-800">{i.package_name}</span>
+            <span className="text-ink-500">@ {i.version ?? "—"}</span>
+            {i.provider_status ? (
+              <ProviderStatusBadge status={i.provider_status as ProviderStatus} />
+            ) : null}
+            {i.cache_status && i.cache_status !== "miss" ? (
+              <span className="rounded bg-ink-100 px-1.5 py-0.5 text-[10px] text-ink-600">
+                cache: {i.cache_status}
+              </span>
+            ) : null}
+            {i.fetched_at ? (
+              <span className="text-ink-500">{formatTimestamp(i.fetched_at)}</span>
+            ) : null}
+          </li>
+        ))}
+      </ul>
+    </div>
   );
 }

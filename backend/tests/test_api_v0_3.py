@@ -337,13 +337,28 @@ def test_compare_scans_rejects_different_repositories(app_config, workspace_root
 
 
 def test_orchestrator_end_to_end_pipeline_writes_components(app_config, workspace_root) -> None:
-    """A real orchestrator run should write components for the discovered manifests."""
+    """A real orchestrator run should write components for the discovered manifests.
+
+    v0.4 honesty fix: the scan may finish as ``partial`` if
+    the provider network is unavailable. The previous
+    v0.3 baseline asserted ``completed`` because the
+    state machine laundered provider-unavailable stages
+    through ``COMPLETED``. The v0.4 contract accepts
+    either ``completed`` (all providers reachable) or
+    ``partial`` (a provider-backed stage saw an
+    unavailable observation); both shapes are truthful
+    given the network state of the test environment.
+    """
     with _db_session.SessionLocal() as s:
         scan_id, _, _ = _setup_scan_with_zip(s, workspace_root, include_workflow=True)
         s.commit()
     orchestrator = ScanOrchestrator(_db_session.SessionLocal)
     outcome = orchestrator.run(scan_id)
-    assert outcome.final_status == ScanStatus.COMPLETED
+    assert outcome.final_status in {ScanStatus.COMPLETED, ScanStatus.PARTIAL}, (
+        f"v0.4 honest failure semantics: a scan with unavailable "
+        f"provider data must finish 'partial', not 'failed'; "
+        f"got {outcome.final_status!r}"
+    )
     # The orchestrator should have at least one component row
     # for the left-pad dependency declared in package.json.
     with _db_session.SessionLocal() as s:

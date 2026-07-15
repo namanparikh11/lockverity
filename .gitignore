@@ -113,6 +113,12 @@ uploads/
 tmp/
 tmp.*
 
+# Frontend runtime / dev-only artefacts (vite proxy log,
+# convenience start scripts, etc.). The frontend has no
+# committed runtime state; the v0.4 integrated smoke runs
+# Vite through the standard ``npm run dev`` entry point.
+frontend/var/
+
 # Generated coverage / build reports
 backend/coverage/
 frontend/coverage/
