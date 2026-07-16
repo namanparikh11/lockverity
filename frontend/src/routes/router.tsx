@@ -14,6 +14,7 @@ import { ProviderHealthPage } from "@/pages/ProviderHealthPage";
 import { RepositoriesPage } from "@/pages/RepositoriesPage";
 import { RepositoryDetailsPage } from "@/pages/RepositoryDetailsPage";
 import { ScanComparisonPage } from "@/pages/ScanComparisonPage";
+import { ScanCompareSelectPage } from "@/pages/ScanCompareSelectPage";
 import { ScanDetailsPage } from "@/pages/ScanDetailsPage";
 import { ScansIndexPage } from "@/pages/ScansIndexPage";
 import { UploadArchivePage } from "@/pages/UploadArchivePage";
@@ -70,6 +71,10 @@ export const router = createBrowserRouter([
       {
         path: "/scans/:scanId/exports",
         element: <ExportCenterPage />,
+      },
+      {
+        path: "/scans/:scanId/compare-select",
+        element: <ScanCompareSelectPage />,
       },
       {
         path: "/scans/:scanId/compare/:baseScanId",

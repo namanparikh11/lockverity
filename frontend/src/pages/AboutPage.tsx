@@ -31,7 +31,7 @@ export function AboutPage() {
         </p>
 
         <h2 className="mt-6 text-base font-semibold text-ink-900">
-          What v0.2 implements today
+          What v0.5 implements today
         </h2>
         <p className="text-xs uppercase tracking-wide text-ink-500">
           All items in this list have direct, exercised code paths in this
@@ -108,15 +108,15 @@ export function AboutPage() {
         </ul>
 
         <h2 className="mt-6 text-base font-semibold text-ink-900">
-          What v0.2 does <em>not</em> include
+          What v0.5 does <em>not</em> include
         </h2>
         <p className="text-xs uppercase tracking-wide text-ink-500">
           Planned for later milestones, not implemented today.
         </p>
         <ul className="ml-5 list-disc space-y-1">
           <li>Authentication, multi-tenancy, billing, or self-service signup.</li>
-          <li>Continuous / scheduled scans. v0.2 scans are explicit operator actions.</li>
-          <li>Private GitHub repository analysis (v0.2 is public-only; the
+          <li>Continuous / scheduled scans. v0.5 scans are explicit operator actions.</li>
+          <li>Private GitHub repository analysis (v0.5 is public-only; the
             <code>LOCKVERITY_GITHUB_TOKEN</code> environment variable is
             honoured for public rate limits but private endpoints are out of
             scope).

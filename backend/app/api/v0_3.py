@@ -14,7 +14,6 @@ from __future__ import annotations
 
 import json
 import logging
-from datetime import UTC, datetime
 from typing import Any
 
 from fastapi import APIRouter, Query, Response
@@ -39,10 +38,10 @@ from app.models.finding import (
     FindingCategory,
     FindingSeverity,
 )
-from app.models.manifest import Manifest
-from app.models.scan_run import ScanRun, ScanStatus
+from app.models.scan_run import ScanRun
 from app.providers.results import ProviderSuccess
 from app.schemas.common import SchemaModel
+from app.schemas.comparison import ScanComparisonResponse
 from app.schemas.intake import ScanRunRequest
 from app.schemas.scan import (
     AdvisoryRead,
@@ -51,10 +50,9 @@ from app.schemas.scan import (
     ComponentRead,
     DependencyPathEntry,
     DependencyPathRead,
-    ScanComparisonRead,
     WorkflowFindingRead,
 )
-from app.services import scan_service
+from app.services import comparison_service, scan_service
 from app.utils.errors import ApiError, ApiErrorCode
 
 logger = logging.getLogger("lockverity.api.v0_3")
@@ -931,167 +929,33 @@ def _component_to_enrichment(session: Session, component: Component) -> Componen
 # ----------------------------------------------------------------------
 @router.get(
     "/{head_scan_id}/compare/{base_scan_id}",
-    response_model=ScanComparisonRead,
+    response_model=ScanComparisonResponse,
     summary="Compare two scans of the same repository.",
 )
 def compare_scans(
     head_scan_id: int,
     base_scan_id: int,
     session: DBSession,
-) -> ScanComparisonRead:
-    base = _get_scan_or_404(session, base_scan_id)
-    head = _get_scan_or_404(session, head_scan_id)
-    if base.repository_id != head.repository_id:
-        raise ApiError(
-            ApiErrorCode.VALIDATION_ERROR,
-            "Scans must belong to the same repository.",
-            details={
-                "base_repository_id": base.repository_id,
-                "head_repository_id": head.repository_id,
-            },
-        )
-    base_components = _components_by_name(session, base_scan_id)
-    head_components = _components_by_name(session, head_scan_id)
-    component_rows = _build_component_comparison(base_components, head_components)
-    base_findings = _findings_by_key(session, base_scan_id)
-    head_findings = _findings_by_key(session, head_scan_id)
-    finding_rows = _build_finding_comparison(base_findings, head_findings)
-    base_manifests = _manifests_by_path(session, base_scan_id)
-    head_manifests = _manifests_by_path(session, head_scan_id)
-    manifest_rows = _build_manifest_comparison(base_manifests, head_manifests)
-    unable: list[str] = []
-    if head.status == ScanStatus.FAILED:
-        unable.append("head scan failed")
-    if base.status == ScanStatus.FAILED:
-        unable.append("base scan failed")
-    return ScanComparisonRead(
-        base_scan_id=base.id,
-        head_scan_id=head.id,
-        repository_id=head.repository_id,
-        generated_at=datetime.now(UTC),
-        components=component_rows,
-        findings=finding_rows,
-        manifests=manifest_rows,
-        workflows=[],
-        providers=[],
-        unable_to_determine=unable,
+) -> ScanComparisonResponse:
+    """Read-only, evidence-aware comparison of two terminal scans.
+
+    The comparator is the single source of truth for
+    cross-scan evidence. It never triggers a rescan, never
+    downloads a repository, never extracts an archive, never
+    calls an external provider, and never writes to the
+    database. The response carries the v0.5 evidence-honest
+    state vocabulary (``newly_observed``,
+    ``still_observed``, ``no_longer_observed``,
+    ``changed_observation``, ``coverage_changed``,
+    ``comparison_indeterminate``) and a coverage summary so
+    the frontend can render "no differences observed"
+    without conflating it with "all clear".
+    """
+    return comparison_service.compare_scans(
+        session,
+        base_scan_id=base_scan_id,
+        head_scan_id=head_scan_id,
     )
-
-
-def _components_by_name(session: Session, scan_id: int) -> dict[str, Component]:
-    rows = (
-        session.execute(select(Component).where(Component.scan_run_id == scan_id)).scalars().all()
-    )
-    out: dict[str, Component] = {}
-    for row in rows:
-        # When the same package appears multiple times (one per
-        # manifest), prefer the lockfile-resolved version.
-        existing = out.get(row.package_name)
-        if existing is None or (row.version and not existing.version):
-            out[row.package_name] = row
-    return out
-
-
-def _findings_by_key(session: Session, scan_id: int) -> dict[str, Finding]:
-    rows = session.execute(select(Finding).where(Finding.scan_run_id == scan_id)).scalars().all()
-    return {row.stable_key: row for row in rows}
-
-
-def _manifests_by_path(session: Session, scan_id: int) -> dict[str, Manifest]:
-    rows = session.execute(select(Manifest).where(Manifest.scan_run_id == scan_id)).scalars().all()
-    return {row.path: row for row in rows}
-
-
-def _build_component_comparison(
-    base: dict[str, Component],
-    head: dict[str, Component],
-) -> list[dict[str, Any]]:
-    rows: list[dict[str, Any]] = []
-    for name in sorted(set(base) | set(head)):
-        b = base.get(name)
-        h = head.get(name)
-        if b and not h:
-            verdict = "removed"
-        elif h and not b:
-            verdict = "added"
-        elif b and h and b.version != h.version:
-            verdict = "updated"
-        else:
-            verdict = "persisting"
-        rows.append(
-            {
-                "package_name": name,
-                "ecosystem": (b or h).ecosystem if (b or h) else None,
-                "verdict": verdict,
-                "version_base": b.version if b else None,
-                "version_head": h.version if h else None,
-                "direct_base": b.direct if b else None,
-                "direct_head": h.direct if h else None,
-                "dependency_path_changed": bool(b and h and b.version != h.version),
-            }
-        )
-    return rows
-
-
-def _build_finding_comparison(
-    base: dict[str, Finding],
-    head: dict[str, Finding],
-) -> list[dict[str, Any]]:
-    rows: list[dict[str, Any]] = []
-    for key in sorted(set(base) | set(head)):
-        b = base.get(key)
-        h = head.get(key)
-        if b and not h:
-            verdict = "resolved"
-        elif h and not b:
-            verdict = "added"
-        elif b and h and (b.severity != h.severity or b.confidence != h.confidence):
-            verdict = "updated"
-        else:
-            verdict = "persisting"
-        rows.append(
-            {
-                "stable_key": key,
-                "rule_id": (b or h).rule_id if (b or h) else "",
-                "title": (b or h).title if (b or h) else "",
-                "verdict": verdict,
-                "severity_base": b.severity if b else None,
-                "severity_head": h.severity if h else None,
-                "confidence_base": b.confidence if b else None,
-                "confidence_head": h.confidence if h else None,
-                "provider_attribution_base": [],
-                "provider_attribution_head": [],
-                "unable_to_determine": False,
-            }
-        )
-    return rows
-
-
-def _build_manifest_comparison(
-    base: dict[str, Manifest],
-    head: dict[str, Manifest],
-) -> list[dict[str, Any]]:
-    rows: list[dict[str, Any]] = []
-    for path in sorted(set(base) | set(head)):
-        b = base.get(path)
-        h = head.get(path)
-        if b and not h:
-            change = "removed"
-        elif h and not b:
-            change = "added"
-        elif b and h and b.content_sha256 != h.content_sha256:
-            change = "updated"
-        else:
-            change = "unchanged"
-        rows.append(
-            {
-                "manifest_path": path,
-                "base_hash": b.content_sha256 if b else None,
-                "head_hash": h.content_sha256 if h else None,
-                "change": change,
-            }
-        )
-    return rows
 
 
 # ----------------------------------------------------------------------

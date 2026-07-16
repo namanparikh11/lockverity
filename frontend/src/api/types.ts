@@ -395,65 +395,183 @@ export interface LicenceAssertion {
   updated_at: string;
 }
 
-// ---- Scan comparison (forward-compatible) ----
+// ---- Scan comparison (v0.5 evidence-aware) ----
 
-export type DiffVerdict = "added" | "removed" | "updated" | "persisting" | "resolved" | "new";
+// The v0.5 state vocabulary. The comparator never claims a
+// row was "fixed" or "resolved" - it only describes what the
+// evidence shows between two scans. The frontend renders these
+// as the only labels it ever uses for a comparison row.
+export type ObservationState =
+  | "newly_observed"
+  | "still_observed"
+  | "no_longer_observed"
+  | "changed_observation"
+  | "coverage_changed"
+  | "comparison_indeterminate";
 
-export interface ScanComparisonComponentRow {
-  package_name: string;
+export type ProviderStateName =
+  | "successful"
+  | "cached"
+  | "stale"
+  | "partial"
+  | "unavailable"
+  | "unsupported"
+  | "not_requested"
+  | "unknown";
+
+export interface ScanComparisonComponentObservation {
   ecosystem: string | null;
-  verdict: DiffVerdict;
-  version_base: string | null;
-  version_head: string | null;
+  package_name: string;
+  version: string | null;
+  manifest_paths: string[];
   direct_base: boolean | null;
   direct_head: boolean | null;
-  dependency_path_changed: boolean;
+  state: ObservationState;
 }
 
-export interface ScanComparisonFindingRow {
-  stable_key: string;
-  rule_id: string;
-  title: string;
-  verdict: DiffVerdict;
-  severity_base: FindingSeverity | null;
-  severity_head: FindingSeverity | null;
-  confidence_base: FindingConfidence | null;
-  confidence_head: FindingConfidence | null;
-  provider_attribution_base: string[];
-  provider_attribution_head: string[];
-  unable_to_determine: boolean;
-}
-
-export interface ScanComparisonManifestChange {
+export interface ScanComparisonManifestObservation {
   manifest_path: string;
-  base_hash: string | null;
-  head_hash: string | null;
-  change: "added" | "removed" | "updated" | "unchanged";
+  manifest_type: string | null;
+  ecosystem: string | null;
+  parse_status_base: string | null;
+  parse_status_head: string | null;
+  content_sha256_base: string | null;
+  content_sha256_head: string | null;
+  state: ObservationState;
 }
 
-export interface ScanComparisonWorkflowChange {
+export interface ScanComparisonDependencyPathChange {
+  ecosystem: string | null;
+  package_name: string;
+  version: string | null;
+  parent_chain_base: string[];
+  parent_chain_head: string[];
+  state: ObservationState;
+}
+
+export interface ScanComparisonWorkflowObservation {
+  rule_id: string;
   workflow_path: string;
-  change: "added" | "removed" | "updated" | "unchanged";
+  title: string;
+  severity_base: string | null;
+  severity_head: string | null;
+  confidence_base: string | null;
+  confidence_head: string | null;
+  stable_key: string;
+  state: ObservationState;
 }
 
-export interface ScanComparisonProviderDiff {
+export interface ScanComparisonVulnerabilityObservation {
+  component_id_base: number | null;
+  component_id_head: number | null;
+  ecosystem: string | null;
+  package_name: string | null;
+  package_version_base: string | null;
+  package_version_head: string | null;
+  advisory_source: string | null;
+  advisory_external_id: string | null;
+  advisory_canonical_id: string | null;
+  severity_label_base: string | null;
+  severity_score_base: number | null;
+  severity_label_head: string | null;
+  severity_score_head: number | null;
+  state: ObservationState;
+  provider_provenance_base: string | null;
+  provider_provenance_head: string | null;
+  fetched_at_base: string | null;
+  fetched_at_head: string | null;
+  ambiguity_reason: string | null;
+}
+
+export interface ScanComparisonLicenceObservation {
+  ecosystem: string | null;
+  package_name: string | null;
+  package_version_base: string | null;
+  package_version_head: string | null;
+  licence_base: string | null;
+  licence_head: string | null;
+  provider_base: string | null;
+  provider_head: string | null;
+  review_status_base: string | null;
+  review_status_head: string | null;
+  state: ObservationState;
+}
+
+export interface ScanComparisonOpenSSFObservation {
+  check_id: string;
+  name: string;
+  score_base: number | null;
+  score_head: number | null;
+  reason_base: string | null;
+  reason_head: string | null;
+  details_url: string | null;
+  source: string;
+  state: ObservationState;
+}
+
+export interface ScanComparisonProviderCoverage {
   provider: string;
-  base_status: ProviderStatus | null;
-  head_status: ProviderStatus | null;
-  unable_to_determine: boolean;
+  state_base: ProviderStateName;
+  state_head: ProviderStateName;
+  last_completed_at_base: string | null;
+  last_completed_at_head: string | null;
+  records_returned_base: number | null;
+  records_returned_head: number | null;
+  cache_status_base: string | null;
+  cache_status_head: string | null;
+  error_code_base: string | null;
+  error_summary_base: string | null;
+  error_code_head: string | null;
+  error_summary_head: string | null;
+  evidence_present_base: boolean;
+  evidence_present_head: boolean;
+  state: ObservationState;
+}
+
+export interface ScanComparisonCoverageSummary {
+  base_scan_status: string;
+  head_scan_status: string;
+  components_in_base: number;
+  components_in_head: number;
+  findings_in_base: number;
+  findings_in_head: number;
+  vulnerabilities_in_base: number;
+  vulnerabilities_in_head: number;
+  workflows_in_base: number;
+  workflows_in_head: number;
+  manifests_in_base: number;
+  manifests_in_head: number;
+  licence_assertions_in_base: number;
+  licence_assertions_in_head: number;
+  openssf_checks_in_base: number;
+  openssf_checks_in_head: number;
+  providers_with_changed_state: number;
+  providers_with_indeterminate_head: number;
 }
 
 export interface ScanComparison {
   base_scan_id: number;
   head_scan_id: number;
   repository_id: number;
+  base_trigger_type: string | null;
+  head_trigger_type: string | null;
+  base_resolved_commit_sha: string | null;
+  head_resolved_commit_sha: string | null;
+  base_analyzer_version: string | null;
+  head_analyzer_version: string | null;
+  base_completed_at: string | null;
+  head_completed_at: string | null;
   generated_at: string;
-  components: ScanComparisonComponentRow[];
-  findings: ScanComparisonFindingRow[];
-  manifests: ScanComparisonManifestChange[];
-  workflows: ScanComparisonWorkflowChange[];
-  providers: ScanComparisonProviderDiff[];
-  unable_to_determine: string[];
+  coverage: ScanComparisonCoverageSummary;
+  components: ScanComparisonComponentObservation[];
+  manifests: ScanComparisonManifestObservation[];
+  dependency_paths: ScanComparisonDependencyPathChange[];
+  workflows: ScanComparisonWorkflowObservation[];
+  vulnerabilities: ScanComparisonVulnerabilityObservation[];
+  licences: ScanComparisonLicenceObservation[];
+  openssf: ScanComparisonOpenSSFObservation[];
+  providers: ScanComparisonProviderCoverage[];
+  indeterminate_reasons: string[];
 }
 
 // ---- Provider health rollup (forward-compatible) ----

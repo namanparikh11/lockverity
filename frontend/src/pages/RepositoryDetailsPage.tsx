@@ -270,14 +270,17 @@ function CompareScansCard({
       .then((r) => {
         if (controller.signal.aborted) return;
         setScans(r.items);
-        const completed = r.items.filter(
-          (s) => s.status === "completed" || s.status === "partial" || s.status === "failed"
+        // Mirror the v0.5 comparator rule: only completed
+        // and partial scans are eligible. failed and cancelled
+        // scans are not trustworthy for comparison.
+        const eligible = r.items.filter(
+          (s) => s.status === "completed" || s.status === "partial"
         );
-        if (completed.length >= 2) {
-          setBase(completed[1].id);
-          setHead(completed[0].id);
-        } else if (completed.length === 1) {
-          setHead(completed[0].id);
+        if (eligible.length >= 2) {
+          setBase(eligible[1].id);
+          setHead(eligible[0].id);
+        } else if (eligible.length === 1) {
+          setHead(eligible[0].id);
         }
       })
       .catch(() => {
@@ -306,11 +309,15 @@ function CompareScansCard({
             onChange={(e) => setBase(Number.parseInt(e.target.value, 10))}
           >
             <option value="">— select —</option>
-            {(scans ?? []).map((scan) => (
-              <option key={scan.id} value={scan.id}>
-                #{scan.id} · {scan.status}
-              </option>
-            ))}
+            {(scans ?? [])
+              .filter(
+                (scan) => scan.status === "completed" || scan.status === "partial"
+              )
+              .map((scan) => (
+                <option key={scan.id} value={scan.id}>
+                  #{scan.id} · {scan.status}
+                </option>
+              ))}
           </select>
         </div>
         <div className="flex flex-col">
@@ -324,11 +331,15 @@ function CompareScansCard({
             onChange={(e) => setHead(Number.parseInt(e.target.value, 10))}
           >
             <option value="">— select —</option>
-            {(scans ?? []).map((scan) => (
-              <option key={scan.id} value={scan.id}>
-                #{scan.id} · {scan.status}
-              </option>
-            ))}
+            {(scans ?? [])
+              .filter(
+                (scan) => scan.status === "completed" || scan.status === "partial"
+              )
+              .map((scan) => (
+                <option key={scan.id} value={scan.id}>
+                  #{scan.id} · {scan.status}
+                </option>
+              ))}
           </select>
         </div>
         <Link

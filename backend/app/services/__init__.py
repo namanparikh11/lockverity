@@ -15,4 +15,6 @@ allowed to depend on services, never the other way around.
 
 from __future__ import annotations
 
-__all__: list[str] = []
+from app.services import comparison_service
+
+__all__: list[str] = ["comparison_service"]
