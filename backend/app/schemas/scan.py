@@ -219,14 +219,11 @@ class WorkflowFindingRead(SchemaModel):
     limitations: list[str]
 
 
-class ScanComparisonRead(SchemaModel):
-    base_scan_id: int
-    head_scan_id: int
-    repository_id: int
-    generated_at: datetime
-    components: list[dict]
-    findings: list[dict]
-    manifests: list[dict]
-    workflows: list[dict]
-    providers: list[dict]
-    unable_to_determine: list[str]
+# The v0.5 scan-comparison schema lives in
+# :file:`app/schemas/comparison.py`. The endpoint in
+# :mod:`app.api.v0_3` returns :class:`comparison.ScanComparisonResponse`
+# directly. The legacy ``ScanComparisonRead`` shape (a flat dict
+# per row, with the old "added / removed / updated / persisting /
+# resolved" vocabulary) has been removed: the new shape is
+# strictly typed, preserves provenance, and uses the v0.5
+# evidence-honest state vocabulary.

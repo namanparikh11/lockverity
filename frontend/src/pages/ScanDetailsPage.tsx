@@ -124,6 +124,12 @@ export function ScanDetailsPage() {
               Provider status
             </Link>
             <Link
+              to={`/scans/${scan.id}/compare-select`}
+              className="btn-secondary"
+            >
+              Compare with…
+            </Link>
+            <Link
               to={`/scans/${scan.id}/exports`}
               className="btn-primary"
             >

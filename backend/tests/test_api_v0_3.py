@@ -304,6 +304,12 @@ def test_compare_scans_endpoint_returns_diff(app_config, workspace_root) -> None
                 direct=True,
             )
         )
+        # The v0.5 comparison service requires both scans to
+        # be in a terminal state; move both scans forward.
+        scan_service.transition_scan(s, base_id, target=ScanStatus.RUNNING)
+        scan_service.transition_scan(s, base_id, target=ScanStatus.COMPLETED)
+        scan_service.transition_scan(s, head_id, target=ScanStatus.RUNNING)
+        scan_service.transition_scan(s, head_id, target=ScanStatus.COMPLETED)
         s.commit()
     client = TestClient(app)
     r = client.get(f"/api/v1/scans/{head_id}/compare/{base_id}")
@@ -313,9 +319,34 @@ def test_compare_scans_endpoint_returns_diff(app_config, workspace_root) -> None
     assert body["head_scan_id"] == head_id
     assert body["repository_id"] == repo_id
     assert isinstance(body["components"], list)
-    # We added a manifest with a component; the comparison
-    # should at least show the head scan's findings.
-    assert isinstance(body["findings"], list)
+    # v0.5 typed shape: components carry the evidence-honest
+    # state vocabulary, not the legacy "added/removed/updated"
+    # verdicts.
+    assert {c["state"] for c in body["components"]} <= {
+        "newly_observed",
+        "still_observed",
+        "no_longer_observed",
+        "changed_observation",
+        "coverage_changed",
+        "comparison_indeterminate",
+    }
+    # The v0.5 comparison surfaces manifests, workflow
+    # findings, vulnerabilities, licences, OpenSSF checks,
+    # and provider coverage; the read shape is preserved
+    # even when the lists are empty.
+    for key in (
+        "coverage",
+        "components",
+        "manifests",
+        "dependency_paths",
+        "workflows",
+        "vulnerabilities",
+        "licences",
+        "openssf",
+        "providers",
+        "indeterminate_reasons",
+    ):
+        assert key in body, f"missing top-level key {key!r} in {sorted(body)}"
 
 
 def test_compare_scans_rejects_different_repositories(app_config, workspace_root) -> None:
@@ -330,10 +361,50 @@ def test_compare_scans_rejects_different_repositories(app_config, workspace_root
             s, "https://github.com/anthropics/anthropic-sdk-python"
         )
         scan2.repository_id = repo2.id
+        # v0.5: both scans must be in a terminal state.
+        scan_service.transition_scan(s, scan1, target=ScanStatus.RUNNING)
+        scan_service.transition_scan(s, scan1, target=ScanStatus.COMPLETED)
+        scan_service.transition_scan(s, scan2.id, target=ScanStatus.RUNNING)
+        scan_service.transition_scan(s, scan2.id, target=ScanStatus.COMPLETED)
         s.commit()
     client = TestClient(app)
     r = client.get(f"/api/v1/scans/{scan2.id}/compare/{scan1}")
     assert r.status_code in {400, 422}
+
+
+def test_compare_scans_rejects_non_terminal_scans(app_config, workspace_root) -> None:
+    """A queued scan cannot be compared; the service rejects non-terminal inputs."""
+    with _db_session.SessionLocal() as s:
+        base_id, repo_id, _ = _setup_scan_with_zip(s, workspace_root)
+        head = scan_service.create_scan(
+            s, repository_id=repo_id, trigger_type=ScanTriggerType.MANUAL
+        )
+        # Move only the base scan to a terminal state. The
+        # head scan is still queued.
+        scan_service.transition_scan(s, base_id, target=ScanStatus.RUNNING)
+        scan_service.transition_scan(s, base_id, target=ScanStatus.COMPLETED)
+        s.commit()
+        head_id = head.id
+    client = TestClient(app)
+    r = client.get(f"/api/v1/scans/{head_id}/compare/{base_id}")
+    assert r.status_code == 409
+    body = r.json()
+    assert body["error"]["code"] == "illegal_transition"
+
+
+def test_compare_scans_rejects_identical_scans(app_config, workspace_root) -> None:
+    """The service rejects identical base/head scan selection."""
+    with _db_session.SessionLocal() as s:
+        scan_id, _, _ = _setup_scan_with_zip(s, workspace_root)
+        scan_service.transition_scan(s, scan_id, target=ScanStatus.RUNNING)
+        scan_service.transition_scan(s, scan_id, target=ScanStatus.COMPLETED)
+        s.commit()
+    client = TestClient(app)
+    r = client.get(f"/api/v1/scans/{scan_id}/compare/{scan_id}")
+    # The backend maps VALIDATION_ERROR to 422; accept either.
+    assert r.status_code in {400, 422}
+    body = r.json()
+    assert body["error"]["code"] == "validation_error"
 
 
 def test_orchestrator_end_to_end_pipeline_writes_components(app_config, workspace_root) -> None:
