@@ -14,6 +14,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
 from app.db import session as _db_session
 from app.main import app
 from app.models.component import Component, ComponentVersionSource
@@ -240,12 +241,23 @@ def test_exports_listing_returns_supported_formats(app_config, workspace_root) -
         scan_id, _, _ = _setup_scan_with_zip(s, workspace_root)
         s.commit()
     client = TestClient(app)
+    # The scan is QUEUED at this point; the 1.7 descriptor
+    # is therefore not yet supported (the download endpoint
+    # would 422). We move the scan to COMPLETED to verify
+    # the supported-formats contract for a finished scan.
+    with _db_session.SessionLocal() as s:
+        scan = s.get(scan_service.ScanRun, scan_id)
+        assert scan is not None
+        scan.status = ScanStatus.COMPLETED
+        s.add(scan)
+        s.commit()
     r = client.get(f"/api/v1/scans/{scan_id}/exports")
     assert r.status_code == 200
     body = r.json()
     formats = {item["format"] for item in body["items"]}
     assert formats == {
         "cyclonedx_json",
+        "cyclonedx_1_7",
         "findings_json",
         "findings_csv",
         "sarif_json",
@@ -254,6 +266,161 @@ def test_exports_listing_returns_supported_formats(app_config, workspace_root) -
         assert item["supported"] is True
         assert item["filename_hint"]
         assert item["content_type"]
+
+
+@pytest.mark.parametrize(
+    "scan_status, expected_supported, expected_reason_substring",
+    [
+        (ScanStatus.FAILED, False, "failed"),
+        (ScanStatus.CANCELLED, False, "cancelled"),
+        (ScanStatus.QUEUED, False, "queued"),
+        (ScanStatus.RUNNING, False, "running"),
+    ],
+)
+def test_list_exports_disables_cyclonedx_1_7_for_ineligible_scans(
+    app_config,
+    workspace_root,
+    scan_status: ScanStatus,
+    expected_supported: bool,
+    expected_reason_substring: str,
+) -> None:
+    """The CycloneDX 1.7 descriptor is gated by the
+    authoritative eligibility helper. Failed / cancelled /
+    queued / running scans never offer the 1.7 download
+    through the UI; the descriptor carries a bounded
+    ``not_supported_reason`` so the consumer sees the exact
+    reason.
+
+    Other legacy exports remain ``supported: true`` for
+    these states because they produce empty-but-valid
+    outputs; the UI does not break them."""
+    with _db_session.SessionLocal() as s:
+        scan_id, _, _ = _setup_scan_with_zip(s, workspace_root)
+        s.commit()
+    client = TestClient(app)
+    # Force the scan into the requested state without
+    # rerunning the orchestrator.
+    with _db_session.SessionLocal() as s:
+        scan = s.get(scan_service.ScanRun, scan_id)
+        assert scan is not None
+        scan.status = scan_status
+        s.add(scan)
+        s.commit()
+    r = client.get(f"/api/v1/scans/{scan_id}/exports")
+    assert r.status_code == 200
+    body = r.json()
+    by_format = {item["format"]: item for item in body["items"]}
+    cdx17 = by_format["cyclonedx_1_7"]
+    assert cdx17["supported"] is False
+    assert cdx17["not_supported_reason"] is not None
+    assert expected_reason_substring in cdx17["not_supported_reason"].lower()
+    # Other legacy exports remain available.
+    assert by_format["cyclonedx_json"]["supported"] is True
+    assert by_format["findings_json"]["supported"] is True
+    assert by_format["findings_csv"]["supported"] is True
+    assert by_format["sarif_json"]["supported"] is True
+
+
+def test_list_exports_cyclonedx_1_7_ineligible_partial_scan_without_inventory(
+    app_config, workspace_root
+) -> None:
+    """A partial scan with zero manifests and zero components
+    cannot produce a 1.7 SBOM (the eligibility helper
+    rejects it). The descriptor is ``supported: false`` with
+    a bounded reason."""
+    with _db_session.SessionLocal() as s:
+        scan_id, _, _ = _setup_scan_with_zip(s, workspace_root)
+        # Wipe the inventory so the scan is partial-without-inventory.
+        s.query(Manifest).filter(Manifest.scan_run_id == scan_id).delete()
+        s.query(Component).filter(Component.scan_run_id == scan_id).delete()
+        scan = s.get(scan_service.ScanRun, scan_id)
+        assert scan is not None
+        scan.status = ScanStatus.PARTIAL
+        s.add(scan)
+        s.commit()
+    client = TestClient(app)
+    r = client.get(f"/api/v1/scans/{scan_id}/exports")
+    body = r.json()
+    cdx17 = next(item for item in body["items"] if item["format"] == "cyclonedx_1_7")
+    assert cdx17["supported"] is False
+    assert cdx17["not_supported_reason"] is not None
+    assert "partial" in cdx17["not_supported_reason"].lower()
+
+
+def test_list_exports_cyclonedx_1_7_partial_scan_with_inventory_carries_warning(
+    app_config, workspace_root
+) -> None:
+    """A provider-degraded partial scan with persisted local
+    inventory is **eligible** for a CycloneDX 1.7 export
+    (the download endpoint returns 200). The descriptor is
+    therefore ``supported: true``, but the description text
+    surfaces the partial-evidence limitation so the
+    consumer never mistakes a degraded SBOM for a complete
+    one."""
+    with _db_session.SessionLocal() as s:
+        scan_id, _, _ = _setup_scan_with_zip(s, workspace_root)
+        # Add a parsed manifest and a component so the
+        # eligibility helper sees a non-empty local
+        # inventory (partial-with-inventory is eligible).
+        manifest = Manifest(
+            scan_run_id=scan_id,
+            path="package.json",
+            manifest_type="package_json",
+            ecosystem="npm",
+            parse_status=ManifestParseStatus.PARSED,
+        )
+        s.add(manifest)
+        s.flush()
+        s.add(
+            Component(
+                scan_run_id=scan_id,
+                manifest_id=manifest.id,
+                ecosystem="npm",
+                package_name="left-pad",
+                version="1.0.0",
+                version_source=ComponentVersionSource.LOCKFILE,
+                direct=True,
+            )
+        )
+        scan = s.get(scan_service.ScanRun, scan_id)
+        assert scan is not None
+        scan.status = ScanStatus.PARTIAL
+        s.add(scan)
+        s.commit()
+    client = TestClient(app)
+    r = client.get(f"/api/v1/scans/{scan_id}/exports")
+    body = r.json()
+    cdx17 = next(item for item in body["items"] if item["format"] == "cyclonedx_1_7")
+    assert cdx17["supported"] is True
+    # The description text names the provider-degraded
+    # limitation explicitly.
+    assert "provider-degraded" in cdx17["description"].lower()
+    assert "partial" in cdx17["description"].lower()
+
+
+def test_list_exports_cyclonedx_1_7_completed_scan_has_no_warning(
+    app_config, workspace_root
+) -> None:
+    """A completed scan is eligible and the description
+    text does NOT carry the partial-evidence warning
+    (the limitation applies only to provider-degraded
+    partial scans)."""
+    with _db_session.SessionLocal() as s:
+        scan_id, _, _ = _setup_scan_with_zip(s, workspace_root)
+        scan = s.get(scan_service.ScanRun, scan_id)
+        assert scan is not None
+        scan.status = ScanStatus.COMPLETED
+        s.add(scan)
+        s.commit()
+    client = TestClient(app)
+    r = client.get(f"/api/v1/scans/{scan_id}/exports")
+    body = r.json()
+    cdx17 = next(item for item in body["items"] if item["format"] == "cyclonedx_1_7")
+    assert cdx17["supported"] is True
+    assert cdx17["not_supported_reason"] is None
+    # The completed-scan description is the short form
+    # without the provider-degraded warning.
+    assert "provider-degraded" not in cdx17["description"].lower()
 
 
 def test_export_download_returns_attachment_with_filename(app_config, workspace_root) -> None:

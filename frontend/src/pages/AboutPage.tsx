@@ -31,7 +31,7 @@ export function AboutPage() {
         </p>
 
         <h2 className="mt-6 text-base font-semibold text-ink-900">
-          What v0.5 implements today
+          What v0.6 implements today
         </h2>
         <p className="text-xs uppercase tracking-wide text-ink-500">
           All items in this list have direct, exercised code paths in this
@@ -83,7 +83,7 @@ export function AboutPage() {
             and a provider-cache layer with TTL.
           </li>
           <li>
-            <strong>Exporters</strong> for CycloneDX 1.5 SBOM
+            <strong>Exporters</strong> for CycloneDX 1.5 and 1.7 SBOM
             (JSON), SARIF 2.1.0 (JSON), findings JSON, and findings CSV.
           </li>
           <li>
@@ -94,7 +94,10 @@ export function AboutPage() {
           <li>
             <strong>API surface</strong>: repositories, scans, stages,
             findings, provider observations, provider health rollup,
-            scan comparison, exports, system info, system provider
+            scan comparison, exports (including a CycloneDX 1.7 SBOM
+            that is validated against the official 1.7 schema and
+            surfaced with deterministic serial numbers and explicit
+            evidence-coverage properties), system info, system provider
             limits, and administrative workspace cleanup. All errors use
             a stable envelope and never leak stack traces.
           </li>
@@ -108,7 +111,7 @@ export function AboutPage() {
         </ul>
 
         <h2 className="mt-6 text-base font-semibold text-ink-900">
-          What v0.5 does <em>not</em> include
+          What v0.6 does <em>not</em> include
         </h2>
         <p className="text-xs uppercase tracking-wide text-ink-500">
           Planned for later milestones, not implemented today.

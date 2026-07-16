@@ -29,6 +29,11 @@ from app.exporters import (
     FindingsJsonExporter,
     SarifStaticFindingsExporter,
 )
+from app.exporters._common import evaluate_export_eligibility
+from app.exporters.cyclonedx_v17 import (
+    CYCLONEDX_FORMAT_KEY,
+    CYCLONEDX_MEDIA_TYPE,
+)
 from app.models.advisory import Advisory
 from app.models.component import Component
 from app.models.component_advisory import ComponentAdvisory
@@ -38,6 +43,7 @@ from app.models.finding import (
     FindingCategory,
     FindingSeverity,
 )
+from app.models.manifest import Manifest
 from app.models.scan_run import ScanRun
 from app.providers.results import ProviderSuccess
 from app.schemas.common import SchemaModel
@@ -970,20 +976,113 @@ def list_exports(
     scan_id: int,
     session: DBSession,
 ) -> ExportListResponse:
-    _get_scan_or_404(session, scan_id)
+    """Return the export descriptors for ``scan_id``.
+
+    Most descriptors are unconditional: the legacy v0.5 1.5
+    CycloneDX SBOM, the findings JSON/CSV exports, and the
+    SARIF export all produce empty-but-valid output for a
+    failed, cancelled, queued, or running scan. The v0.6
+    ``cyclonedx_1_7`` descriptor is the single exception: it
+    applies the authoritative
+    :func:`app.exporters._common.evaluate_export_eligibility`
+    rule so the UI never offers a download the actual
+    download endpoint would reject with 422.
+
+    The list endpoint never weakens backend validation. The
+    per-descriptor ``supported`` flag is the same answer the
+    download endpoint would return (200 vs 422), so the
+    frontend cannot offer a button that the backend would
+    reject. The ``not_supported_reason`` carries the bounded
+    eligibility reason so the UI can render a precise
+    "Unavailable" tooltip and the operator log can
+    reproduce the decision without re-querying."""
+    scan = _get_scan_or_404(session, scan_id)
+    # Count the persisted inventory so the eligibility
+    # helper can decide whether a partial scan has enough
+    # local evidence to qualify for a CycloneDX 1.7 export.
+    # The two COUNT queries are bounded and indexed; the
+    # ``list_exports`` endpoint is read-only and never
+    # mutates state.
+    component_count = int(
+        session.execute(
+            select(func.count()).select_from(Component).where(Component.scan_run_id == scan.id)
+        ).scalar_one()
+        or 0
+    )
+    manifest_count = int(
+        session.execute(
+            select(func.count()).select_from(Manifest).where(Manifest.scan_run_id == scan.id)
+        ).scalar_one()
+        or 0
+    )
+    cdx_17_eligibility = evaluate_export_eligibility(
+        scan,
+        component_count=component_count,
+        manifest_count=manifest_count,
+    )
+    if cdx_17_eligibility.eligible:
+        cdx_17_supported = True
+        cdx_17_not_supported_reason: str | None = None
+        if "provider_degraded" in cdx_17_eligibility.limitations:
+            # Provider-degraded partial scan: the local
+            # inventory is complete, but vulnerability /
+            # enrichment evidence is partial. The descriptor
+            # is still ``supported: true`` (the download
+            # would return 200), but the description text
+            # surfaces the limitation so the consumer never
+            # mistakes a degraded SBOM for a complete one.
+            cdx_17_description = (
+                "CycloneDX 1.7 software bill of materials as JSON. "
+                "Generated against the official 1.7 schema. "
+                "Provider-degraded scan: local inventory is "
+                "complete, but vulnerability / enrichment "
+                "evidence may be partial. The BOM does not "
+                "assert a complete dependency graph."
+            )
+        else:
+            cdx_17_description = (
+                "CycloneDX 1.7 software bill of materials as JSON. "
+                "Generated against the official 1.7 schema."
+            )
+    else:
+        cdx_17_supported = False
+        cdx_17_not_supported_reason = cdx_17_eligibility.reason
+        cdx_17_description = (
+            "CycloneDX 1.7 software bill of materials as JSON. "
+            "Generated against the official 1.7 schema. This "
+            "scan is not eligible for the 1.7 export; the "
+            "download endpoint would return 422 for this scan "
+            "state."
+        )
     descriptors = [
         ExportFormatDescriptor(
             format="cyclonedx_json",
             label="CycloneDX 1.5 SBOM (JSON)",
-            description="CycloneDX 1.5 software bill of materials as JSON.",
+            description=(
+                "CycloneDX 1.5 software bill of materials as "
+                "JSON. Produces an empty-but-valid SBOM for a "
+                "scan with no persisted evidence."
+            ),
             supported=True,
             content_type="application/json",
             filename_hint="lockverity-sbom.cdx.json",
         ),
         ExportFormatDescriptor(
+            format=CYCLONEDX_FORMAT_KEY,
+            label="CycloneDX 1.7 SBOM (JSON)",
+            description=cdx_17_description,
+            supported=cdx_17_supported,
+            not_supported_reason=cdx_17_not_supported_reason,
+            content_type=CYCLONEDX_MEDIA_TYPE,
+            filename_hint="lockverity-scan.cdx.json",
+        ),
+        ExportFormatDescriptor(
             format="findings_json",
             label="Findings (JSON)",
-            description="Every finding, with evidence and location.",
+            description=(
+                "Every finding, with evidence and location. "
+                "Empty-but-valid for a scan with no findings."
+            ),
             supported=True,
             content_type="application/json",
             filename_hint="lockverity-findings.json",
@@ -991,7 +1090,7 @@ def list_exports(
         ExportFormatDescriptor(
             format="findings_csv",
             label="Findings (CSV)",
-            description="One finding per row.",
+            description=("One finding per row. Empty-but-valid for a scan with no findings."),
             supported=True,
             content_type="text/csv",
             filename_hint="lockverity-findings.csv",
@@ -999,13 +1098,113 @@ def list_exports(
         ExportFormatDescriptor(
             format="sarif_json",
             label="SARIF 2.1.0 (JSON)",
-            description="Static analysis results in SARIF 2.1.0 format.",
+            description=(
+                "Static analysis results in SARIF 2.1.0 "
+                "format. Empty-but-valid for a scan with no "
+                "static findings."
+            ),
             supported=True,
             content_type="application/sarif+json",
             filename_hint="lockverity.sarif.json",
         ),
     ]
     return ExportListResponse(items=descriptors)
+
+
+# v0.6 CycloneDX 1.7 dedicated route.
+#
+# Declared *before* the format-dispatching
+# ``/{scan_id}/exports/{format}`` route so FastAPI matches the
+# more specific path first. Otherwise the dispatcher would
+# treat ``cyclonedx_1_7`` as a format identifier and return
+# the legacy 1.5-style ``filename_hint`` without the scan id.
+@router.get(
+    "/{scan_id}/exports/cyclonedx_1_7",
+    summary=(
+        "Download a CycloneDX 1.7 SBOM for the scan. "
+        "Read-only, deterministic, validated against the official 1.7 schema."
+    ),
+    response_class=Response,
+)
+def download_cyclonedx_v17_sbom(
+    scan_id: int,
+    session: DBSession,
+) -> Response:
+    """Return the v0.6 CycloneDX 1.7 SBOM for ``scan_id``.
+
+    The route is the v0.6 entry point. It deliberately lives
+    alongside the existing ``/{scan_id}/exports/{format}``
+    route so the legacy 1.5 export and the new 1.7 export are
+    both available, with no behaviour change to the legacy
+    route. The 1.7 endpoint:
+
+    - Returns the BOM with the correct CycloneDX 1.7 JSON
+      media type (``application/vnd.cyclonedx+json; version=1.7``).
+    - Uses a deterministic ``Content-Disposition`` filename that
+      includes the scan id, so two different scans never collide
+      on the same downloaded file.
+    - Maps the exporter's bounded :class:`ProviderUnavailable`
+      codes to 4xx/5xx responses with no internal paths or
+      validator internals leaked.
+    - Performs no database writes and no external HTTP requests.
+    """
+    from app.db import session as _db_session
+    from app.exporters.cyclonedx_v17 import (
+        CYCLONEDX_MEDIA_TYPE,
+        CycloneDxV17Exporter,
+    )
+
+    _get_scan_or_404(session, scan_id)
+    exporter = CycloneDxV17Exporter(_db_session.SessionLocal)
+    result = exporter.export(scan_run_id=scan_id)
+    if not isinstance(result, ProviderSuccess):
+        code = getattr(result, "error_code", "export_failed")
+        summary = getattr(result, "error_summary", "Export is not currently available.")
+        # The exporter's bounded code map. The API layer never
+        # returns the internal exception, the stack trace, or
+        # the validator internals; only the bounded summary.
+        if code == "export_scan_not_found":
+            raise ApiError(
+                ApiErrorCode.NOT_FOUND,
+                summary,
+                details={"scan_id": scan_id, "code": code},
+            )
+        # scan_failed, scan_cancelled, scan_not_started,
+        # scan_in_progress, partial_incomplete: a state-based
+        # rejection that the consumer should treat as a 409
+        # (state conflict).
+        state_codes = {
+            "scan_failed",
+            "scan_cancelled",
+            "scan_not_started",
+            "scan_in_progress",
+            "partial_incomplete",
+            "cyclonedx_validation_failed",
+        }
+        if code in state_codes:
+            raise ApiError(
+                ApiErrorCode.VALIDATION_ERROR,
+                summary,
+                details={"scan_id": scan_id, "code": code},
+            )
+        raise ApiError(
+            ApiErrorCode.PROVIDER_UNAVAILABLE,
+            summary,
+            details={"scan_id": scan_id, "code": code},
+        )
+    payload = result.data
+    filename = f"lockverity-scan-{scan_id}.cdx.json"
+    return Response(
+        content=payload,
+        # FastAPI's ``media_type`` does not accept media-type
+        # parameters, so the parameter is appended manually via
+        # the ``Content-Type`` header. The base type remains
+        # ``application/vnd.cyclonedx+json``.
+        headers={
+            "Content-Type": CYCLONEDX_MEDIA_TYPE,
+            "Content-Disposition": f'attachment; filename="{filename}"',
+        },
+    )
 
 
 @router.get(
@@ -1026,7 +1225,12 @@ def download_export(
             "Export format is not implemented.",
             details={
                 "format": format,
-                "supported": ["cyclonedx_json", "findings_json", "findings_csv", "sarif_json"],
+                "supported": [
+                    "cyclonedx_json",
+                    "findings_json",
+                    "findings_csv",
+                    "sarif_json",
+                ],
             },
         )
     from app.exporters._common import ScanNotFoundError
@@ -1060,6 +1264,10 @@ def download_export(
 
 
 def _exporter_for_format(format: str):
+    # The ``cyclonedx_1_7`` format is served by the dedicated
+    # ``/{scan_id}/exports/cyclonedx_1_7`` route above so the
+    # 1.7 download can carry the per-scan filename and the
+    # media-type parameter. The dispatcher never sees it.
     if format == "cyclonedx_json":
         from app.db import session as _db_session
 

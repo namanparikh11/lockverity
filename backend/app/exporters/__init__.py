@@ -10,12 +10,24 @@ either a :class:`ProviderSuccess[bytes]` or a
 from __future__ import annotations
 
 from app.exporters.cyclonedx import CycloneDxExporter
+from app.exporters.cyclonedx_v17 import (
+    CYCLONEDX_FORMAT_KEY,
+    CYCLONEDX_MEDIA_TYPE,
+    CYCLONEDX_SCHEMA_URI,
+    CYCLONEDX_SPEC_VERSION,
+    CycloneDxV17Exporter,
+)
 from app.exporters.findings_csv import FindingsCsvExporter
 from app.exporters.findings_json import FindingsJsonExporter
 from app.exporters.sarif import SarifStaticFindingsExporter
 
 __all__ = [
+    "CYCLONEDX_FORMAT_KEY",
+    "CYCLONEDX_MEDIA_TYPE",
+    "CYCLONEDX_SCHEMA_URI",
+    "CYCLONEDX_SPEC_VERSION",
     "CycloneDxExporter",
+    "CycloneDxV17Exporter",
     "FindingsCsvExporter",
     "FindingsJsonExporter",
     "SarifStaticFindingsExporter",
