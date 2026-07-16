@@ -31,7 +31,7 @@ export function AboutPage() {
         </p>
 
         <h2 className="mt-6 text-base font-semibold text-ink-900">
-          What v0.6 implements today
+          What v0.7 implements today
         </h2>
         <p className="text-xs uppercase tracking-wide text-ink-500">
           All items in this list have direct, exercised code paths in this
@@ -87,6 +87,18 @@ export function AboutPage() {
             (JSON), SARIF 2.1.0 (JSON), findings JSON, and findings CSV.
           </li>
           <li>
+            <strong>CycloneDX 1.7 SBOM evidence preview</strong> on the
+            Export Center page: a read-only summary at{" "}
+            <code>{"GET /api/v1/scans/{id}/exports/cyclonedx_1_7/preview"}</code>{" "}
+            that surfaces scan identity, eligibility verdict, inventory
+            summary, evidence coverage, SBOM output facts, omissions,
+            and the legacy-export relationship note before the user
+            downloads the SBOM. The preview is generated from the
+            existing v0.6 eligibility helper and never produces a full
+            BOM; the actual download endpoint is the one that runs the
+            official JSON 1.7 schema validator.
+          </li>
+          <li>
             <strong>Local scan worker</strong> with a 10-stage pipeline,
             per-stage status, scan cancellation, and per-scan heartbeat
             monitoring.
@@ -96,10 +108,11 @@ export function AboutPage() {
             findings, provider observations, provider health rollup,
             scan comparison, exports (including a CycloneDX 1.7 SBOM
             that is validated against the official 1.7 schema and
-            surfaced with deterministic serial numbers and explicit
-            evidence-coverage properties), system info, system provider
-            limits, and administrative workspace cleanup. All errors use
-            a stable envelope and never leak stack traces.
+            surfaced with deterministic serial numbers, an evidence
+            preview summary, and explicit evidence-coverage
+            properties), system info, system provider limits, and
+            administrative workspace cleanup. All errors use a stable
+            envelope and never leak stack traces.
           </li>
           <li>
             <strong>Frontend</strong> shell with a typed API client,
@@ -111,7 +124,7 @@ export function AboutPage() {
         </ul>
 
         <h2 className="mt-6 text-base font-semibold text-ink-900">
-          What v0.6 does <em>not</em> include
+          What v0.7 does <em>not</em> include
         </h2>
         <p className="text-xs uppercase tracking-wide text-ink-500">
           Planned for later milestones, not implemented today.

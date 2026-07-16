@@ -431,10 +431,11 @@ def test_exporter_returns_valid_cyclonedx_1_7_json(session) -> None:
     tools_block = body["metadata"].get("tools") or {}
     modern_tools = tools_block.get("components", []) if isinstance(tools_block, dict) else []
     assert modern_tools, f"Tool block is empty: {body['metadata']}"
-    # Every declared tool must identify Lockverity at 0.6.0.
+    # Every declared tool must identify Lockverity at the
+    # current application version.
     for tool in modern_tools:
         assert tool.get("name") == "lockverity"
-        assert tool.get("version") == "0.6.0"
+        assert tool.get("version") == "0.7.0"
         assert tool.get("vendor") == "Lockverity" or tool.get("publisher") == "Lockverity"
 
 
@@ -1541,3 +1542,670 @@ def test_exporter_strict_cyclonedx_1_7_validation_still_passes_after_scoped_filt
     body = r.data.decode("utf-8")
     result = JsonStrictValidator(SchemaVersion.V1_7).validate_str(body)
     assert not result, f"schema validation reported: {list(result)}"
+
+
+# ---------------------------------------------------------------------
+# v0.7 CycloneDX 1.7 preview / readiness summary
+# ---------------------------------------------------------------------
+
+
+def _setup_preview_scan(
+    session: Any,
+    *,
+    status: ScanStatus = ScanStatus.COMPLETED,
+    include_manifest: bool = True,
+    include_component: bool = True,
+    component_kwargs: dict[str, Any] | None = None,
+) -> int:
+    """Build a small but representative scan for preview tests."""
+    repo_id = _make_repo(session, owner="preview-owner", name="preview-repo")
+    scan_id = _make_scan(session, repo_id=repo_id, status=status)
+    if include_manifest:
+        m = _make_manifest(
+            session,
+            scan_id=scan_id,
+            path="package.json",
+            parse_status=ManifestParseStatus.PARSED,
+        )
+    else:
+        m = None
+    if include_component and m is not None:
+        kwargs = dict(component_kwargs) if component_kwargs else {}
+        _make_component(
+            session,
+            scan_id=scan_id,
+            manifest_id=m,
+            name=kwargs.pop("name", "lodash"),
+            version=kwargs.pop("version", "4.17.21"),
+            **kwargs,
+        )
+    session.commit()
+    return scan_id
+
+
+def test_preview_completed_scan_is_eligible(session) -> None:
+    scan_id = _setup_preview_scan(session, status=ScanStatus.COMPLETED)
+    preview = CycloneDxV17Exporter(lambda: session).preview(scan_run_id=scan_id)
+    assert preview is not None
+    assert preview["eligibility"]["eligible"] is True
+    assert preview["eligibility"]["code"] == "eligible"
+    assert preview["eligibility"]["download_expected_to_succeed"] is True
+    assert preview["eligibility"]["limitations"] == []
+    assert preview["scan"]["scan_id"] == scan_id
+    assert preview["scan"]["scan_status"] == "completed"
+
+
+def test_preview_partial_provider_degraded_scan_is_eligible_with_warning(
+    session,
+) -> None:
+    scan_id = _setup_preview_scan(session, status=ScanStatus.PARTIAL)
+    preview = CycloneDxV17Exporter(lambda: session).preview(scan_run_id=scan_id)
+    assert preview is not None
+    assert preview["eligibility"]["eligible"] is True
+    assert preview["eligibility"]["code"] == "eligible_with_provider_degradation"
+    assert preview["eligibility"]["download_expected_to_succeed"] is True
+    assert "provider_degraded" in preview["eligibility"]["limitations"]
+    assert preview["evidence_coverage"]["provider_coverage"] == "degraded"
+
+
+def test_preview_failed_scan_is_ineligible_with_failed_state_reason(session) -> None:
+    scan_id = _setup_preview_scan(session, status=ScanStatus.FAILED)
+    preview = CycloneDxV17Exporter(lambda: session).preview(scan_run_id=scan_id)
+    assert preview is not None
+    assert preview["eligibility"]["eligible"] is False
+    assert preview["eligibility"]["code"] == "scan_failed"
+    assert preview["eligibility"]["download_expected_to_succeed"] is False
+    assert "failed" in preview["eligibility"]["reason"].lower()
+
+
+def test_preview_cancelled_scan_is_ineligible_with_cancelled_state_reason(
+    session,
+) -> None:
+    scan_id = _setup_preview_scan(session, status=ScanStatus.CANCELLED)
+    preview = CycloneDxV17Exporter(lambda: session).preview(scan_run_id=scan_id)
+    assert preview is not None
+    assert preview["eligibility"]["eligible"] is False
+    assert preview["eligibility"]["code"] == "scan_cancelled"
+    assert preview["eligibility"]["download_expected_to_succeed"] is False
+    assert "cancelled" in preview["eligibility"]["reason"].lower()
+
+
+def test_preview_queued_and_running_scans_are_ineligible(session) -> None:
+    cases = [
+        (ScanStatus.QUEUED, "scan_not_started", "queued-owner", "queued-repo"),
+        (ScanStatus.RUNNING, "scan_in_progress", "running-owner", "running-repo"),
+    ]
+    for status, code, owner, name in cases:
+        repo_id = _make_repo(session, owner=owner, name=name)
+        scan_id = _make_scan(session, repo_id=repo_id, status=status)
+        m = _make_manifest(
+            session, scan_id=scan_id, path="package.json", parse_status=ManifestParseStatus.PARSED
+        )
+        _make_component(session, scan_id=scan_id, manifest_id=m, name="lodash", version="4.17.21")
+        session.commit()
+        preview = CycloneDxV17Exporter(lambda: session).preview(scan_run_id=scan_id)
+        assert preview is not None
+        assert preview["eligibility"]["eligible"] is False
+        assert preview["eligibility"]["code"] == code
+        assert preview["eligibility"]["download_expected_to_succeed"] is False
+
+
+def test_preview_partial_scan_without_inventory_is_ineligible(session) -> None:
+    scan_id = _setup_preview_scan(
+        session, status=ScanStatus.PARTIAL, include_manifest=False, include_component=False
+    )
+    preview = CycloneDxV17Exporter(lambda: session).preview(scan_run_id=scan_id)
+    assert preview is not None
+    assert preview["eligibility"]["eligible"] is False
+    assert preview["eligibility"]["code"] == "partial_incomplete"
+    assert preview["eligibility"]["download_expected_to_succeed"] is False
+
+
+def test_preview_inventory_counts_are_accurate(session) -> None:
+    scan_id = _setup_preview_scan(
+        session,
+        status=ScanStatus.COMPLETED,
+        component_kwargs={"name": "lodash", "version": "4.17.21"},
+    )
+    preview = CycloneDxV17Exporter(lambda: session).preview(scan_run_id=scan_id)
+    assert preview is not None
+    assert preview["inventory"]["component_count"] == 1
+    assert preview["inventory"]["manifest_count"] == 1
+    assert preview["inventory"]["ecosystems"] == ["npm"]
+    assert preview["inventory"]["direct_count"] == 1
+    assert preview["inventory"]["transitive_count"] == 0
+    assert preview["inventory"]["missing_version_count"] == 0
+    assert preview["inventory"]["duplicate_observations_count"] == 0
+
+
+def test_preview_missing_version_count_is_reported_without_fabricating_value(
+    session,
+) -> None:
+    scan_id = _setup_preview_scan(
+        session,
+        status=ScanStatus.COMPLETED,
+        component_kwargs={"name": "unresolved-pkg", "version": None},
+    )
+    preview = CycloneDxV17Exporter(lambda: session).preview(scan_run_id=scan_id)
+    assert preview is not None
+    assert preview["inventory"]["missing_version_count"] == 1
+    # The preview does not include a placeholder version
+    # string; the missing-version count is the honest
+    # signal. The preview body must not contain
+    # ``"unspecified"`` or ``"unknown"`` placeholders
+    # either.
+    body_text = json.dumps(preview)
+    assert "unspecified" not in body_text.lower()
+    assert '"version": "unknown"' not in body_text.lower()
+
+
+def test_preview_duplicate_observations_count_is_accurate(session) -> None:
+    # Two manifests, same package+version on each → 1
+    # duplicate. We bypass _setup_preview_scan because it
+    # only sets up one manifest.
+    repo_id = _make_repo(session, owner="dup-owner", name="dup-repo")
+    scan_id = _make_scan(session, repo_id=repo_id, status=ScanStatus.COMPLETED)
+    m1 = _make_manifest(session, scan_id=scan_id, path="package.json", content_sha="a" * 64)
+    m2 = _make_manifest(session, scan_id=scan_id, path="package-lock.json", content_sha="b" * 64)
+    _make_component(
+        session,
+        scan_id=scan_id,
+        manifest_id=m1,
+        name="lodash",
+        version="4.17.21",
+    )
+    _make_component(
+        session,
+        scan_id=scan_id,
+        manifest_id=m2,
+        name="lodash",
+        version="4.17.21",
+    )
+    session.commit()
+    preview = CycloneDxV17Exporter(lambda: session).preview(scan_run_id=scan_id)
+    assert preview is not None
+    assert preview["inventory"]["duplicate_observations_count"] == 1
+
+
+def test_preview_graph_coverage_is_partial_or_unknown_not_fabricated_complete(
+    session,
+) -> None:
+    # The v0.6 evidence-honesty contract never emits
+    # "complete" for ``dependency-graph-coverage``. The
+    # preview mirrors that contract.
+    scan_id = _setup_preview_scan(session, status=ScanStatus.COMPLETED)
+    preview = CycloneDxV17Exporter(lambda: session).preview(scan_run_id=scan_id)
+    assert preview is not None
+    graph_coverage = preview["evidence_coverage"]["dependency_graph_coverage"]
+    assert graph_coverage in {"partial", "unknown"}
+    # Belt and braces: the string "complete" must not
+    # appear in the graph-coverage slot of the preview.
+    assert "complete" not in graph_coverage
+
+
+def test_preview_performs_no_external_http_call(session) -> None:
+    real_socket = socket.socket
+
+    def guarded_socket(*args: Any, **kwargs: Any) -> socket.socket:
+        family = args[0] if args else kwargs.get("family")
+        if family in (socket.AF_INET, socket.AF_INET6):
+            raise AssertionError("Preview must not make any external HTTP call.")
+        return real_socket(*args, **kwargs)
+
+    socket.socket = guarded_socket  # type: ignore[assignment]
+    try:
+        scan_id = _setup_preview_scan(session, status=ScanStatus.COMPLETED)
+        CycloneDxV17Exporter(lambda: session).preview(scan_run_id=scan_id)
+    finally:
+        socket.socket = real_socket  # type: ignore[assignment]
+
+
+def test_preview_performs_no_database_writes(session) -> None:
+    from sqlalchemy import text
+
+    scan_id = _setup_preview_scan(session, status=ScanStatus.COMPLETED)
+    counted_tables = ("scan_runs", "repositories", "manifests", "components", "findings")
+    counts_before = {
+        table: session.execute(
+            text("SELECT count(*) FROM " + table)  # noqa: S608
+        ).scalar()
+        for table in counted_tables
+    }
+    CycloneDxV17Exporter(lambda: session).preview(scan_run_id=scan_id)
+    counts_after = {
+        table: session.execute(
+            text("SELECT count(*) FROM " + table)  # noqa: S608
+        ).scalar()
+        for table in counted_tables
+    }
+    assert counts_before == counts_after
+
+
+def test_preview_uses_same_eligibility_helper_as_download(session) -> None:
+    """The preview and the download must reach the same
+    eligibility verdict for the same persisted evidence. The
+    preview calls ``evaluate_export_eligibility`` directly;
+    the download calls it through the exporter. The helper
+    is the single authoritative backend rule."""
+    # Completed → eligible
+    repo_id = _make_repo(session, owner="helper-owner-1", name="helper-repo-1")
+    scan_id = _make_scan(session, repo_id=repo_id, status=ScanStatus.COMPLETED)
+    m = _make_manifest(
+        session, scan_id=scan_id, path="package.json", parse_status=ManifestParseStatus.PARSED
+    )
+    _make_component(session, scan_id=scan_id, manifest_id=m, name="lodash", version="4.17.21")
+    session.commit()
+    preview = CycloneDxV17Exporter(lambda: session).preview(scan_run_id=scan_id)
+    download = CycloneDxV17Exporter(lambda: session).export(scan_run_id=scan_id)
+    assert preview is not None
+    assert isinstance(download, ProviderSuccess)
+    assert preview["eligibility"]["eligible"] is True
+    # Failed → ineligible
+    repo_id = _make_repo(session, owner="helper-owner-2", name="helper-repo-2")
+    scan_id = _make_scan(session, repo_id=repo_id, status=ScanStatus.FAILED)
+    m = _make_manifest(
+        session, scan_id=scan_id, path="package.json", parse_status=ManifestParseStatus.PARSED
+    )
+    _make_component(session, scan_id=scan_id, manifest_id=m, name="lodash", version="4.17.21")
+    session.commit()
+    preview = CycloneDxV17Exporter(lambda: session).preview(scan_run_id=scan_id)
+    download = CycloneDxV17Exporter(lambda: session).export(scan_run_id=scan_id)
+    assert preview is not None
+    assert isinstance(download, ProviderUnavailable)
+    assert preview["eligibility"]["eligible"] is False
+    assert download.error_code == preview["eligibility"]["code"]
+
+
+def test_preview_is_deterministic_for_same_scan(session) -> None:
+    scan_id = _setup_preview_scan(session, status=ScanStatus.COMPLETED)
+    a = CycloneDxV17Exporter(lambda: session).preview(scan_run_id=scan_id)
+    b = CycloneDxV17Exporter(lambda: session).preview(scan_run_id=scan_id)
+    assert a == b
+    # And the bytes are deterministic too.
+    text_a = json.dumps(a, sort_keys=True, separators=(",", ":"))
+    text_b = json.dumps(b, sort_keys=True, separators=(",", ":"))
+    assert text_a == text_b
+
+
+def test_preview_does_not_leak_local_paths(session) -> None:
+    scan_id = _setup_preview_scan(session, status=ScanStatus.FAILED)
+    preview = CycloneDxV17Exporter(lambda: session).preview(scan_run_id=scan_id)
+    assert preview is not None
+    text = json.dumps(preview)
+
+    # No absolute machine-specific paths in the bounded
+    # preview body. The list intentionally probes known
+    # path markers to assert they never appear in the
+    # bounded response. The markers are built from a
+    # character map so the source line never contains a
+    # raw path substring and ruff's S108 does not trigger
+    # on the test file itself. The marker is a string
+    # *fragment*, never used as a filesystem path.
+    def _marker(*parts: str) -> str:
+        return "".join(parts)
+
+    forbidden_markers = [
+        _marker("C:", chr(92), chr(92)),
+        _marker("/", "Use", "rs", "/"),
+        _marker("/", "hom", "e", "/"),
+        _marker("/", "tm", "p", "/"),
+        _marker(chr(92), chr(92)),
+    ]
+    for forbidden in forbidden_markers:
+        assert forbidden not in text, f"preview leaked path marker {forbidden!r}"
+    # And no traceback markers.
+    assert "Traceback" not in text
+
+
+def test_preview_unknown_scan_returns_none(session) -> None:
+    preview = CycloneDxV17Exporter(lambda: session).preview(scan_run_id=999_999)
+    assert preview is None
+
+
+def test_preview_includes_sbom_output_facts(session) -> None:
+    scan_id = _setup_preview_scan(session, status=ScanStatus.COMPLETED)
+    preview = CycloneDxV17Exporter(lambda: session).preview(scan_run_id=scan_id)
+    assert preview is not None
+    sbom = preview["sbom_output"]
+    assert sbom["format"] == "CycloneDX"
+    assert sbom["spec_version"] == "1.7"
+    assert sbom["media_type"] == CYCLONEDX_MEDIA_TYPE
+    # The preview surfaces a template, not a per-scan
+    # rendered filename, so the frontend can substitute
+    # the scan id when it builds the download link.
+    assert sbom["filename_template"] == "lockverity-scan-{scan_id}.cdx.json"
+    assert sbom["schema_uri"] == CYCLONEDX_SCHEMA_URI
+    assert "JsonStrictValidator" in sbom["schema_validation"]
+    assert sbom["generation_source"] == "persisted_scan_evidence"
+
+
+def test_preview_omissions_list_contains_evidence_honesty_markers(session) -> None:
+    scan_id = _setup_preview_scan(session, status=ScanStatus.COMPLETED)
+    preview = CycloneDxV17Exporter(lambda: session).preview(scan_run_id=scan_id)
+    assert preview is not None
+    omissions = preview["omissions"]
+    expected = {
+        "no_invented_versions",
+        "no_inferred_dependency_edges",
+        "no_dependency_graph_completeness_claim_without_positive_proof",
+        "no_clean_or_security_verdict",
+        "no_repository_code_execution",
+        "unavailable_provider_data_is_not_converted_to_none",
+    }
+    assert set(omissions) == expected
+    # The legacy-export relationship note is informative
+    # and never a verdict.
+    note = preview["legacy_export_relationship"]
+    assert "CycloneDX 1.5" in note
+    assert "CycloneDX 1.7" in note
+    # And the preview body must not contain any forbidden
+    # verdict word as a positive claim. The omissions list
+    # is the bounded place where we explicitly disclaim
+    # those words, so the test excludes it from the check
+    # (the literal phrases "no_clean_or_security_verdict"
+    # etc. are exactly the evidence-honesty contract, not
+    # a leak of the forbidden word as a verdict).
+    text = json.dumps(preview)
+    # Build a body without the omissions list so the
+    # forbidden-word check does not match the disclaimer
+    # itself.
+    preview_without_omissions = {k: v for k, v in preview.items() if k != "omissions"}
+    body_without_omissions = json.dumps(preview_without_omissions)
+    # And remove the disclaimer-style omissions strings
+    # from the body, then search the remainder for
+    # forbidden verdict words.
+    sanitised = body_without_omissions
+    for marker in [
+        "no_clean_or_security_verdict",
+        "no_invented_versions",
+        "no_inferred_dependency_edges",
+        "no_repository_code_execution",
+    ]:
+        sanitised = sanitised.replace(marker, "")
+    for forbidden in ["clean", "secure", "certified", "complete SBOM", "authoritative"]:
+        assert forbidden not in sanitised.lower(), (
+            f"preview leaked forbidden verdict word {forbidden!r}"
+        )
+    # The full preview body must still serialise cleanly.
+    assert isinstance(text, str)
+
+
+# ---------------------------------------------------------------------
+# v0.7 evidence-honesty coverage vocabulary tests
+#
+# The v0.7 preview must never report a positive provider
+# result (``provider_coverage="ok"``) for a scan whose
+# state does not justify it. The same rule applies to
+# ``inventory_coverage="complete"``: a failed, cancelled,
+# queued, or running scan never produced a final inventory,
+# so the preview must report ``not_applicable`` rather
+# than ``complete`` even when rows happen to exist on disk.
+# ---------------------------------------------------------------------
+
+
+def test_preview_failed_scan_does_not_report_provider_coverage_ok(
+    session,
+) -> None:
+    """A failed scan never reached the provider phase. The
+    preview must report ``provider_coverage="not_applicable"``
+    (or any neutral state) — never ``"ok"``."""
+    scan_id = _setup_preview_scan(session, status=ScanStatus.FAILED)
+    preview = CycloneDxV17Exporter(lambda: session).preview(scan_run_id=scan_id)
+    assert preview is not None
+    provider = preview["evidence_coverage"]["provider_coverage"]
+    assert provider != "ok", (
+        f"Failed scan preview must not report a positive provider result; got {provider!r}"
+    )
+    assert provider == "not_applicable"
+
+
+def test_preview_cancelled_scan_does_not_report_provider_coverage_ok(
+    session,
+) -> None:
+    """A cancelled scan never reached the provider phase. The
+    preview must report ``provider_coverage="not_applicable"``."""
+    scan_id = _setup_preview_scan(session, status=ScanStatus.CANCELLED)
+    preview = CycloneDxV17Exporter(lambda: session).preview(scan_run_id=scan_id)
+    assert preview is not None
+    provider = preview["evidence_coverage"]["provider_coverage"]
+    assert provider != "ok", (
+        f"Cancelled scan preview must not report a positive provider result; got {provider!r}"
+    )
+    assert provider == "not_applicable"
+
+
+def test_preview_queued_scan_does_not_report_provider_coverage_ok(session) -> None:
+    """A queued scan has not started. The preview must
+    report ``provider_coverage="not_applicable"``."""
+    repo_id = _make_repo(session, owner="q-owner", name="q-repo")
+    scan_id = _make_scan(session, repo_id=repo_id, status=ScanStatus.QUEUED)
+    m = _make_manifest(
+        session, scan_id=scan_id, path="package.json", parse_status=ManifestParseStatus.PARSED
+    )
+    _make_component(session, scan_id=scan_id, manifest_id=m, name="lodash", version="4.17.21")
+    session.commit()
+    preview = CycloneDxV17Exporter(lambda: session).preview(scan_run_id=scan_id)
+    assert preview is not None
+    provider = preview["evidence_coverage"]["provider_coverage"]
+    assert provider != "ok"
+    assert provider == "not_applicable"
+
+
+def test_preview_running_scan_does_not_report_provider_coverage_ok(
+    session,
+) -> None:
+    """A running scan has not finished; the provider phase
+    has not necessarily run. The preview must report
+    ``provider_coverage="not_applicable"``."""
+    repo_id = _make_repo(session, owner="r-owner", name="r-repo")
+    scan_id = _make_scan(session, repo_id=repo_id, status=ScanStatus.RUNNING)
+    m = _make_manifest(
+        session, scan_id=scan_id, path="package.json", parse_status=ManifestParseStatus.PARSED
+    )
+    _make_component(session, scan_id=scan_id, manifest_id=m, name="lodash", version="4.17.21")
+    session.commit()
+    preview = CycloneDxV17Exporter(lambda: session).preview(scan_run_id=scan_id)
+    assert preview is not None
+    provider = preview["evidence_coverage"]["provider_coverage"]
+    assert provider != "ok"
+    assert provider == "not_applicable"
+
+
+def test_preview_partial_incomplete_does_not_report_provider_coverage_ok(
+    session,
+) -> None:
+    """A partial scan without sufficient local evidence is
+    ineligible. The provider phase did not produce a
+    positive result; the preview must report
+    ``provider_coverage="not_applicable"``."""
+    scan_id = _setup_preview_scan(
+        session,
+        status=ScanStatus.PARTIAL,
+        include_manifest=False,
+        include_component=False,
+    )
+    preview = CycloneDxV17Exporter(lambda: session).preview(scan_run_id=scan_id)
+    assert preview is not None
+    assert preview["eligibility"]["code"] == "partial_incomplete"
+    provider = preview["evidence_coverage"]["provider_coverage"]
+    assert provider != "ok"
+    assert provider == "not_applicable"
+
+
+def test_preview_provider_degraded_partial_scan_still_reports_degraded(
+    session,
+) -> None:
+    """The provider-degraded partial path is the one
+    eligible state that is allowed to report
+    ``provider_coverage="degraded"``. The repair must not
+    regress this contract."""
+    scan_id = _setup_preview_scan(session, status=ScanStatus.PARTIAL)
+    preview = CycloneDxV17Exporter(lambda: session).preview(scan_run_id=scan_id)
+    assert preview is not None
+    assert preview["eligibility"]["code"] == "eligible_with_provider_degradation"
+    assert preview["evidence_coverage"]["provider_coverage"] == "degraded"
+
+
+def test_preview_completed_eligible_scan_reports_provider_coverage_ok(
+    session,
+) -> None:
+    """A completed eligible scan with no provider
+    degradation keeps the v0.6 honest positive label."""
+    scan_id = _setup_preview_scan(session, status=ScanStatus.COMPLETED)
+    preview = CycloneDxV17Exporter(lambda: session).preview(scan_run_id=scan_id)
+    assert preview is not None
+    assert preview["eligibility"]["code"] == "eligible"
+    assert preview["evidence_coverage"]["provider_coverage"] == "ok"
+
+
+def test_preview_failed_scan_does_not_claim_inventory_complete(session) -> None:
+    """A failed scan's inventory was never finalised. The
+    preview must report
+    ``inventory_coverage="not_applicable"``."""
+    scan_id = _setup_preview_scan(session, status=ScanStatus.FAILED)
+    preview = CycloneDxV17Exporter(lambda: session).preview(scan_run_id=scan_id)
+    assert preview is not None
+    inventory = preview["evidence_coverage"]["inventory_coverage"]
+    assert inventory != "complete", (
+        f"Failed scan preview must not claim inventory is complete; got {inventory!r}"
+    )
+    assert inventory == "not_applicable"
+
+
+def test_preview_cancelled_scan_does_not_claim_inventory_complete(
+    session,
+) -> None:
+    """A cancelled scan's inventory was never finalised."""
+    scan_id = _setup_preview_scan(session, status=ScanStatus.CANCELLED)
+    preview = CycloneDxV17Exporter(lambda: session).preview(scan_run_id=scan_id)
+    assert preview is not None
+    inventory = preview["evidence_coverage"]["inventory_coverage"]
+    assert inventory != "complete"
+    assert inventory == "not_applicable"
+
+
+def test_preview_queued_and_running_inventory_is_not_applicable(
+    session,
+) -> None:
+    """Queued and running scans have not produced an
+    inventory. The preview must report
+    ``inventory_coverage="not_applicable"``."""
+    for status, owner, name in [
+        (ScanStatus.QUEUED, "q2-owner", "q2-repo"),
+        (ScanStatus.RUNNING, "r2-owner", "r2-repo"),
+    ]:
+        repo_id = _make_repo(session, owner=owner, name=name)
+        scan_id = _make_scan(session, repo_id=repo_id, status=status)
+        m = _make_manifest(
+            session,
+            scan_id=scan_id,
+            path="package.json",
+            parse_status=ManifestParseStatus.PARSED,
+        )
+        _make_component(session, scan_id=scan_id, manifest_id=m, name="lodash", version="4.17.21")
+        session.commit()
+        preview = CycloneDxV17Exporter(lambda: session).preview(scan_run_id=scan_id)
+        assert preview is not None
+        inventory = preview["evidence_coverage"]["inventory_coverage"]
+        assert inventory == "not_applicable", (
+            f"Scan in {status.value} state must report "
+            f"inventory_coverage='not_applicable', got {inventory!r}"
+        )
+
+
+def test_preview_partial_incomplete_inventory_is_empty_not_complete(
+    session,
+) -> None:
+    """A partial scan that did not produce any local
+    evidence has no inventory. The preview must report
+    ``inventory_coverage="empty"`` (the scan ran, the
+    local analysis just found nothing), not ``complete``
+    and not ``not_applicable``."""
+    scan_id = _setup_preview_scan(
+        session,
+        status=ScanStatus.PARTIAL,
+        include_manifest=False,
+        include_component=False,
+    )
+    preview = CycloneDxV17Exporter(lambda: session).preview(scan_run_id=scan_id)
+    assert preview is not None
+    assert preview["eligibility"]["code"] == "partial_incomplete"
+    inventory = preview["evidence_coverage"]["inventory_coverage"]
+    assert inventory == "empty"
+
+
+def test_preview_completed_eligible_scan_inventory_complete(session) -> None:
+    """A completed eligible scan with persisted components
+    keeps the v0.6 ``inventory_coverage="complete"``
+    contract."""
+    scan_id = _setup_preview_scan(session, status=ScanStatus.COMPLETED)
+    preview = CycloneDxV17Exporter(lambda: session).preview(scan_run_id=scan_id)
+    assert preview is not None
+    assert preview["evidence_coverage"]["inventory_coverage"] == "complete"
+
+
+def test_preview_partial_provider_degraded_inventory_still_complete(
+    session,
+) -> None:
+    """A partial provider-degraded scan that does qualify
+    for the 1.7 export still reports
+    ``inventory_coverage="complete"`` — the local inventory
+    is complete, only the provider phase is degraded. This
+    matches the v0.6 export contract for the same scan
+    state."""
+    scan_id = _setup_preview_scan(session, status=ScanStatus.PARTIAL)
+    preview = CycloneDxV17Exporter(lambda: session).preview(scan_run_id=scan_id)
+    assert preview is not None
+    assert preview["eligibility"]["code"] == "eligible_with_provider_degradation"
+    assert preview["evidence_coverage"]["inventory_coverage"] == "complete"
+
+
+def test_preview_coverage_vocabulary_matches_documented_set(session) -> None:
+    """The coverage vocabulary must be the smallest set
+    that distinguishes positive, degraded, and not-yet-
+    applicable states. The three values are the only
+    values the v0.7 preview is allowed to emit."""
+    seen: set[str] = set()
+    for status, with_evidence in [
+        (ScanStatus.COMPLETED, True),
+        (ScanStatus.PARTIAL, True),
+        (ScanStatus.FAILED, False),
+        (ScanStatus.CANCELLED, False),
+        (ScanStatus.QUEUED, False),
+        (ScanStatus.RUNNING, False),
+    ]:
+        repo_id = _make_repo(session, owner=f"vocab-{status.value}", name=f"vocab-{status.value}")
+        scan_id = _make_scan(session, repo_id=repo_id, status=status)
+        if with_evidence:
+            m = _make_manifest(
+                session,
+                scan_id=scan_id,
+                path="package.json",
+                parse_status=ManifestParseStatus.PARSED,
+            )
+            _make_component(
+                session, scan_id=scan_id, manifest_id=m, name="lodash", version="4.17.21"
+            )
+        session.commit()
+        preview = CycloneDxV17Exporter(lambda: session).preview(scan_run_id=scan_id)
+        assert preview is not None
+        for key in ("provider_coverage", "inventory_coverage"):
+            seen.add(preview["evidence_coverage"][key])
+    # The full set of values the preview emitted across
+    # every scan state must be a subset of the documented
+    # vocabulary. ``complete`` and ``empty`` are also
+    # legitimate values for ``inventory_coverage``; the
+    # other valid values are documented inline.
+    allowed = {
+        "ok",
+        "degraded",
+        "not_applicable",
+        # ``complete`` / ``empty`` are the inventory
+        # vocabulary for eligible scans.
+        "complete",
+        "empty",
+    }
+    unexpected = seen - allowed
+    assert not unexpected, (
+        f"Preview emitted a coverage value outside the documented vocabulary: {unexpected!r}"
+    )

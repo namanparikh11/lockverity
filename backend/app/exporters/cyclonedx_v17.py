@@ -65,7 +65,7 @@ from app.models.component import Component
 from app.models.finding import Finding, FindingCategory
 from app.models.manifest import Manifest
 from app.models.repository import Repository
-from app.models.scan_run import ScanRun
+from app.models.scan_run import ScanRun, ScanStatus
 from app.providers.results import (
     ProviderOutcome,
     ProviderSuccess,
@@ -354,6 +354,280 @@ def _dependency_graph_coverage(manifests: list[Manifest], edges: list[Any]) -> s
 
 
 # ---------------------------------------------------------------------
+# v0.7 Preview / readiness summary
+# ---------------------------------------------------------------------
+
+
+# SBOM output facts that the v0.7 preview returns to the
+# frontend. The constants are module-level so the API
+# layer, the exporter, and the test suite all reference the
+# same authoritative values. Changing a value here changes
+# the documented contract.
+_PREVIEW_BOM_FORMAT = "CycloneDX"
+_PREVIEW_SPEC_VERSION = "1.7"
+_PREVIEW_MEDIA_TYPE = CYCLONEDX_MEDIA_TYPE
+_PREVIEW_FILENAME_TEMPLATE = "lockverity-scan-{scan_id}.cdx.json"
+_PREVIEW_SCHEMA_URI = CYCLONEDX_SCHEMA_URI
+
+
+def _inventory_coverage(component_count: int, scan_status: ScanStatus) -> str:
+    """Return the inventory coverage label for the preview.
+
+    The v0.7 evidence-honesty contract uses the smallest
+    vocabulary that fits the existing frontend / backend
+    types:
+
+    - ``"complete"`` — the scan is eligible (COMPLETED with
+      persisted evidence, or a PARTIAL scan whose local
+      inventory is sufficient) **and** at least one
+      component was observed. This matches the v0.6 export
+      contract for the same scan state.
+    - ``"empty"`` — the scan is eligible but no component
+      was observed (e.g. a COMPLETED scan against a
+      repository that genuinely has no manifest-pinned
+      dependencies), OR a PARTIAL_INCOMPLETE scan whose
+      local analysis ran but produced no inventory.
+    - ``"not_applicable"`` — the scan is ineligible and the
+      inventory assessment never ran (FAILED, CANCELLED,
+      QUEUED, RUNNING). The label is **not** ``"empty"``
+      because the scan did not reach the inventory phase;
+      reporting ``"empty"`` would imply the scan ran and
+      found nothing, which is misleading for a scan that
+      crashed or was cancelled mid-flight.
+
+    The function never returns ``"complete"`` for a
+    non-terminal scan state, even if rows were persisted
+    before the failure; the v0.6 export rule never accepts
+    those scans, and the preview must not contradict it.
+    """
+    if scan_status in {
+        ScanStatus.FAILED,
+        ScanStatus.CANCELLED,
+        ScanStatus.QUEUED,
+        ScanStatus.RUNNING,
+    }:
+        # The scan never reached the inventory phase. The
+        # preview does not report "empty" because that
+        # would imply a deliberate result; the honest
+        # answer is that the assessment is not applicable.
+        return "not_applicable"
+    if component_count <= 0:
+        return "empty"
+    return "complete"
+
+
+def _provider_coverage(eligibility: ExportEligibility) -> str:
+    """Return the provider coverage label for the preview.
+
+    The v0.7 evidence-honesty contract uses the smallest
+    vocabulary that fits the existing frontend / backend
+    types:
+
+    - ``"ok"`` — the scan is eligible and no provider
+      limitation was reported. This matches the v0.6 BOM
+      contract for the same scan state.
+    - ``"degraded"`` — the scan is eligible but the
+      eligibility verdict reports a provider-degradation
+      limitation (the local analysis ran to completion, the
+      provider phase did not). This matches the v0.6 BOM
+      contract for the same scan state.
+    - ``"not_applicable"`` — the scan is ineligible. The
+      provider was never queried (FAILED / CANCELLED /
+      QUEUED / RUNNING) or the scan did not produce enough
+      local evidence to know whether a provider call would
+      have applied (PARTIAL_INCOMPLETE). The preview does
+      **not** report ``"ok"`` for an ineligible scan: that
+      would invent a positive provider result the
+      persisted schema does not support.
+
+    No provider call is made here; the label is derived
+    from the existing eligibility verdict. The vocabulary
+    is the smallest that distinguishes "we know the
+    provider phase is fine", "we know it is degraded",
+    and "we cannot say because the scan did not reach that
+    phase"."""
+    if not eligibility.eligible:
+        return "not_applicable"
+    if "provider_degraded" in eligibility.limitations:
+        return "degraded"
+    return "ok"
+
+
+def _duplicate_package_version_count(components: list[Component]) -> int:
+    """Return the count of duplicate package/version observations.
+
+    A duplicate is counted as ``(components - unique_keys)``
+    where ``unique_keys`` is the number of distinct
+    ``(package_name, version)`` pairs across the inventory.
+    The count is honest: a single duplicate observation
+    adds 1 to the count, two duplicates add 2, and so on.
+    Components with a missing version are keyed on
+    ``(package_name, None)`` so a package observed once with
+    a version and once without is correctly counted as
+    two distinct observations."""
+    if not components:
+        return 0
+    seen: set[tuple[str, str | None]] = set()
+    duplicates = 0
+    for component in components:
+        key = (component.package_name, component.version)
+        if key in seen:
+            duplicates += 1
+        else:
+            seen.add(key)
+    return duplicates
+
+
+def build_cyclonedx_v17_preview(
+    *,
+    scan: ScanRun,
+    components: list[Component],
+    manifests: list[Manifest],
+    edges: list[Any],
+) -> dict[str, Any]:
+    """Return the v0.7 CycloneDX 1.7 preview / readiness summary.
+
+    The function is the single authoritative backend entry
+    point for the v0.7 preview endpoint. It is read-only,
+    never generates a full BOM, never calls a provider,
+    never executes repository content, and never writes
+    to the database.
+
+    The response shape is the documented v0.7 contract:
+
+    1. **scan identity** — id, repository id, status,
+       source kind if known.
+    2. **eligibility** — the v0.6 authoritative verdict
+       plus a ``download_expected_to_succeed`` boolean the
+       frontend can render alongside the actual download
+       button.
+    3. **inventory summary** — counts the persisted
+       components and manifests, the observed ecosystems,
+       direct vs transitive counts when persisted, the
+       missing-version count, and the duplicate
+       package/version observation count.
+    4. **evidence coverage** — inventory coverage,
+       dependency-graph coverage, provider coverage.
+    5. **SBOM output facts** — format, spec version, media
+       type, deterministic filename template, the schema
+       validation contract, and the persisted-evidence
+       generator contract.
+    6. **omissions and limitations** — the v0.6
+       evidence-honesty rules the consumer should be able
+       to read before download.
+    7. **legacy export relationship** — the bounded note
+       that older exports may still be empty-but-valid for
+       failed / cancelled scans, while CycloneDX 1.7
+       requires sufficient persisted inventory.
+
+    The function is deterministic for a given scan state:
+    the same persisted evidence always produces the same
+    bytes (modulo JSON formatting, which is sorted-keys
+    compact). The eligibility verdict, the counts, and
+    the coverage labels all derive from the persisted
+    schema and the v0.6 helper, never from the wall clock
+    or any non-deterministic source.
+    """
+    # 1. scan identity
+    source_kind = "scan"
+    if scan.trigger_type is not None:
+        # The persisted trigger_type is informational; it
+        # tells the consumer whether the scan was an
+        # explicit operator action, an upload, an
+        # scheduled run, or an API call. The v0.7 preview
+        # surfaces the trigger value so the consumer can
+        # distinguish a manually triggered scan from an
+        # API-driven run.
+        source_kind = f"scan:{scan.trigger_type.value}"
+    scan_identity = {
+        "scan_id": scan.id,
+        "repository_id": scan.repository_id,
+        "scan_status": scan.status.value,
+        "source_kind": source_kind,
+    }
+
+    # 2. eligibility — single authoritative backend rule.
+    eligibility = evaluate_export_eligibility(
+        scan,
+        component_count=len(components),
+        manifest_count=len(manifests),
+    )
+    eligibility_block = {
+        "eligible": eligibility.eligible,
+        "code": eligibility.code,
+        "reason": eligibility.reason,
+        "limitations": list(eligibility.limitations),
+        "download_expected_to_succeed": eligibility.eligible,
+    }
+
+    # 3. inventory summary
+    ecosystems = sorted({c.ecosystem for c in components if c.ecosystem})
+    direct_count = sum(1 for c in components if c.direct)
+    transitive_count = sum(1 for c in components if not c.direct)
+    missing_version_count = sum(1 for c in components if c.version is None)
+    duplicate_count = _duplicate_package_version_count(components)
+    inventory_summary = {
+        "component_count": len(components),
+        "manifest_count": len(manifests),
+        "ecosystems": ecosystems,
+        "direct_count": direct_count,
+        "transitive_count": transitive_count,
+        "missing_version_count": missing_version_count,
+        "duplicate_observations_count": duplicate_count,
+    }
+
+    # 4. evidence coverage
+    inventory_coverage = _inventory_coverage(len(components), scan.status)
+    graph_coverage = _dependency_graph_coverage(manifests, edges)
+    provider_coverage = _provider_coverage(eligibility)
+    evidence_coverage = {
+        "inventory_coverage": inventory_coverage,
+        "dependency_graph_coverage": graph_coverage,
+        "provider_coverage": provider_coverage,
+    }
+
+    # 5. SBOM output facts
+    sbom_output = {
+        "format": _PREVIEW_BOM_FORMAT,
+        "spec_version": _PREVIEW_SPEC_VERSION,
+        "media_type": _PREVIEW_MEDIA_TYPE,
+        "filename_template": _PREVIEW_FILENAME_TEMPLATE,
+        "schema_uri": _PREVIEW_SCHEMA_URI,
+        "schema_validation": "official_offline_JsonStrictValidator_v1_7",
+        "generation_source": "persisted_scan_evidence",
+    }
+
+    # 6. omissions and limitations
+    omissions = [
+        "no_invented_versions",
+        "no_inferred_dependency_edges",
+        "no_dependency_graph_completeness_claim_without_positive_proof",
+        "no_clean_or_security_verdict",
+        "no_repository_code_execution",
+        "unavailable_provider_data_is_not_converted_to_none",
+    ]
+
+    # 7. legacy export relationship
+    legacy_note = (
+        "Older exports (CycloneDX 1.5 SBOM, findings JSON, "
+        "findings CSV, SARIF) may still be empty-but-valid for "
+        "failed or cancelled scans, while CycloneDX 1.7 "
+        "requires sufficient persisted local inventory to "
+        "honestly represent the analyzed evidence."
+    )
+
+    return {
+        "scan": scan_identity,
+        "eligibility": eligibility_block,
+        "inventory": inventory_summary,
+        "evidence_coverage": evidence_coverage,
+        "sbom_output": sbom_output,
+        "omissions": omissions,
+        "legacy_export_relationship": legacy_note,
+    }
+
+
+# ---------------------------------------------------------------------
 # Exporter
 # ---------------------------------------------------------------------
 
@@ -378,6 +652,42 @@ class CycloneDxV17Exporter:
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
+
+    def preview(self, *, scan_run_id: int) -> dict[str, Any] | None:
+        """Return the v0.7 preview / readiness summary for ``scan_run_id``.
+
+        The method is the read-only, deterministic entry point
+        for the ``GET /api/v1/scans/{scan_id}/exports/cyclonedx_1_7/preview``
+        endpoint. It returns ``None`` only when the scan does
+        not exist (the API layer maps that to a 404). For
+        every other scan, the method returns a preview dict
+        that mirrors the documented v0.7 contract; the
+        verdict is always informative (the eligibility block
+        carries the verdict, not the HTTP status).
+
+        The method is read-only: it never generates a full
+        BOM, never validates against the official JSON
+        schema, never calls a provider, never executes
+        repository content, and never writes to the
+        database.
+        """
+        session = self._session_factory()
+        try:
+            try:
+                scan = get_scan_or_raise(session, scan_run_id)
+            except ScanNotFoundError:
+                return None
+            components = list(fetch_components(session, scan_run_id))
+            manifests = list(fetch_manifests(session, scan_run_id))
+            edges = list(fetch_dependency_edges(session, scan_run_id))
+        finally:
+            session.close()
+        return build_cyclonedx_v17_preview(
+            scan=scan,
+            components=components,
+            manifests=manifests,
+            edges=edges,
+        )
 
     def export(self, *, scan_run_id: int) -> ProviderSuccess[bytes] | ProviderUnavailable:
         """Return the CycloneDX 1.7 JSON document for ``scan_run_id``.
@@ -968,6 +1278,7 @@ __all__ = [
     "CYCLONEDX_SCHEMA_URI",
     "CYCLONEDX_SPEC_VERSION",
     "CycloneDxV17Exporter",
+    "build_cyclonedx_v17_preview",
 ]
 
 

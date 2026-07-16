@@ -610,3 +610,97 @@ def test_orchestrator_end_to_end_pipeline_writes_components(app_config, workspac
     assert r.status_code == 200
     items = r.json()["items"]
     assert any(item["rule_id"] == "LOCK-WF-001" for item in items), items
+
+
+# ---------------------------------------------------------------------
+# v0.7 CycloneDX 1.7 preview / readiness summary
+# ---------------------------------------------------------------------
+
+
+def test_preview_endpoint_returns_completed_eligible_summary(app_config, workspace_root) -> None:
+    with _db_session.SessionLocal() as s:
+        scan_id, _, _ = _setup_scan_with_zip(s, workspace_root)
+        scan_service.transition_scan(s, scan_id, target=ScanStatus.RUNNING)
+        scan_service.transition_scan(s, scan_id, target=ScanStatus.COMPLETED)
+        s.commit()
+    client = TestClient(app)
+    r = client.get(f"/api/v1/scans/{scan_id}/exports/cyclonedx_1_7/preview")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["scan"]["scan_id"] == scan_id
+    assert body["scan"]["scan_status"] == "completed"
+    assert body["eligibility"]["eligible"] is True
+    assert body["eligibility"]["code"] == "eligible"
+    assert body["eligibility"]["download_expected_to_succeed"] is True
+    assert body["sbom_output"]["format"] == "CycloneDX"
+    assert body["sbom_output"]["spec_version"] == "1.7"
+    assert "omissions" in body
+    assert "legacy_export_relationship" in body
+
+
+def test_preview_endpoint_returns_404_for_unknown_scan(app_config, workspace_root) -> None:
+    client = TestClient(app)
+    r = client.get("/api/v1/scans/999999/exports/cyclonedx_1_7/preview")
+    assert r.status_code == 404
+
+
+def test_preview_endpoint_returns_failed_ineligible_summary(app_config, workspace_root) -> None:
+    with _db_session.SessionLocal() as s:
+        scan_id, _, _ = _setup_scan_with_zip(s, workspace_root)
+        scan_service.transition_scan(s, scan_id, target=ScanStatus.RUNNING)
+        scan_service.transition_scan(s, scan_id, target=ScanStatus.FAILED)
+        s.commit()
+    client = TestClient(app)
+    r = client.get(f"/api/v1/scans/{scan_id}/exports/cyclonedx_1_7/preview")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["eligibility"]["eligible"] is False
+    assert body["eligibility"]["code"] == "scan_failed"
+    assert body["eligibility"]["download_expected_to_succeed"] is False
+
+
+def test_preview_endpoint_returns_cancelled_ineligible_summary(app_config, workspace_root) -> None:
+    with _db_session.SessionLocal() as s:
+        scan_id, _, _ = _setup_scan_with_zip(s, workspace_root)
+        scan_service.transition_scan(s, scan_id, target=ScanStatus.CANCELLED)
+        s.commit()
+    client = TestClient(app)
+    r = client.get(f"/api/v1/scans/{scan_id}/exports/cyclonedx_1_7/preview")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["eligibility"]["eligible"] is False
+    assert body["eligibility"]["code"] == "scan_cancelled"
+    assert body["eligibility"]["download_expected_to_succeed"] is False
+
+
+def test_preview_endpoint_response_is_deterministic(app_config, workspace_root) -> None:
+    with _db_session.SessionLocal() as s:
+        scan_id, _, _ = _setup_scan_with_zip(s, workspace_root)
+        scan_service.transition_scan(s, scan_id, target=ScanStatus.RUNNING)
+        scan_service.transition_scan(s, scan_id, target=ScanStatus.COMPLETED)
+        s.commit()
+    client = TestClient(app)
+    r1 = client.get(f"/api/v1/scans/{scan_id}/exports/cyclonedx_1_7/preview")
+    r2 = client.get(f"/api/v1/scans/{scan_id}/exports/cyclonedx_1_7/preview")
+    assert r1.status_code == 200
+    assert r2.status_code == 200
+    # The body is deterministic for the same scan state.
+    assert r1.json() == r2.json()
+
+
+def test_preview_endpoint_does_not_validate_full_bom(app_config, workspace_root) -> None:
+    """The preview must not run the full CycloneDX 1.7
+    schema validator. The route is a small summary; the
+    actual download endpoint is the one that runs the
+    validator. This test asserts the preview is reachable
+    even for scans that have not produced a real SBOM (a
+    queued scan returns a 200 preview with eligible=false)."""
+    with _db_session.SessionLocal() as s:
+        scan_id, _, _ = _setup_scan_with_zip(s, workspace_root)
+        s.commit()
+    client = TestClient(app)
+    r = client.get(f"/api/v1/scans/{scan_id}/exports/cyclonedx_1_7/preview")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["eligibility"]["eligible"] is False
+    assert body["eligibility"]["code"] == "scan_not_started"

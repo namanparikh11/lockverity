@@ -168,9 +168,97 @@ function renderExportCenter() {
   );
 }
 
+/**
+ * Build the v0.7 preview / readiness summary response
+ * shape. The tests use this as a default fallback so the
+ * existing v0.6 export tests do not have to mock the new
+ * preview endpoint individually. Tests that need a
+ * specific preview state override this with their own
+ * ``mockResolvedValueOnce``.
+ */
+function makePreviewResponse(
+  overrides: {
+    eligible?: boolean;
+    code?: string;
+    reason?: string;
+    limitations?: string[];
+    inventory?: Record<string, unknown>;
+    evidence_coverage?: Record<string, string>;
+  } = {}
+) {
+  const eligible = overrides.eligible ?? true;
+  return {
+    scan: {
+      scan_id: 1,
+      repository_id: 1,
+      scan_status: "completed",
+      source_kind: "scan:manual",
+    },
+    eligibility: {
+      eligible,
+      code: overrides.code ?? "eligible",
+      reason:
+        overrides.reason ??
+        (eligible
+          ? "Scan completed with persisted local-analysis evidence."
+          : "Scan is not eligible for CycloneDX 1.7."),
+      limitations: overrides.limitations ?? [],
+      download_expected_to_succeed: eligible,
+    },
+    inventory: {
+      component_count: 1,
+      manifest_count: 1,
+      ecosystems: ["npm"],
+      direct_count: 1,
+      transitive_count: 0,
+      missing_version_count: 0,
+      duplicate_observations_count: 0,
+      ...overrides.inventory,
+    },
+    evidence_coverage: {
+      inventory_coverage: "complete",
+      dependency_graph_coverage: "partial",
+      provider_coverage: "ok",
+      ...overrides.evidence_coverage,
+    },
+    sbom_output: {
+      format: "CycloneDX",
+      spec_version: "1.7",
+      media_type: "application/vnd.cyclonedx+json; version=1.7",
+      filename_template: "lockverity-scan-{scan_id}.cdx.json",
+      schema_uri: "http://cyclonedx.org/schema/bom-1.7.schema.json",
+      schema_validation: "official_offline_JsonStrictValidator_v1_7",
+      generation_source: "persisted_scan_evidence",
+    },
+    omissions: [
+      "no_invented_versions",
+      "no_inferred_dependency_edges",
+      "no_dependency_graph_completeness_claim_without_positive_proof",
+      "no_clean_or_security_verdict",
+      "no_repository_code_execution",
+      "unavailable_provider_data_is_not_converted_to_none",
+    ],
+    legacy_export_relationship:
+      "Older exports may still be empty-but-valid for failed or cancelled scans, while CycloneDX 1.7 requires sufficient persisted local inventory.",
+  };
+}
+
 describe("v0.6 CycloneDX 1.7 SBOM export", () => {
   beforeEach(() => {
-    vi.stubGlobal("fetch", vi.fn());
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    // Default handler: the v0.7 preview endpoint returns
+    // a successful eligible preview; every other call
+    // returns the list-exports response the test
+    // configured. Tests can override either by setting
+    // ``mockResolvedValueOnce`` first.
+    fetchMock.mockImplementation((input: RequestInfo | URL) => {
+      const url = typeof input === "string" ? input : input.toString();
+      if (url.includes("/exports/cyclonedx_1_7/preview")) {
+        return Promise.resolve(jsonResponse(makePreviewResponse()));
+      }
+      return Promise.resolve(jsonResponse(makeListResponse()));
+    });
   });
   afterEach(() => {
     vi.unstubAllGlobals();
@@ -246,7 +334,12 @@ describe("v0.6 CycloneDX 1.7 SBOM export", () => {
 
   it("downloads the SBOM with the correct content type and filename when triggered", async () => {
     const fetchMock = vi.mocked(globalThis.fetch);
+    // The v0.7 export page now makes a second fetch for
+    // the preview summary before the user downloads.
+    // Queue: (1) list exports, (2) preview summary,
+    // (3) actual SBOM body for the download click.
     fetchMock.mockResolvedValueOnce(jsonResponse(makeListResponse()));
+    fetchMock.mockResolvedValueOnce(jsonResponse(makePreviewResponse()));
     const sbomJson = JSON.stringify({
       bomFormat: "CycloneDX",
       specVersion: "1.7",
@@ -309,7 +402,20 @@ describe("v0.6 CycloneDX 1.7 SBOM export", () => {
 
 describe("v0.6 CycloneDX 1.7 Export Center UI eligibility", () => {
   beforeEach(() => {
-    vi.stubGlobal("fetch", vi.fn());
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    // Default handler routes by URL: the v0.7 preview
+    // endpoint returns a successful eligible preview by
+    // default; every other call returns the list-exports
+    // response the test configured. Tests can override
+    // either by setting ``mockResolvedValueOnce`` first.
+    fetchMock.mockImplementation((input: RequestInfo | URL) => {
+      const url = typeof input === "string" ? input : input.toString();
+      if (url.includes("/exports/cyclonedx_1_7/preview")) {
+        return Promise.resolve(jsonResponse(makePreviewResponse()));
+      }
+      return Promise.resolve(jsonResponse(makeListResponse()));
+    });
   });
   afterEach(() => {
     vi.unstubAllGlobals();
@@ -527,5 +633,420 @@ describe("v0.6 CycloneDX 1.7 download action filename", () => {
     const contentDisposition = response.headers.get("content-disposition");
     const filenameMatch = contentDisposition?.match(/filename="?([^"]+)"?/);
     expect(filenameMatch?.[1]).toBe("lockverity-scan-42.cdx.json");
+  });
+});
+
+
+describe("v0.7 CycloneDX 1.7 evidence preview", () => {
+  beforeEach(() => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    // The preview panel is lazy: it only fetches when the
+    // user clicks "Show preview". The default handler
+    // returns a successful eligible preview for any
+    // preview call; tests that need a specific state
+    // override with ``mockResolvedValueOnce`` first.
+    fetchMock.mockImplementation((input: RequestInfo | URL) => {
+      const url = typeof input === "string" ? input : input.toString();
+      if (url.includes("/exports/cyclonedx_1_7/preview")) {
+        return Promise.resolve(jsonResponse(makePreviewResponse()));
+      }
+      return Promise.resolve(jsonResponse(makeListResponse()));
+    });
+  });
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    cleanup();
+  });
+
+  it("renders a 'Show preview' button on the export page and fetches only when expanded", async () => {
+    const fetchMock = vi.mocked(globalThis.fetch);
+    renderExportCenter();
+    // The page mounts; the preview panel renders the
+    // collapsed "Show preview" button. The list-exports
+    // fetch has fired (1 call), but the preview endpoint
+    // has not been touched yet.
+    await waitFor(() => {
+      expect(
+        screen.getByTestId("preview-show-button")
+      ).toBeInTheDocument();
+    });
+    // The preview endpoint must not have been called yet.
+    const previewCallsBefore = fetchMock.mock.calls
+      .map((c) => String(c[0]))
+      .filter((u) => u.includes("/exports/cyclonedx_1_7/preview"));
+    expect(previewCallsBefore.length).toBe(0);
+    // Click "Show preview" to trigger the fetch.
+    const showButton = screen.getByTestId("preview-show-button");
+    showButton.click();
+    // The preview panel now renders the summary with the
+    // component / manifest counts and the eligibility
+    // verdict.
+    await waitFor(() => {
+      expect(
+        screen.getByTestId("preview-inventory-components")
+      ).toHaveTextContent("1");
+    });
+    // After the click, the preview endpoint has been
+    // called exactly once.
+    const previewCallsAfter = fetchMock.mock.calls
+      .map((c) => String(c[0]))
+      .filter((u) => u.includes("/exports/cyclonedx_1_7/preview"));
+    expect(previewCallsAfter.length).toBe(1);
+    expect(
+      screen.getByTestId("preview-inventory-manifests")
+    ).toHaveTextContent("1");
+    expect(
+      screen.getByTestId("preview-coverage-inventory")
+    ).toHaveTextContent("complete");
+    expect(
+      screen.getByTestId("preview-coverage-graph")
+    ).toHaveTextContent("partial");
+    expect(
+      screen.getByTestId("preview-coverage-provider")
+    ).toHaveTextContent("ok");
+  });
+
+  it("shows the provider-degraded warning for a partial scan preview", async () => {
+    const fetchMock = vi.mocked(globalThis.fetch);
+    // Override the default handler entirely: the
+    // list response is the default list, the preview
+    // response carries the provider-degraded limitation.
+    fetchMock.mockImplementation((input: RequestInfo | URL) => {
+      const url = typeof input === "string" ? input : input.toString();
+      if (url.includes("/exports/cyclonedx_1_7/preview")) {
+        return Promise.resolve(
+          jsonResponse(
+            makePreviewResponse({
+              eligible: true,
+              code: "eligible_with_provider_degradation",
+              limitations: ["provider_degraded"],
+              evidence_coverage: {
+                inventory_coverage: "complete",
+                dependency_graph_coverage: "partial",
+                provider_coverage: "degraded",
+              },
+            })
+          )
+        );
+      }
+      return Promise.resolve(jsonResponse(makeListResponse()));
+    });
+    renderExportCenter();
+    await waitFor(() => {
+      expect(screen.getByTestId("preview-show-button")).toBeInTheDocument();
+    });
+    screen.getByTestId("preview-show-button").click();
+    await waitFor(() => {
+      expect(screen.getByTestId("preview-notice-warn")).toBeInTheDocument();
+    });
+    expect(
+      screen.getByTestId("preview-coverage-provider")
+    ).toHaveTextContent("degraded");
+  });
+
+  it("shows the ineligible explanation for a failed scan preview", async () => {
+    const fetchMock = vi.mocked(globalThis.fetch);
+    fetchMock.mockImplementation((input: RequestInfo | URL) => {
+      const url = typeof input === "string" ? input : input.toString();
+      if (url.includes("/exports/cyclonedx_1_7/preview")) {
+        return Promise.resolve(
+          jsonResponse(
+            makePreviewResponse({
+              eligible: false,
+              code: "scan_failed",
+              reason: "Scan terminated in a failed state.",
+              limitations: [],
+            })
+          )
+        );
+      }
+      return Promise.resolve(jsonResponse(makeListResponse()));
+    });
+    renderExportCenter();
+    await waitFor(() => {
+      expect(screen.getByTestId("preview-show-button")).toBeInTheDocument();
+    });
+    screen.getByTestId("preview-show-button").click();
+    await waitFor(() => {
+      expect(screen.getByTestId("preview-notice-danger")).toBeInTheDocument();
+    });
+    expect(screen.getByText(/Scan terminated in a failed state/)).toBeInTheDocument();
+  });
+
+  it("shows the ineligible explanation for a cancelled scan preview", async () => {
+    const fetchMock = vi.mocked(globalThis.fetch);
+    fetchMock.mockImplementation((input: RequestInfo | URL) => {
+      const url = typeof input === "string" ? input : input.toString();
+      if (url.includes("/exports/cyclonedx_1_7/preview")) {
+        return Promise.resolve(
+          jsonResponse(
+            makePreviewResponse({
+              eligible: false,
+              code: "scan_cancelled",
+              reason: "Scan was cancelled before completion.",
+              limitations: [],
+            })
+          )
+        );
+      }
+      return Promise.resolve(jsonResponse(makeListResponse()));
+    });
+    renderExportCenter();
+    await waitFor(() => {
+      expect(screen.getByTestId("preview-show-button")).toBeInTheDocument();
+    });
+    screen.getByTestId("preview-show-button").click();
+    // The preview panel renders the "Verdict reason"
+    // row with the bounded backend reason.
+    await waitFor(() => {
+      expect(
+        screen.getByTestId("preview-verdict-reason")
+      ).toHaveTextContent(/Scan was cancelled before completion/);
+    });
+  });
+
+  it("does not call the SBOM download endpoint from the preview", async () => {
+    const fetchMock = vi.mocked(globalThis.fetch);
+    renderExportCenter();
+    await waitFor(() => {
+      expect(screen.getByTestId("preview-show-button")).toBeInTheDocument();
+    });
+    screen.getByTestId("preview-show-button").click();
+    await waitFor(() => {
+      expect(screen.getByTestId("preview-inventory-components")).toBeInTheDocument();
+    });
+    // The preview endpoint is the v0.7 read-only summary;
+    // it is a sibling of the SBOM download endpoint. The
+    // preview must never trigger a download.
+    const calls = fetchMock.mock.calls.map((c) => String(c[0]));
+    // No call should go to the bare download endpoint
+    // ``/exports/cyclonedx_1_7`` (no ``/preview`` suffix).
+    const downloads = calls.filter((u) => /\/exports\/cyclonedx_1_7$/.test(u));
+    expect(downloads.length).toBe(0);
+    // And the preview endpoint must have been called at
+    // least once.
+    const previews = calls.filter((u) => u.includes("/exports/cyclonedx_1_7/preview"));
+    expect(previews.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it("does not leak forbidden verdict words in the preview body", async () => {
+    vi.mocked(globalThis.fetch);
+    renderExportCenter();
+    await waitFor(() => {
+      expect(screen.getByTestId("preview-show-button")).toBeInTheDocument();
+    });
+    screen.getByTestId("preview-show-button").click();
+    await waitFor(() => {
+      expect(screen.getByTestId("preview-inventory-components")).toBeInTheDocument();
+    });
+    const text = (document.body.textContent ?? "").toLowerCase();
+    for (const forbidden of ["clean sbom", "secure sbom", "certified sbom", "complete sbom", "authoritative sbom"]) {
+      expect(text).not.toContain(forbidden);
+    }
+  });
+
+  it("still shows legacy export rows after the preview panel is collapsed", async () => {
+    vi.mocked(globalThis.fetch);
+    renderExportCenter();
+    await waitFor(() => {
+      expect(screen.getByTestId("preview-show-button")).toBeInTheDocument();
+    });
+    // The legacy exports remain visible alongside the new
+    // preview toggle.
+    expect(screen.getByText("cyclonedx_json")).toBeInTheDocument();
+    expect(screen.getByText("findings_json")).toBeInTheDocument();
+    expect(screen.getByText("findings_csv")).toBeInTheDocument();
+    expect(screen.getByText("sarif_json")).toBeInTheDocument();
+  });
+
+  it("renders the neutral 'not_applicable' provider coverage for an ineligible failed scan without implying success", async () => {
+    const fetchMock = vi.mocked(globalThis.fetch);
+    fetchMock.mockImplementation((input: RequestInfo | URL) => {
+      const url = typeof input === "string" ? input : input.toString();
+      if (url.includes("/exports/cyclonedx_1_7/preview")) {
+        return Promise.resolve(
+          jsonResponse(
+            makePreviewResponse({
+              eligible: false,
+              code: "scan_failed",
+              reason: "Scan terminated in a failed state.",
+              limitations: [],
+              evidence_coverage: {
+                inventory_coverage: "not_applicable",
+                dependency_graph_coverage: "unknown",
+                provider_coverage: "not_applicable",
+              },
+            })
+          )
+        );
+      }
+      return Promise.resolve(jsonResponse(makeListResponse()));
+    });
+    renderExportCenter();
+    await waitFor(() => {
+      expect(screen.getByTestId("preview-show-button")).toBeInTheDocument();
+    });
+    screen.getByTestId("preview-show-button").click();
+    await waitFor(() => {
+      expect(screen.getByTestId("preview-coverage-provider")).toBeInTheDocument();
+    });
+    // The neutral value is rendered verbatim, so the
+    // consumer can render its own meaning for it.
+    expect(
+      screen.getByTestId("preview-coverage-provider")
+    ).toHaveTextContent("not_applicable");
+    expect(
+      screen.getByTestId("preview-coverage-inventory")
+    ).toHaveTextContent("not_applicable");
+    expect(
+      screen.getByTestId("preview-coverage-graph")
+    ).toHaveTextContent("unknown");
+    // The body must not contain the misleading "ok" or
+    // "complete" labels for a failed scan.
+    const text = (document.body.textContent ?? "").toLowerCase();
+    // The body might legitimately contain "ok" elsewhere
+    // (e.g. in the unrelated coverage list). The
+    // assertion is scoped to the data-testid elements that
+    // own the failed scan's coverage values.
+    expect(screen.getByTestId("preview-coverage-provider").textContent).not.toBe("ok");
+    expect(screen.getByTestId("preview-coverage-inventory").textContent).not.toBe(
+      "complete"
+    );
+    // Sanity check: the test does not let an unrelated
+    // "ok" string in the document silently mask a bug.
+    expect(text.length).toBeGreaterThan(0);
+  });
+
+  it("renders the neutral 'not_applicable' provider coverage for a cancelled scan", async () => {
+    const fetchMock = vi.mocked(globalThis.fetch);
+    fetchMock.mockImplementation((input: RequestInfo | URL) => {
+      const url = typeof input === "string" ? input : input.toString();
+      if (url.includes("/exports/cyclonedx_1_7/preview")) {
+        return Promise.resolve(
+          jsonResponse(
+            makePreviewResponse({
+              eligible: false,
+              code: "scan_cancelled",
+              reason: "Scan was cancelled before completion.",
+              limitations: [],
+              evidence_coverage: {
+                inventory_coverage: "not_applicable",
+                dependency_graph_coverage: "unknown",
+                provider_coverage: "not_applicable",
+              },
+            })
+          )
+        );
+      }
+      return Promise.resolve(jsonResponse(makeListResponse()));
+    });
+    renderExportCenter();
+    await waitFor(() => {
+      expect(screen.getByTestId("preview-show-button")).toBeInTheDocument();
+    });
+    screen.getByTestId("preview-show-button").click();
+    await waitFor(() => {
+      expect(screen.getByTestId("preview-coverage-provider")).toBeInTheDocument();
+    });
+    expect(
+      screen.getByTestId("preview-coverage-provider")
+    ).toHaveTextContent("not_applicable");
+    expect(
+      screen.getByTestId("preview-coverage-inventory")
+    ).toHaveTextContent("not_applicable");
+  });
+
+  it("renders the neutral 'not_applicable' provider coverage for a queued scan", async () => {
+    const fetchMock = vi.mocked(globalThis.fetch);
+    fetchMock.mockImplementation((input: RequestInfo | URL) => {
+      const url = typeof input === "string" ? input : input.toString();
+      if (url.includes("/exports/cyclonedx_1_7/preview")) {
+        return Promise.resolve(
+          jsonResponse(
+            makePreviewResponse({
+              eligible: false,
+              code: "scan_not_started",
+              reason: "Scan is queued; no inventory has been observed yet.",
+              limitations: [],
+              evidence_coverage: {
+                inventory_coverage: "not_applicable",
+                dependency_graph_coverage: "unknown",
+                provider_coverage: "not_applicable",
+              },
+            })
+          )
+        );
+      }
+      return Promise.resolve(jsonResponse(makeListResponse()));
+    });
+    renderExportCenter();
+    await waitFor(() => {
+      expect(screen.getByTestId("preview-show-button")).toBeInTheDocument();
+    });
+    screen.getByTestId("preview-show-button").click();
+    await waitFor(() => {
+      expect(screen.getByTestId("preview-coverage-provider")).toBeInTheDocument();
+    });
+    expect(
+      screen.getByTestId("preview-coverage-provider")
+    ).toHaveTextContent("not_applicable");
+    expect(
+      screen.getByTestId("preview-coverage-inventory")
+    ).toHaveTextContent("not_applicable");
+  });
+
+  it("renders the neutral 'empty' inventory coverage for a partial scan without inventory", async () => {
+    const fetchMock = vi.mocked(globalThis.fetch);
+    fetchMock.mockImplementation((input: RequestInfo | URL) => {
+      const url = typeof input === "string" ? input : input.toString();
+      if (url.includes("/exports/cyclonedx_1_7/preview")) {
+        return Promise.resolve(
+          jsonResponse(
+            makePreviewResponse({
+              eligible: false,
+              code: "partial_incomplete",
+              reason:
+                "Scan is partial and no persisted local-analysis evidence is complete enough to derive an inventory.",
+              limitations: [],
+              inventory: {
+                component_count: 0,
+                manifest_count: 0,
+                ecosystems: [],
+                direct_count: 0,
+                transitive_count: 0,
+                missing_version_count: 0,
+                duplicate_observations_count: 0,
+              },
+              evidence_coverage: {
+                inventory_coverage: "empty",
+                dependency_graph_coverage: "unknown",
+                provider_coverage: "not_applicable",
+              },
+            })
+          )
+        );
+      }
+      return Promise.resolve(jsonResponse(makeListResponse()));
+    });
+    renderExportCenter();
+    await waitFor(() => {
+      expect(screen.getByTestId("preview-show-button")).toBeInTheDocument();
+    });
+    screen.getByTestId("preview-show-button").click();
+    await waitFor(() => {
+      expect(screen.getByTestId("preview-coverage-inventory")).toBeInTheDocument();
+    });
+    expect(
+      screen.getByTestId("preview-coverage-inventory")
+    ).toHaveTextContent("empty");
+    expect(
+      screen.getByTestId("preview-coverage-provider")
+    ).toHaveTextContent("not_applicable");
+    // A partial_incomplete scan must never claim
+    // inventory is complete.
+    expect(screen.getByTestId("preview-coverage-inventory").textContent).not.toBe(
+      "complete"
+    );
   });
 });

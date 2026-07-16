@@ -1,11 +1,18 @@
-import { Download } from "lucide-react";
+import { Download, FileText } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useParams } from "react-router-dom";
 
 import { api } from "@/api/api";
 import { ApiClientError, describeError } from "@/api/client";
 import { isNotImplemented } from "@/api/fallback";
-import type { ExportDescriptor, ExportFormat } from "@/api/types";
+import type {
+  CycloneDxPreviewCoverage,
+  CycloneDxPreviewInventory,
+  CycloneDxPreviewResponse,
+  CycloneDxPreviewSbomOutput,
+  ExportDescriptor,
+  ExportFormat,
+} from "@/api/types";
 import { ConfirmationDialog } from "@/components/ConfirmationDialog";
 import { DataCompletenessNotice } from "@/components/DataCompletenessNotice";
 import { ErrorState } from "@/components/ErrorState";
@@ -237,13 +244,16 @@ export function ExportCenterPage() {
         </ResponsiveTable>
       )}
       {!error ? (
-        <div className="mt-4">
-          <DataCompletenessNotice
-            title="About exports"
-            description="Exports are generated from the current scan's database state. A scan that has not yet produced findings produces an empty-but-valid export. The bytes are downloaded directly in the browser; they are not sent to any third-party service."
-            tone="muted"
-          />
-        </div>
+        <>
+          <CycloneDxPreviewPanel scanId={sid} />
+          <div className="mt-4">
+            <DataCompletenessNotice
+              title="About exports"
+              description="Exports are generated from the current scan's database state. A scan that has not yet produced findings produces an empty-but-valid export. The bytes are downloaded directly in the browser; they are not sent to any third-party service."
+              tone="muted"
+            />
+          </div>
+        </>
       ) : null}
       <ConfirmationDialog
         open={confirm !== null}
@@ -276,4 +286,404 @@ function fallbackLabel(format: ExportFormat): string {
     default:
       return format;
   }
+}
+
+/**
+ * Read-only preview / readiness summary panel for the
+ * CycloneDX 1.7 export. v0.7 surfaces the bounded
+ * eligibility verdict, the inventory summary, the
+ * evidence-coverage labels, and the omissions list before
+ * the user downloads the SBOM. The panel never fetches a
+ * full BOM; it consumes the dedicated preview endpoint.
+ *
+ * The component is a controlled sub-render of the export
+ * page. The panel is collapsed by default and only fetches
+ * the preview summary when the user clicks "Show preview";
+ * this keeps the export page lightweight and avoids an
+ * unconditional round-trip on every page load. The fetch
+ * is aborted on unmount so a fast scan switch does not
+ * leave a stale preview on screen.
+ */
+function CycloneDxPreviewPanel({ scanId }: { scanId: number }) {
+  const [preview, setPreview] = useState<CycloneDxPreviewResponse | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [expanded, setExpanded] = useState(false);
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    if (!expanded) return;
+    if (!Number.isFinite(scanId)) return;
+    const controller = new AbortController();
+    setLoading(true);
+    setError(null);
+    api
+      .previewCyclonedx17(scanId)
+      .then((response) => {
+        if (controller.signal.aborted) return;
+        setPreview(response);
+      })
+      .catch((err) => {
+        if (controller.signal.aborted) return;
+        if (err instanceof ApiClientError && err.apiError.httpStatus === 404) {
+          setError("Preview is not available for this scan.");
+          return;
+        }
+        setError(describeError(err));
+      })
+      .finally(() => {
+        if (controller.signal.aborted) return;
+        setLoading(false);
+      });
+    return () => controller.abort();
+  }, [expanded, scanId]);
+
+  if (error) {
+    return (
+      <div className="mt-4 rounded-md border border-rose-200 bg-rose-50 p-4 text-sm text-rose-900">
+        <p className="font-semibold">CycloneDX 1.7 preview unavailable</p>
+        <p className="mt-1">{error}</p>
+      </div>
+    );
+  }
+
+  if (!expanded) {
+    return (
+      <div className="mt-4">
+        <button
+          type="button"
+          className="rounded border border-ink-300 bg-white px-4 py-2 text-sm font-medium text-ink-800"
+          onClick={() => setExpanded(true)}
+          data-testid="preview-show-button"
+        >
+          <FileText aria-hidden="true" className="mr-2 inline h-4 w-4" />
+          Show CycloneDX 1.7 evidence preview
+        </button>
+      </div>
+    );
+  }
+
+  if (loading && !preview) {
+    return (
+      <div className="mt-4 rounded-md border border-ink-200 bg-ink-50 p-4 text-sm text-ink-700">
+        <p className="font-semibold text-ink-900">CycloneDX 1.7 preview</p>
+        <p className="mt-1 text-ink-600">Loading evidence summary…</p>
+      </div>
+    );
+  }
+
+  if (!preview || !preview.eligibility || !preview.inventory || !preview.evidence_coverage) {
+    return (
+      <div
+        className="mt-4 rounded-md border border-ink-200 bg-ink-50 p-4 text-sm text-ink-700"
+        data-testid="preview-panel"
+      >
+        <p className="font-semibold text-ink-900">CycloneDX 1.7 preview</p>
+        <p className="mt-1 text-ink-600">Evidence summary is not yet available.</p>
+      </div>
+    );
+  }
+
+  return (
+    <div data-testid="preview-panel">
+      <PreviewBody preview={preview} expanded={expanded} onToggle={() => setExpanded(false)} />
+    </div>
+  );
+}
+
+function PreviewBody({
+  preview,
+  expanded,
+  onToggle,
+}: {
+  preview: CycloneDxPreviewResponse;
+  expanded: boolean;
+  onToggle: () => void;
+}) {
+  const eligible = preview.eligibility.eligible;
+  const providerDegraded = preview.eligibility.limitations.includes("provider_degraded");
+  return (
+    <section
+      aria-label="CycloneDX 1.7 evidence preview"
+      className="mt-4 rounded-md border border-ink-200 bg-white p-4 text-sm"
+    >
+      <header className="flex items-start justify-between gap-4">
+        <div>
+          <p className="flex items-center gap-2 font-semibold text-ink-900">
+            <FileText aria-hidden="true" className="h-4 w-4" />
+            CycloneDX 1.7 SBOM &mdash; evidence preview
+          </p>
+          <p className="mt-1 text-xs text-ink-600">
+            Read-only summary generated from persisted scan evidence. The bytes are downloaded
+            directly in the browser; they are not sent to a third party. This preview does not
+            generate a full SBOM.
+          </p>
+        </div>
+        <button
+          type="button"
+          className="rounded border border-ink-200 px-3 py-1 text-xs font-medium text-ink-700"
+          onClick={onToggle}
+          aria-expanded={expanded}
+        >
+          {expanded ? "Hide details" : "Show details"}
+        </button>
+      </header>
+
+      <div className="mt-3 grid grid-cols-1 gap-2 md:grid-cols-2">
+        <PreviewKvp label="Eligibility" value={eligible ? "eligible" : "not eligible"} />
+        <PreviewKvp
+          label="Verdict reason"
+          value={preview.eligibility.reason}
+          tone={eligible ? "ok" : "danger"}
+          testId="preview-verdict-reason"
+        />
+        <PreviewKvp
+          label="Download expected to succeed"
+          value={preview.eligibility.download_expected_to_succeed ? "yes" : "no"}
+        />
+        <PreviewKvp label="Coverage: provider" value={preview.evidence_coverage.provider_coverage} />
+      </div>
+
+      {!eligible ? (
+        <PreviewNotice tone="danger">
+          This scan is not eligible for a CycloneDX 1.7 SBOM. The download endpoint would
+          return a 422 for this scan state. Older legacy exports may still produce an
+          empty-but-valid file for this scan.
+        </PreviewNotice>
+      ) : null}
+      {providerDegraded ? (
+        <PreviewNotice tone="warn">
+          Provider-degraded scan: local inventory is complete, but vulnerability / enrichment
+          evidence may be partial. The SBOM does not claim a complete dependency graph.
+        </PreviewNotice>
+      ) : null}
+
+      {expanded ? (
+        <div className="mt-3 space-y-3 text-xs text-ink-700">
+          <InventorySummary inventory={preview.inventory} />
+          <CoverageSummary coverage={preview.evidence_coverage} />
+          <SbomOutputSummary sbom={preview.sbom_output} />
+          <OmissionsList omissions={preview.omissions} />
+          <LegacyNote note={preview.legacy_export_relationship} />
+        </div>
+      ) : null}
+    </section>
+  );
+}
+
+function PreviewKvp({
+  label,
+  value,
+  tone,
+  testId,
+}: {
+  label: string;
+  value: string;
+  tone?: "ok" | "warn" | "danger";
+  testId?: string;
+}) {
+  const colour =
+    tone === "ok"
+      ? "text-emerald-700"
+      : tone === "warn"
+        ? "text-amber-700"
+        : tone === "danger"
+          ? "text-rose-700"
+          : "text-ink-900";
+  return (
+    <div className="rounded border border-ink-100 bg-ink-50 px-3 py-2">
+      <p className="text-[10px] uppercase tracking-wide text-ink-500">{label}</p>
+      <p
+        className={`mt-0.5 font-medium ${colour}`}
+        data-testid={testId}
+      >
+        {value}
+      </p>
+    </div>
+  );
+}
+
+function PreviewNotice({
+  tone,
+  children,
+}: {
+  tone: "warn" | "danger";
+  children: React.ReactNode;
+}) {
+  const colour =
+    tone === "warn"
+      ? "border-amber-200 bg-amber-50 text-amber-900"
+      : "border-rose-200 bg-rose-50 text-rose-900";
+  return (
+    <p
+      className={`mt-3 rounded border px-3 py-2 text-xs ${colour}`}
+      data-testid={`preview-notice-${tone}`}
+    >
+      {children}
+    </p>
+  );
+}
+
+function InventorySummary({ inventory }: { inventory: CycloneDxPreviewInventory }) {
+  return (
+    <div>
+      <p className="text-[10px] uppercase tracking-wide text-ink-500">Inventory summary</p>
+      <ul className="mt-1 grid grid-cols-2 gap-x-4 gap-y-1 md:grid-cols-3">
+        <li>
+          <span className="text-ink-500">Components:</span>{" "}
+          <span className="font-medium text-ink-900" data-testid="preview-inventory-components">
+            {inventory.component_count}
+          </span>
+        </li>
+        <li>
+          <span className="text-ink-500">Manifests:</span>{" "}
+          <span className="font-medium text-ink-900" data-testid="preview-inventory-manifests">
+            {inventory.manifest_count}
+          </span>
+        </li>
+        <li>
+          <span className="text-ink-500">Ecosystems:</span>{" "}
+          <span className="font-medium text-ink-900">
+            {inventory.ecosystems.length === 0 ? "—" : inventory.ecosystems.join(", ")}
+          </span>
+        </li>
+        <li>
+          <span className="text-ink-500">Direct:</span>{" "}
+          <span className="font-medium text-ink-900">{inventory.direct_count}</span>
+        </li>
+        <li>
+          <span className="text-ink-500">Transitive:</span>{" "}
+          <span className="font-medium text-ink-900">{inventory.transitive_count}</span>
+        </li>
+        <li>
+          <span className="text-ink-500">Missing version:</span>{" "}
+          <span
+            className={`font-medium ${inventory.missing_version_count > 0 ? "text-amber-700" : "text-ink-900"}`}
+            data-testid="preview-inventory-missing-version"
+          >
+            {inventory.missing_version_count}
+          </span>
+        </li>
+        <li>
+          <span className="text-ink-500">Duplicate observations:</span>{" "}
+          <span
+            className={`font-medium ${inventory.duplicate_observations_count > 0 ? "text-amber-700" : "text-ink-900"}`}
+          >
+            {inventory.duplicate_observations_count}
+          </span>
+        </li>
+      </ul>
+    </div>
+  );
+}
+
+function CoverageSummary({ coverage }: { coverage: CycloneDxPreviewCoverage }) {
+  return (
+    <div>
+      <p className="text-[10px] uppercase tracking-wide text-ink-500">Evidence coverage</p>
+      <ul className="mt-1 grid grid-cols-1 gap-1 md:grid-cols-3">
+        <li>
+          <span className="text-ink-500">Inventory:</span>{" "}
+          <span
+            className="font-medium text-ink-900"
+            data-testid="preview-coverage-inventory"
+          >
+            {coverage.inventory_coverage}
+          </span>
+        </li>
+        <li>
+          <span className="text-ink-500">Dependency graph:</span>{" "}
+          <span
+            className="font-medium text-ink-900"
+            data-testid="preview-coverage-graph"
+          >
+            {coverage.dependency_graph_coverage}
+          </span>
+        </li>
+        <li>
+          <span className="text-ink-500">Provider:</span>{" "}
+          <span
+            className={`font-medium ${coverage.provider_coverage === "degraded" ? "text-amber-700" : "text-ink-900"}`}
+            data-testid="preview-coverage-provider"
+          >
+            {coverage.provider_coverage}
+          </span>
+        </li>
+      </ul>
+    </div>
+  );
+}
+
+function SbomOutputSummary({ sbom }: { sbom: CycloneDxPreviewSbomOutput }) {
+  return (
+    <div>
+      <p className="text-[10px] uppercase tracking-wide text-ink-500">SBOM output facts</p>
+      <ul className="mt-1 grid grid-cols-1 gap-1 md:grid-cols-2">
+        <li>
+          <span className="text-ink-500">Format:</span>{" "}
+          <span className="font-medium text-ink-900">{sbom.format}</span>
+        </li>
+        <li>
+          <span className="text-ink-500">Spec version:</span>{" "}
+          <span className="font-medium text-ink-900">{sbom.spec_version}</span>
+        </li>
+        <li>
+          <span className="text-ink-500">Media type:</span>{" "}
+          <span className="font-mono text-[11px] text-ink-700">{sbom.media_type}</span>
+        </li>
+        <li>
+          <span className="text-ink-500">Filename template:</span>{" "}
+          <span className="font-mono text-[11px] text-ink-700">
+            {sbom.filename_template}
+          </span>
+        </li>
+        <li className="md:col-span-2">
+          <span className="text-ink-500">Schema validation:</span>{" "}
+          <span className="font-medium text-ink-900">{sbom.schema_validation}</span>
+        </li>
+      </ul>
+      <p className="mt-1 text-[11px] text-ink-500">
+        Source: {sbom.generation_source}. The official CycloneDX 1.7 schema is bundled
+        with the library; no network access occurs at export time.
+      </p>
+    </div>
+  );
+}
+
+function OmissionsList({ omissions }: { omissions: string[] }) {
+  // The omissions list is the bounded place where we
+  // explicitly disclaim forbidden claims. Renaming any
+  // marker here would change the evidence-honesty
+  // contract; the frontend simply renders them.
+  const human: Record<string, string> = {
+    no_invented_versions: "No invented component versions.",
+    no_inferred_dependency_edges:
+      "No inferred dependency edges. Only persisted DependencyEdge rows are emitted.",
+    no_dependency_graph_completeness_claim_without_positive_proof:
+      "No dependency-graph completeness claim unless a positive persisted signal exists.",
+    no_clean_or_security_verdict: "No clean / security / certification verdict.",
+    no_repository_code_execution: "No repository code is executed.",
+    unavailable_provider_data_is_not_converted_to_none:
+      "Unavailable provider data is not converted to a 'no findings' verdict.",
+  };
+  return (
+    <div>
+      <p className="text-[10px] uppercase tracking-wide text-ink-500">Omissions and limitations</p>
+      <ul
+        className="mt-1 list-disc space-y-0.5 pl-5 text-ink-700"
+        data-testid="preview-omissions"
+      >
+        {omissions.map((marker) => (
+          <li key={marker}>{human[marker] ?? marker}</li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+function LegacyNote({ note }: { note: string }) {
+  return (
+    <p className="rounded border border-ink-100 bg-ink-50 p-2 text-[11px] text-ink-700">
+      {note}
+    </p>
+  );
 }
