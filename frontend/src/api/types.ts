@@ -591,7 +591,12 @@ export interface ProviderHealthEntry {
 
 // ---- Exports ----
 
-export type ExportFormat = "cyclonedx_json" | "findings_json" | "findings_csv" | "sarif_json";
+export type ExportFormat =
+  | "cyclonedx_json"
+  | "cyclonedx_1_7"
+  | "findings_json"
+  | "findings_csv"
+  | "sarif_json";
 
 export interface ExportDescriptor {
   format: ExportFormat;

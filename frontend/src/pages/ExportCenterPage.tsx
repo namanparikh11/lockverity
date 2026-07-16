@@ -16,6 +16,7 @@ import { Skeleton } from "@/components/Skeleton";
 
 const KNOWN_FORMATS: ExportFormat[] = [
   "cyclonedx_json",
+  "cyclonedx_1_7",
   "findings_json",
   "findings_csv",
   "sarif_json",
@@ -30,6 +31,16 @@ const FALLBACK_DESCRIPTORS: ExportDescriptor[] = [
     not_supported_reason: null,
     content_type: "application/vnd.cyclonedx+json",
     filename_hint: "lockverity-sbom.cdx.json",
+  },
+  {
+    format: "cyclonedx_1_7",
+    label: "CycloneDX 1.7 SBOM (JSON)",
+    description:
+      "CycloneDX 1.7 software bill of materials as JSON. Generated against the official 1.7 schema. Only completed and partial scans with persisted local inventory are eligible.",
+    supported: true,
+    not_supported_reason: null,
+    content_type: "application/vnd.cyclonedx+json; version=1.7",
+    filename_hint: "lockverity-scan.cdx.json",
   },
   {
     format: "findings_json",
@@ -254,6 +265,8 @@ function fallbackLabel(format: ExportFormat): string {
   switch (format) {
     case "cyclonedx_json":
       return "CycloneDX SBOM (JSON)";
+    case "cyclonedx_1_7":
+      return "CycloneDX 1.7 SBOM (JSON)";
     case "findings_json":
       return "Findings (JSON)";
     case "findings_csv":

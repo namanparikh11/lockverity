@@ -39,6 +39,21 @@ dependencies = [
     # depth limits in ``app.utils.yaml_safe`` to defend against billion-laughs
     # and stack-overflow attacks via hostile workflow files.
     "pyyaml>=6.0.1",
+    # v0.6 CycloneDX 1.7 SBOM export. ``cyclonedx-python-lib`` is the
+    # official data-model, 1.7 JSON serializer, and offline schema
+    # validator. The ``[json-validation]`` extra is the official
+    # dependency channel for the offline JSON validator path the v0.6
+    # exporter uses; pulling the extra (rather than re-declaring
+    # ``jsonschema`` directly) keeps the version constraint under
+    # the library's own maintenance. ``packageurl-python`` is a
+    # direct dependency because the exporter itself imports
+    # ``PackageURL`` to build and round-trip PURLs from the persisted
+    # evidence (it is not just a transitive consumer). None of these
+    # libraries make network requests at export time. Pinned with
+    # exact versions so the v0.6 dependency tree is fully
+    # reproducible from the lockfile alone.
+    "cyclonedx-python-lib[json-validation]==11.11.0",
+    "packageurl-python==0.15.1",
 ]
 
 [project.optional-dependencies]
