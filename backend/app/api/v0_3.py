@@ -1111,6 +1111,68 @@ def list_exports(
     return ExportListResponse(items=descriptors)
 
 
+# v0.7 CycloneDX 1.7 preview / readiness summary.
+#
+# Declared *before* the format-dispatching
+# ``/{scan_id}/exports/{format}`` route so FastAPI matches
+# the more specific path first. The preview is a read-only
+# JSON summary that reuses the same eligibility helper the
+# download endpoint uses. It never generates a full BOM,
+# never validates against the official JSON schema, and
+# never writes to the database. The endpoint always returns
+# 200 with a JSON body; the ``eligibility`` block in the
+# body carries the bounded verdict (the API does not raise
+# on eligibility because the consumer wants the verdict
+# to render an "ineligible, here is why" panel rather
+# than a 4xx error).
+@router.get(
+    "/{scan_id}/exports/cyclonedx_1_7/preview",
+    summary=(
+        "Preview the CycloneDX 1.7 SBOM for a scan. "
+        "Returns a read-only JSON summary: scan identity, "
+        "eligibility, inventory summary, evidence coverage, "
+        "SBOM output facts, omissions, and the legacy-export "
+        "relationship note."
+    ),
+)
+def preview_cyclonedx_v17_sbom(
+    scan_id: int,
+    session: DBSession,
+) -> dict[str, Any]:
+    """Return the v0.7 preview / readiness summary for ``scan_id``.
+
+    The route is informational. The ``eligibility`` block in
+    the response carries the same verdict the download
+    endpoint enforces, so the consumer can render the
+    "eligible / disabled" state from a single source of
+    truth. The route is read-only, deterministic, and
+    performs no provider / network call.
+
+    A 404 is returned only when the scan id does not exist
+    in the database; every other scan state (queued,
+    running, completed, partial, failed, cancelled)
+    returns 200 with the appropriate ``eligibility``
+    verdict.
+    """
+    from app.db import session as _db_session
+    from app.exporters.cyclonedx_v17 import CycloneDxV17Exporter
+
+    _get_scan_or_404(session, scan_id)
+    exporter = CycloneDxV17Exporter(_db_session.SessionLocal)
+    preview = exporter.preview(scan_run_id=scan_id)
+    if preview is None:
+        # The scan was deleted between the 404 check and
+        # the preview call. The bounded 404 envelope is
+        # the right answer; the consumer never sees a
+        # half-built preview.
+        raise ApiError(
+            ApiErrorCode.NOT_FOUND,
+            f"Scan {scan_id} not found.",
+            details={"scan_id": scan_id},
+        )
+    return preview
+
+
 # v0.6 CycloneDX 1.7 dedicated route.
 #
 # Declared *before* the format-dispatching

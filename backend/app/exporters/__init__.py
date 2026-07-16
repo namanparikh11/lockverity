@@ -16,6 +16,7 @@ from app.exporters.cyclonedx_v17 import (
     CYCLONEDX_SCHEMA_URI,
     CYCLONEDX_SPEC_VERSION,
     CycloneDxV17Exporter,
+    build_cyclonedx_v17_preview,
 )
 from app.exporters.findings_csv import FindingsCsvExporter
 from app.exporters.findings_json import FindingsJsonExporter
@@ -31,4 +32,5 @@ __all__ = [
     "FindingsCsvExporter",
     "FindingsJsonExporter",
     "SarifStaticFindingsExporter",
+    "build_cyclonedx_v17_preview",
 ]

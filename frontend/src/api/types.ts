@@ -608,6 +608,59 @@ export interface ExportDescriptor {
   filename_hint: string;
 }
 
+// ---- v0.7 CycloneDX 1.7 preview / readiness summary ----
+
+export interface CycloneDxPreviewScan {
+  scan_id: number;
+  repository_id: number;
+  scan_status: ScanStatus;
+  source_kind: string;
+}
+
+export interface CycloneDxPreviewEligibility {
+  eligible: boolean;
+  code: string;
+  reason: string;
+  limitations: string[];
+  download_expected_to_succeed: boolean;
+}
+
+export interface CycloneDxPreviewInventory {
+  component_count: number;
+  manifest_count: number;
+  ecosystems: string[];
+  direct_count: number;
+  transitive_count: number;
+  missing_version_count: number;
+  duplicate_observations_count: number;
+}
+
+export interface CycloneDxPreviewCoverage {
+  inventory_coverage: string;
+  dependency_graph_coverage: string;
+  provider_coverage: string;
+}
+
+export interface CycloneDxPreviewSbomOutput {
+  format: string;
+  spec_version: string;
+  media_type: string;
+  filename_template: string;
+  schema_uri: string;
+  schema_validation: string;
+  generation_source: string;
+}
+
+export interface CycloneDxPreviewResponse {
+  scan: CycloneDxPreviewScan;
+  eligibility: CycloneDxPreviewEligibility;
+  inventory: CycloneDxPreviewInventory;
+  evidence_coverage: CycloneDxPreviewCoverage;
+  sbom_output: CycloneDxPreviewSbomOutput;
+  omissions: string[];
+  legacy_export_relationship: string;
+}
+
 // ---- Pagination ----
 
 export interface PageMeta {

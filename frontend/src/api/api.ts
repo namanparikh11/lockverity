@@ -4,6 +4,7 @@ import type {
   Component,
   ComponentAdvisory,
   ComponentEnrichment,
+  CycloneDxPreviewResponse,
   DependencyPath,
   ExportDescriptor,
   ExportFormat,
@@ -298,6 +299,14 @@ export const api = {
     apiClient.get<{ items: ExportDescriptor[] }>(`/scans/${scanId}/exports`),
   downloadExport: (scanId: number, format: ExportFormat) =>
     apiClient.getText(`/scans/${scanId}/exports/${format}`),
+  // v0.7 preview / readiness summary for the CycloneDX 1.7
+  // export. The endpoint always returns 200; the eligibility
+  // verdict is in the body. The frontend renders the
+  // preview summary panel from this response.
+  previewCyclonedx17: (scanId: number) =>
+    apiClient.get<CycloneDxPreviewResponse>(
+      `/scans/${scanId}/exports/cyclonedx_1_7/preview`
+    ),
 };
 
 export type { ListRepositoriesFilters as _ListRepositoriesFilters };
