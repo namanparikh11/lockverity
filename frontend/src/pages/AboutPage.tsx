@@ -31,7 +31,7 @@ export function AboutPage() {
         </p>
 
         <h2 className="mt-6 text-base font-semibold text-ink-900">
-          What v0.9 implements today
+          What v1.0 implements today
         </h2>
         <p className="text-xs uppercase tracking-wide text-ink-500">
           All items in this list have direct, exercised code paths in this
@@ -137,6 +137,32 @@ export function AboutPage() {
             only; the endpoint never returns a verdict.
           </li>
           <li>
+            <strong>Human-readable evidence report (Markdown)</strong>{" "}
+            on the Export Center page: a read-only summary at{" "}
+            <code>{"GET /api/v1/scans/{id}/reports/evidence-summary/preview"}</code>{" "}
+            and a deterministic Markdown download at{" "}
+            <code>{"GET /api/v1/scans/{id}/reports/evidence-summary.md"}</code>
+            {" "}(
+            <code>text/markdown; charset=utf-8</code>). The report
+            surfaces scan identity, summary counts, evidence coverage,
+            evidence gaps, a bounded component table, the CycloneDX
+            1.7 export relationship, and an explicit
+            evidence-honesty block. The report is{" "}
+            <strong>not a security verdict</strong>,{" "}
+            <strong>not a certification</strong>, and{" "}
+            <strong>not a compliance pass-or-fail</strong>. Missing
+            evidence is rendered as &ldquo;missing&rdquo; /
+            &ldquo;no persisted evidence&rdquo; / &ldquo;no persisted
+            edges&rdquo;, never converted into a clean bill of
+            health. The endpoint reuses the v0.6 / v0.7 / v0.8 / v0.9
+            helpers for PURL, bom-ref, licence classification,
+            dependency-graph coverage, and provider coverage, so the
+            report cannot disagree with the detail drawer, the
+            evidence summary, or the CycloneDX 1.7 export. PDF, DOCX,
+            HTML, signed attestations, and certification exports are
+            out of scope by design.
+          </li>
+          <li>
             <strong>Local scan worker</strong> with a 10-stage pipeline,
             per-stage status, scan cancellation, and per-scan heartbeat
             monitoring.
@@ -162,7 +188,7 @@ export function AboutPage() {
         </ul>
 
         <h2 className="mt-6 text-base font-semibold text-ink-900">
-          What v0.9 does <em>not</em> include
+          What v1.0 does <em>not</em> include
         </h2>
         <p className="text-xs uppercase tracking-wide text-ink-500">
           Planned for later milestones, not implemented today.

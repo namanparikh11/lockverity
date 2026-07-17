@@ -1,5 +1,5 @@
 import { Download, FileText } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useParams } from "react-router-dom";
 
 import { api } from "@/api/api";
@@ -10,6 +10,7 @@ import type {
   CycloneDxPreviewInventory,
   CycloneDxPreviewResponse,
   CycloneDxPreviewSbomOutput,
+  EvidenceReportPreviewResponse,
   ExportDescriptor,
   ExportFormat,
 } from "@/api/types";
@@ -246,6 +247,7 @@ export function ExportCenterPage() {
       {!error ? (
         <>
           <CycloneDxPreviewPanel scanId={sid} />
+          <EvidenceReportPanel scanId={sid} />
           <div className="mt-4">
             <DataCompletenessNotice
               title="About exports"
@@ -685,5 +687,343 @@ function LegacyNote({ note }: { note: string }) {
     <p className="rounded border border-ink-100 bg-ink-50 p-2 text-[11px] text-ink-700">
       {note}
     </p>
+  );
+}
+
+/**
+ * v1.0 human-readable evidence report panel.
+ *
+ * Renders a card with a "Show evidence report" toggle, a
+ * Markdown download button, and a lazy preview of the
+ * report's evidence-only summary. The preview fetches
+ * the JSON summary on first expand; the download fires
+ * a separate request for the Markdown body.
+ *
+ * The panel is informational. It never claims the
+ * report is a security verdict, a certification, or a
+ * compliance pass-or-fail.
+ */
+function EvidenceReportPanel({ scanId }: { scanId: number }) {
+  const [expanded, setExpanded] = useState(false);
+  const [report, setReport] = useState<EvidenceReportPreviewResponse | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [downloading, setDownloading] = useState(false);
+  const [downloadError, setDownloadError] = useState<string | null>(null);
+  const [notImpl, setNotImpl] = useState(false);
+
+  // The v1.0 preview fetch must not be aborted by a
+  // re-render that only changes ``loading`` or
+  // ``notImpl``. A previous version of this effect
+  // included those values in the dependency array,
+  // which made React call the cleanup
+  // (``controller.abort()``) the moment
+  // ``setLoading(true)`` ran, so the in-flight fetch was
+  // cancelled before ``.then`` could fire. The fix is
+  // to track the in-flight controller and the
+  // already-fetched flag in refs, and to depend only
+  // on ``expanded`` and ``scanId``. The unmount-only
+  // effect below cancels the controller when the panel
+  // leaves the tree.
+  const reportRef = useRef<EvidenceReportPreviewResponse | null>(null);
+  const notImplRef = useRef(false);
+  const inFlightRef = useRef(false);
+  const controllerRef = useRef<AbortController | null>(null);
+
+  useEffect(() => {
+    if (!expanded) return;
+    if (reportRef.current || notImplRef.current || inFlightRef.current) return;
+    inFlightRef.current = true;
+    // Abort any previous in-flight controller (e.g. from
+    // a different scanId the user has since navigated
+    // away from).
+    if (controllerRef.current) {
+      controllerRef.current.abort();
+    }
+    const controller = new AbortController();
+    controllerRef.current = controller;
+    setError(null);
+    api
+      .previewEvidenceReport(scanId)
+      .then((response) => {
+        if (controller.signal.aborted) return;
+        reportRef.current = response;
+        setReport(response);
+      })
+      .catch((err) => {
+        if (controller.signal.aborted) return;
+        if (isNotImplemented(err)) {
+          notImplRef.current = true;
+          setNotImpl(true);
+          return;
+        }
+        setError(
+          err instanceof ApiClientError ? describeError(err) : "Unable to load the report preview."
+        );
+      })
+      .finally(() => {
+        inFlightRef.current = false;
+        // The UI infers the loading state from
+        // ``report === null``; the ``report`` set in the
+        // ``.then`` above is the only place the panel
+        // exits the skeleton. No ``setLoading(false)`` is
+        // needed because the Skeleton / error / notImpl
+        // branching is driven by ``report`` and
+        // ``error``.
+      });
+    // Intentionally no per-render cleanup: a re-render
+    // caused by ``setLoading(true)`` or ``setReport(...)``
+    // must not cancel the in-flight fetch. The
+    // unmount-only effect below handles teardown.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [expanded, scanId]);
+
+  useEffect(() => {
+    return () => {
+      if (controllerRef.current) controllerRef.current.abort();
+    };
+  }, []);
+
+  const onDownload = async () => {
+    setDownloading(true);
+    setDownloadError(null);
+    try {
+      const body = await api.downloadEvidenceReport(scanId);
+      // The download endpoint returns the Markdown body
+      // as a string; create a Blob and trigger a
+      // browser download. The filename matches the
+      // ``Content-Disposition`` the backend returns.
+      const blob = new Blob([body], { type: "text/markdown;charset=utf-8" });
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = `lockverity-scan-${scanId}.evidence-report.md`;
+      document.body.appendChild(anchor);
+      anchor.click();
+      document.body.removeChild(anchor);
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      if (isNotImplemented(err)) {
+        setDownloadError(
+          "Markdown download is not exposed by the API yet."
+        );
+        return;
+      }
+      setDownloadError(
+        err instanceof ApiClientError ? describeError(err) : "Unable to download the report."
+      );
+    } finally {
+      setDownloading(false);
+    }
+  };
+
+  return (
+    <section
+      className="mt-4 rounded-md border border-ink-200 bg-white p-4 shadow-sm"
+      data-testid="evidence-report-panel"
+    >
+      <div className="flex flex-col gap-1 border-b border-ink-100 pb-3 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <h2 className="text-sm font-semibold text-ink-800">
+            Evidence report
+          </h2>
+          <p className="text-xs text-ink-500">
+            Markdown. Evidence-only summary, not a security verdict,
+            not a certification, not a compliance pass-or-fail.
+          </p>
+        </div>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            className="btn-secondary"
+            onClick={() => setExpanded((e) => !e)}
+            aria-expanded={expanded}
+            data-testid="evidence-report-toggle"
+          >
+            {expanded ? "Hide report summary" : "Show report summary"}
+          </button>
+          <button
+            type="button"
+            className="btn-primary inline-flex items-center gap-1"
+            onClick={onDownload}
+            disabled={downloading}
+            data-testid="evidence-report-download"
+            aria-label="Download Markdown report"
+          >
+            <Download aria-hidden="true" className="h-4 w-4" />
+            {downloading ? "Preparing\u2026" : "Download Markdown"}
+          </button>
+        </div>
+      </div>
+      {downloadError ? (
+        <p
+          className="mt-2 rounded border border-rose-200 bg-rose-50 p-2 text-xs text-rose-900"
+          data-testid="evidence-report-download-error"
+        >
+          {downloadError}
+        </p>
+      ) : null}
+      {expanded ? (
+        <div className="mt-3" data-testid="evidence-report-summary">
+          {notImpl ? (
+            <p className="text-xs text-ink-500">
+              The evidence-report endpoint is not exposed by the API yet.
+            </p>
+          ) : error ? (
+            <p
+              className="rounded border border-rose-200 bg-rose-50 p-2 text-xs text-rose-900"
+              data-testid="evidence-report-error"
+            >
+              {error}
+            </p>
+          ) : report === null ? (
+            <Skeleton rows={4} />
+          ) : (
+            <EvidenceReportSummary report={report} />
+          )}
+        </div>
+      ) : null}
+    </section>
+  );
+}
+
+/**
+ * Renders the bounded evidence-only summary the v1.0
+ * preview endpoint returns. The component never claims
+ * the report is a security verdict, a certification, or
+ * a compliance pass-or-fail. Missing evidence is rendered
+ * as &ldquo;missing&rdquo; / &ldquo;no persisted
+ * evidence&rdquo; / &ldquo;no persisted edges&rdquo;.
+ */
+function EvidenceReportSummary({
+  report,
+}: {
+  report: EvidenceReportPreviewResponse;
+}) {
+  const summary = report.summary;
+  const gaps = report.evidence_gaps;
+  const coverage = report.evidence_coverage;
+  const rel = report.export_relationship;
+  return (
+    <div className="space-y-3 text-xs" data-testid="evidence-report-body">
+      <p
+        className="rounded border border-ink-100 bg-ink-50 p-2 text-ink-700"
+        data-testid="evidence-report-disclaimer"
+      >
+        {report.disclaimer}
+      </p>
+      <div>
+        <p className="text-[10px] uppercase tracking-wide text-ink-500">
+          Scan
+        </p>
+        <ul className="mt-1 space-y-0.5 text-ink-700">
+          <li>
+            Status:{" "}
+            <span className="font-mono" data-testid="evidence-report-scan-status">
+              {report.scan.scan_status}
+            </span>
+          </li>
+          <li>
+            Components:{" "}
+            <span className="font-mono" data-testid="evidence-report-component-count">
+              {summary.component_count}
+            </span>
+          </li>
+          <li>
+            Manifests:{" "}
+            <span className="font-mono" data-testid="evidence-report-manifest-count">
+              {summary.manifest_count}
+            </span>
+          </li>
+        </ul>
+      </div>
+      <div>
+        <p className="text-[10px] uppercase tracking-wide text-ink-500">
+          Evidence gaps
+        </p>
+        <ul
+          className="mt-1 space-y-0.5 text-ink-700"
+          data-testid="evidence-report-gaps"
+        >
+          <li>
+            Missing version:{" "}
+            <span className="font-mono">{gaps.missing_version_count}</span>
+          </li>
+          <li>
+            Missing licence evidence:{" "}
+            <span className="font-mono">
+              {gaps.missing_licence_evidence_count}
+            </span>
+          </li>
+          <li>
+            Missing provider evidence:{" "}
+            <span className="font-mono">
+              {gaps.missing_provider_evidence_count}
+            </span>
+          </li>
+          <li>
+            No persisted dependency edges:{" "}
+            <span className="font-mono">
+              {gaps.no_persisted_edges_count}
+            </span>
+          </li>
+        </ul>
+      </div>
+      <div>
+        <p className="text-[10px] uppercase tracking-wide text-ink-500">
+          CycloneDX 1.7 relationship
+        </p>
+        <ul
+          className="mt-1 space-y-0.5 text-ink-700"
+          data-testid="evidence-report-cyclonedx"
+        >
+          <li>
+            Eligible:{" "}
+            <span className="font-mono">
+              {rel.cyclonedx_eligible ? "yes" : "no"}
+            </span>
+          </li>
+          <li>
+            Appear in BOM:{" "}
+            <span className="font-mono">
+              {rel.appears_in_cyclonedx_17_count}
+            </span>
+          </li>
+          <li>
+            Dependency relationships emitted:{" "}
+            <span className="font-mono">
+              {rel.cyclonedx_relationships_emitted_count}
+            </span>
+          </li>
+        </ul>
+      </div>
+      <div>
+        <p className="text-[10px] uppercase tracking-wide text-ink-500">
+          Evidence coverage
+        </p>
+        <ul
+          className="mt-1 space-y-0.5 text-ink-700"
+          data-testid="evidence-report-coverage"
+        >
+          <li>
+            Inventory:{" "}
+            <span className="font-mono">{coverage.inventory_coverage}</span>
+          </li>
+          <li>
+            Dependency graph:{" "}
+            <span className="font-mono">
+              {coverage.dependency_graph_coverage}
+            </span>
+          </li>
+          <li>
+            Provider:{" "}
+            <span className="font-mono">{coverage.provider_coverage}</span>
+          </li>
+        </ul>
+      </div>
+      <p className="text-[11px] text-ink-500">
+        Not a certification. Not a security verdict. Not a compliance
+        pass-or-fail.
+      </p>
+    </div>
   );
 }

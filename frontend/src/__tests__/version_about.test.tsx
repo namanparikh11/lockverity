@@ -30,7 +30,7 @@ describe("version consistency", () => {
       new Response(
         JSON.stringify({
           name: "Lockverity",
-          version: "0.9.0",
+          version: "1.0.0",
           tagline: "Evidence-first software supply-chain assurance",
           environment: "test",
           api_prefix: "/api/v1",
@@ -52,7 +52,7 @@ describe("version consistency", () => {
       </MemoryRouter>
     );
     await waitFor(() => {
-      expect(screen.getByText("v0.9.0")).toBeInTheDocument();
+      expect(screen.getByText("v1.0.0")).toBeInTheDocument();
     });
   });
 
@@ -88,7 +88,7 @@ describe("About page current product copy", () => {
     cleanup();
   });
 
-  it("documents v0.9 capabilities and the defensive-only scope", () => {
+  it("documents v1.0 capabilities and the defensive-only scope", () => {
     render(
       <MemoryRouter initialEntries={["/about"]}>
         <Routes>
@@ -98,24 +98,38 @@ describe("About page current product copy", () => {
         </Routes>
       </MemoryRouter>
     );
-    // The "What v0.9 implements today" section header must be
+    // The "What v1.0 implements today" section header must be
     // present. The About page is the single source of truth
     // for the current milestone and must be kept in sync with
     // ``backend/app/_version.py``.
     expect(
-      screen.getByRole("heading", { name: /what v0\.9 implements today/i })
+      screen.getByRole("heading", { name: /what v1\.0 implements today/i })
     ).toBeInTheDocument();
-    // The v0.9 evidence search / filtering capability is
-    // described with the evidence-honest wording
-    // (&ldquo;not persisted&rdquo; / &ldquo;none observed&rdquo; /
-    // &ldquo;no persisted edges&rdquo;) and the endpoint path.
+    // The v1.0 human-readable evidence report is described with
+    // the bounded &ldquo;not a verdict / not a certification /
+    // not a compliance pass-or-fail&rdquo; wording and the two
+    // endpoint paths.
     expect(
-      screen.getByText(/evidence search and filtering/i)
+      screen.getByText(/human-readable evidence report/i)
     ).toBeInTheDocument();
     expect(
       screen.getByText(
-        /\/api\/v1\/scans\/\{id\}\/components\/evidence-summary/
+        /\/api\/v1\/scans\/\{id\}\/reports\/evidence-summary\/preview/
       )
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        /\/api\/v1\/scans\/\{id\}\/reports\/evidence-summary\.md/
+      )
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(/not a security verdict/i)
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(/not a certification/i)
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(/not a compliance pass-or-fail/i)
     ).toBeInTheDocument();
     expect(
       screen.getByText(/does not execute analyzed code/i)

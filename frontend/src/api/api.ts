@@ -8,6 +8,7 @@ import type {
   ComponentEvidenceSummaryResponse,
   CycloneDxPreviewResponse,
   DependencyPath,
+  EvidenceReportPreviewResponse,
   ExportDescriptor,
   ExportFormat,
   Finding,
@@ -349,6 +350,21 @@ export const api = {
     apiClient.get<CycloneDxPreviewResponse>(
       `/scans/${scanId}/exports/cyclonedx_1_7/preview`
     ),
+  // v1.0 human-readable evidence report — preview
+  // summary (lazy) and Markdown download. The download
+  // route uses ``getText`` so the raw Markdown body
+  // reaches the consumer unmodified; the response
+  // carries a per-scan ``Content-Disposition`` filename
+  // that the consumer can read from the headers when
+  // present.
+  previewEvidenceReport: (scanId: number) =>
+    apiClient.get<EvidenceReportPreviewResponse>(
+      `/scans/${scanId}/reports/evidence-summary/preview`
+    ),
+  downloadEvidenceReport: (scanId: number) =>
+    apiClient
+      .getText(`/scans/${scanId}/reports/evidence-summary.md`)
+      .then((r) => r.body),
 };
 
 export type { ListRepositoriesFilters as _ListRepositoriesFilters };
