@@ -1557,9 +1557,128 @@ def _orchestrator_session_factory():
     return _db_session.SessionLocal
 
 
+# v1.0 human-readable evidence report — preview and download.
+#
+# The two routes share a single backend rule
+# (``app.reports.evidence.build_evidence_report``). The
+# preview returns a JSON summary the frontend renders
+# in a lazy expandable panel; the download returns the
+# full Markdown report. Both are read-only, deterministic,
+# and never call a provider, never download a
+# repository, never execute analyzed code, and never
+# write to the database.
+#
+# Route declaration order matters: the dedicated
+# ``/{scan_id}/reports/evidence-summary/preview`` and
+# ``/{scan_id}/reports/evidence-summary.md`` routes are
+# declared *before* the legacy
+# ``/{scan_id}/exports/{format}`` route so FastAPI
+# matches the more specific path first. The dispatcher
+# would otherwise treat ``evidence-summary.md`` as a
+# format identifier.
+@router.get(
+    "/{scan_id}/reports/evidence-summary/preview",
+    summary=(
+        "Preview the v1.0 human-readable evidence report for "
+        "a scan. Returns a read-only JSON summary: report "
+        "metadata, scan identity, summary counts, evidence "
+        "coverage, evidence gaps, the bounded component table, "
+        "the CycloneDX 1.7 export relationship, and the "
+        "evidence-honesty markers."
+    ),
+)
+def preview_evidence_report(
+    scan_id: int,
+    session: DBSession,
+) -> dict[str, Any]:
+    """Return the v1.0 evidence report preview for ``scan_id``.
+
+    The route is informational. It always returns 200
+    with the report dict when the scan exists, regardless
+    of the scan's terminal state. The
+    ``evidence_coverage`` block carries the bounded
+    verdict; a failed / cancelled / queued / running scan
+    returns ``not_applicable`` coverage and an empty
+    inventory, so the consumer can render the honest
+    "no persisted evidence" panel rather than a fake
+    success.
+
+    A 404 is returned only when the scan id does not
+    exist in the database.
+    """
+    from app.db import session as _db_session
+    from app.reports.evidence import EvidenceReportService
+
+    _get_scan_or_404(session, scan_id)
+    service = EvidenceReportService(_db_session.SessionLocal)
+    preview = service.fetch(scan_run_id=scan_id)
+    if preview is None:
+        raise ApiError(
+            ApiErrorCode.NOT_FOUND,
+            f"Scan {scan_id} not found.",
+            details={"scan_id": scan_id},
+        )
+    return preview
+
+
+@router.get(
+    "/{scan_id}/reports/evidence-summary.md",
+    summary=(
+        "Download the v1.0 human-readable evidence report "
+        "for a scan as Markdown. Read-only, deterministic, "
+        "generated only from persisted evidence."
+    ),
+    response_class=Response,
+)
+def download_evidence_report_markdown(
+    scan_id: int,
+    session: DBSession,
+) -> Response:
+    """Return the v1.0 evidence report as Markdown.
+
+    The route is the v1.0 download entry point. It:
+
+    - Returns the Markdown with the documented
+      ``text/markdown; charset=utf-8`` media type.
+    - Uses a deterministic ``Content-Disposition``
+      filename that includes the scan id, so two
+      different scans never collide on the same
+      downloaded file.
+    - Performs no database writes and no external
+      HTTP requests.
+    - Returns 404 only when the scan id does not exist.
+    """
+    from app.db import session as _db_session
+    from app.reports.evidence import (
+        REPORT_MEDIA_TYPE,
+        EvidenceReportService,
+        render_evidence_report_markdown,
+    )
+
+    _get_scan_or_404(session, scan_id)
+    service = EvidenceReportService(_db_session.SessionLocal)
+    preview = service.fetch(scan_run_id=scan_id)
+    if preview is None:
+        raise ApiError(
+            ApiErrorCode.NOT_FOUND,
+            f"Scan {scan_id} not found.",
+            details={"scan_id": scan_id},
+        )
+    payload = render_evidence_report_markdown(preview)
+    filename = f"lockverity-scan-{scan_id}.evidence-report.md"
+    return Response(
+        content=payload,
+        headers={
+            "Content-Type": REPORT_MEDIA_TYPE,
+            "Content-Disposition": f'attachment; filename="{filename}"',
+        },
+    )
+
+
 __all__ = [
     "auto_run",
     "compare_scans",
+    "download_evidence_report_markdown",
     "download_export",
     "get_dependency_path",
     "list_advisories",
@@ -1569,5 +1688,6 @@ __all__ = [
     "list_openssf_checks",
     "list_vulnerabilities",
     "list_workflow_findings",
+    "preview_evidence_report",
     "router",
 ]

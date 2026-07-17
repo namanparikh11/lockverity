@@ -886,3 +886,113 @@ export interface Paginated<T> {
   items: T[];
   pagination: PageMeta;
 }
+
+// ---- v1.0 human-readable evidence report ----
+
+export interface EvidenceReportMetadata {
+  report_name: string;
+  generator: string;
+  generator_version: string;
+  report_format: string;
+  report_format_version: string;
+  generated_at_utc: string;
+  scan_id: number;
+  repository_id: number;
+}
+
+export interface EvidenceReportScan {
+  scan_id: number;
+  repository_id: number;
+  repository_canonical_url: string | null;
+  repository_source_type: string | null;
+  repository_visibility: string | null;
+  scan_status: ScanStatus;
+  scan_trigger_type: string | null;
+  resolved_commit_sha: string | null;
+  analyzer_version: string | null;
+}
+
+export interface EvidenceReportSummary {
+  component_count: number;
+  manifest_count: number;
+  ecosystems: Record<string, number>;
+  direct_count: number;
+  transitive_count: number;
+  version_present_count: number;
+  version_missing_count: number;
+  licence_observed_count: number;
+  licence_missing_count: number;
+  provider_observed_count: number;
+  provider_missing_count: number;
+  edges_observed_count: number;
+  edges_none_observed_count: number;
+  purl_persisted_count: number;
+  purl_constructible_count: number;
+  purl_omitted_count: number;
+  appears_in_cyclonedx_17_count: number;
+  cyclonedx_version_omitted_count: number;
+  cyclonedx_relationships_emitted_count: number;
+}
+
+export interface EvidenceReportEvidenceCoverage {
+  inventory_coverage: string;
+  dependency_graph_coverage: string;
+  provider_coverage: string;
+}
+
+export interface EvidenceReportEvidenceGaps {
+  missing_version_count: number;
+  missing_licence_evidence_count: number;
+  missing_provider_evidence_count: number;
+  no_persisted_edges_count: number;
+  purl_omitted_count: number;
+}
+
+export interface EvidenceReportComponentRow {
+  id: number;
+  ecosystem: string | null;
+  package_name: string;
+  version: string | null;
+  version_source: string | null;
+  direct: boolean;
+  purl_state: "persisted" | "constructible" | "omitted";
+  edges_evidence: string;
+  licence_evidence: string;
+  provider_evidence: string;
+  appears_in_cyclonedx_17: boolean;
+  cyclonedx_version_omitted: boolean;
+  cyclonedx_relationships_emitted: boolean;
+}
+
+export interface EvidenceReportTruncation {
+  truncated: boolean;
+  shown: number;
+  total: number;
+  reason: string;
+}
+
+export interface EvidenceReportExportRelationship {
+  cyclonedx_eligible: boolean;
+  cyclonedx_eligibility_code: string;
+  cyclonedx_eligibility_reason: string;
+  appears_in_cyclonedx_17_count: number;
+  cyclonedx_version_omitted_count: number;
+  cyclonedx_relationships_emitted_count: number;
+  cyclonedx_relationships_omitted_count: number;
+  inventory_coverage: string;
+  dependency_graph_coverage: string;
+  provider_coverage: string;
+}
+
+export interface EvidenceReportPreviewResponse {
+  metadata: EvidenceReportMetadata;
+  scan: EvidenceReportScan;
+  summary: EvidenceReportSummary;
+  evidence_coverage: EvidenceReportEvidenceCoverage;
+  evidence_gaps: EvidenceReportEvidenceGaps;
+  components: EvidenceReportComponentRow[];
+  truncated: EvidenceReportTruncation;
+  export_relationship: EvidenceReportExportRelationship;
+  omissions: string[];
+  disclaimer: string;
+}
