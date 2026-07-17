@@ -198,13 +198,29 @@ The default SQLite database is `./lockverity.sqlite`. To use
 PostgreSQL instead, set `LOCKVERITY_DATABASE_URL` to a SQLAlchemy
 URL like `postgresql+psycopg://user:pass@host:5432/lockverity`.
 
-For the v1.0 demo dataset, point the backend at the manual-review
-SQLite file:
+For the v1.1 demo dataset, the safest path is to use the bundled
+loader so the demo never depends on a hidden SQLite file:
 
 ```bash
-export LOCKVERITY_DATABASE_URL="sqlite:///var/manual-review/review.sqlite"
+cd backend
+.venv\Scripts\python.exe scripts\load_demo.py --reset-demo-db
+# or on POSIX: .venv/bin/python scripts/load_demo.py --reset-demo-db
+
+export LOCKVERITY_DATABASE_URL="sqlite:///var/demo/lockverity-demo.sqlite"
+# (PowerShell: $env:LOCKVERITY_DATABASE_URL = "sqlite:///var/demo/lockverity-demo.sqlite")
+
 uvicorn app.main:app --reload --port 8765
 ```
+
+The loader is safe to commit: every value it persists is an
+obviously-synthetic literal (the fixture repository is
+`https://github.com/example-org/lockverity-fixture`, the resolved
+commit SHA is the `deadbeef` fill, every package name is
+`alpha` / `beta` / `gamma` / `left-pad` / `right-pad` / `stay`,
+and no real secret, token, or personal data is ever written).
+The script creates the four documented scan states
+(completed / partial / failed / cancelled) so every v0.5–v1.0
+surface can be reviewed end-to-end.
 
 The backend will log the resolved database path on startup.
 
