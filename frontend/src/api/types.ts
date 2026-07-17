@@ -661,6 +661,132 @@ export interface CycloneDxPreviewResponse {
   legacy_export_relationship: string;
 }
 
+// ---- v0.8 component evidence drilldown ----
+
+export interface ComponentEvidenceScan {
+  scan_id: number;
+  repository_id: number;
+  scan_status: ScanStatus;
+}
+
+export interface ComponentEvidenceIdentity {
+  id: number;
+  ecosystem: string | null;
+  package_name: string;
+  version: string | null;
+  version_source: string | null;
+  direct: boolean;
+  development: boolean;
+  optional: boolean;
+  scope: string | null;
+  relationship: string | null;
+  integrity: string | null;
+  package_url: string | null;
+  package_url_well_formed: boolean | null;
+  purl_constructible: boolean;
+  bom_ref: string;
+}
+
+export interface ComponentEvidenceManifest {
+  available: boolean;
+  id: number | null;
+  path: string | null;
+  manifest_type: string | null;
+  ecosystem: string | null;
+  parse_status: string | null;
+  parse_warning_count: number | null;
+}
+
+export interface ComponentEvidenceLicenceObservation {
+  value: string;
+  classification: string;
+  provenance: string;
+  source: string | null;
+  finding_id: number;
+  rule_id: string;
+}
+
+export interface ComponentEvidenceLicenceBlock {
+  available: boolean;
+  reason: string | null;
+  observations: ComponentEvidenceLicenceObservation[];
+  sources: string[];
+}
+
+export interface ComponentEvidenceProviderObservation {
+  id: number;
+  provider: string;
+  operation: string;
+  status: string;
+  cache_status: string | null;
+  http_status: number | null;
+  records_returned: number;
+  requested_at: string | null;
+  completed_at: string | null;
+  error_code: string | null;
+  error_summary: string | null;
+  evidence_keys: string[];
+}
+
+export interface ComponentEvidenceAdvisory {
+  advisory_id: number;
+  available: boolean;
+  reason: string | null;
+  canonical_id: string | null;
+  source_advisory_id: string | null;
+  source: string | null;
+  severity_label: string | null;
+  severity_score: number | null;
+  severity_source: string | null;
+  fixed_versions: string[];
+  aliases: string[];
+  confidence: null;
+  provider_provenance: string | null;
+  affected: boolean;
+}
+
+export interface ComponentEvidenceProviderBlock {
+  available: boolean;
+  any_provider_queried: boolean;
+  observations: ComponentEvidenceProviderObservation[];
+  advisories: ComponentEvidenceAdvisory[];
+}
+
+export interface ComponentEvidenceDependencyEdge {
+  edge_id: number;
+  component_id: number;
+  other_component_id: number;
+  direction: "incoming" | "outgoing";
+  relationship: string;
+  depth: number;
+}
+
+export interface ComponentEvidenceDependencyBlock {
+  graph_coverage: string;
+  incoming: ComponentEvidenceDependencyEdge[];
+  outgoing: ComponentEvidenceDependencyEdge[];
+  no_edges_observed: boolean;
+}
+
+export interface ComponentEvidenceExportImplications {
+  appears_in_cyclonedx_17: boolean;
+  version_omitted: boolean;
+  purl_emitted: boolean;
+  dependency_relationships_emitted: boolean;
+  graph_coverage: string;
+}
+
+export interface ComponentEvidenceResponse {
+  scan: ComponentEvidenceScan;
+  component: ComponentEvidenceIdentity;
+  manifest: ComponentEvidenceManifest;
+  licence_evidence: ComponentEvidenceLicenceBlock;
+  provider_evidence: ComponentEvidenceProviderBlock;
+  dependency_evidence: ComponentEvidenceDependencyBlock;
+  export_implications: ComponentEvidenceExportImplications;
+  omissions: string[];
+}
+
 // ---- Pagination ----
 
 export interface PageMeta {

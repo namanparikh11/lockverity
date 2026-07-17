@@ -704,3 +704,159 @@ def test_preview_endpoint_does_not_validate_full_bom(app_config, workspace_root)
     body = r.json()
     assert body["eligibility"]["eligible"] is False
     assert body["eligibility"]["code"] == "scan_not_started"
+
+
+# v0.8 component evidence drilldown — API tests.
+#
+# The endpoint is a sibling of the existing
+# ``/components/{component_id}/path`` route. The fixture
+# mirrors the dependency-path test: a small persisted
+# manifest + component + (optionally) a dependency edge,
+# queried through the public FastAPI route.
+
+
+def test_component_evidence_endpoint_returns_full_summary(app_config, workspace_root) -> None:
+    with _db_session.SessionLocal() as s:
+        scan_id, _repo_id, _ = _setup_scan_with_zip(s, workspace_root)
+        scan_service.transition_scan(s, scan_id, target=ScanStatus.RUNNING)
+        scan_service.transition_scan(s, scan_id, target=ScanStatus.COMPLETED)
+        manifest = Manifest(
+            scan_run_id=scan_id,
+            path="package.json",
+            manifest_type="package_json",
+            ecosystem="npm",
+            parse_status=ManifestParseStatus.PARSED,
+        )
+        s.add(manifest)
+        s.flush()
+        component = Component(
+            scan_run_id=scan_id,
+            manifest_id=manifest.id,
+            ecosystem="npm",
+            package_name="left-pad",
+            version="1.0.0",
+            version_source=ComponentVersionSource.LOCKFILE,
+            package_url="pkg:npm/left-pad@1.0.0",
+            direct=True,
+        )
+        s.add(component)
+        s.commit()
+        component_id = component.id
+    client = TestClient(app)
+    r = client.get(f"/api/v1/scans/{scan_id}/components/{component_id}/evidence")
+    assert r.status_code == 200
+    body = r.json()
+    # The documented shape is the contract.
+    assert set(body.keys()) == {
+        "scan",
+        "component",
+        "manifest",
+        "licence_evidence",
+        "provider_evidence",
+        "dependency_evidence",
+        "export_implications",
+        "omissions",
+    }
+    assert body["component"]["id"] == component_id
+    assert body["component"]["package_name"] == "left-pad"
+    assert body["component"]["package_url"] == "pkg:npm/left-pad@1.0.0"
+    assert body["component"]["package_url_well_formed"] is True
+    assert body["component"]["bom_ref"] == "pkg:npm/left-pad@1.0.0"
+    assert body["manifest"]["path"] == "package.json"
+    assert body["manifest"]["parse_status"] == "parsed"
+    # The export implications are derived from the v0.6
+    # exporter rules.
+    assert body["export_implications"]["appears_in_cyclonedx_17"] is True
+    assert body["export_implications"]["version_omitted"] is False
+    assert body["export_implications"]["purl_emitted"] is True
+    # No outgoing edges were persisted.
+    assert body["export_implications"]["dependency_relationships_emitted"] is False
+    # No provider / licence evidence.
+    assert body["licence_evidence"]["available"] is False
+    assert body["provider_evidence"]["available"] is False
+    assert body["dependency_evidence"]["no_edges_observed"] is True
+
+
+def test_component_evidence_endpoint_returns_404_for_unknown_component(
+    app_config, workspace_root
+) -> None:
+    with _db_session.SessionLocal() as s:
+        scan_id, _repo_id, _ = _setup_scan_with_zip(s, workspace_root)
+        scan_service.transition_scan(s, scan_id, target=ScanStatus.RUNNING)
+        scan_service.transition_scan(s, scan_id, target=ScanStatus.COMPLETED)
+        s.commit()
+    client = TestClient(app)
+    r = client.get(f"/api/v1/scans/{scan_id}/components/999999/evidence")
+    assert r.status_code == 404
+
+
+def test_component_evidence_endpoint_returns_404_for_cross_scan_component(
+    app_config, workspace_root
+) -> None:
+    with _db_session.SessionLocal() as s:
+        scan_a, _repo_a, _ = _setup_scan_with_zip(s, workspace_root)
+        scan_b, _repo_b, _ = _setup_scan_with_zip(s, workspace_root)
+        scan_service.transition_scan(s, scan_a, target=ScanStatus.RUNNING)
+        scan_service.transition_scan(s, scan_a, target=ScanStatus.COMPLETED)
+        scan_service.transition_scan(s, scan_b, target=ScanStatus.RUNNING)
+        scan_service.transition_scan(s, scan_b, target=ScanStatus.COMPLETED)
+        manifest = Manifest(
+            scan_run_id=scan_a,
+            path="package.json",
+            manifest_type="package_json",
+            ecosystem="npm",
+            parse_status=ManifestParseStatus.PARSED,
+        )
+        s.add(manifest)
+        s.flush()
+        component = Component(
+            scan_run_id=scan_a,
+            manifest_id=manifest.id,
+            ecosystem="npm",
+            package_name="left-pad",
+            version="1.0.0",
+            version_source=ComponentVersionSource.LOCKFILE,
+            direct=True,
+        )
+        s.add(component)
+        s.commit()
+        component_id = component.id
+    client = TestClient(app)
+    # The component belongs to scan_a; scan_b must reject.
+    r = client.get(f"/api/v1/scans/{scan_b}/components/{component_id}/evidence")
+    assert r.status_code == 404
+
+
+def test_component_evidence_endpoint_response_is_deterministic(app_config, workspace_root) -> None:
+    with _db_session.SessionLocal() as s:
+        scan_id, _repo_id, _ = _setup_scan_with_zip(s, workspace_root)
+        scan_service.transition_scan(s, scan_id, target=ScanStatus.RUNNING)
+        scan_service.transition_scan(s, scan_id, target=ScanStatus.COMPLETED)
+        manifest = Manifest(
+            scan_run_id=scan_id,
+            path="package.json",
+            manifest_type="package_json",
+            ecosystem="npm",
+            parse_status=ManifestParseStatus.PARSED,
+        )
+        s.add(manifest)
+        s.flush()
+        component = Component(
+            scan_run_id=scan_id,
+            manifest_id=manifest.id,
+            ecosystem="npm",
+            package_name="left-pad",
+            version="1.0.0",
+            version_source=ComponentVersionSource.LOCKFILE,
+            package_url="pkg:npm/left-pad@1.0.0",
+            direct=True,
+        )
+        s.add(component)
+        s.commit()
+        component_id = component.id
+    client = TestClient(app)
+    r1 = client.get(f"/api/v1/scans/{scan_id}/components/{component_id}/evidence")
+    r2 = client.get(f"/api/v1/scans/{scan_id}/components/{component_id}/evidence")
+    assert r1.status_code == 200
+    assert r2.status_code == 200
+    assert r1.json() == r2.json()
