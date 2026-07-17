@@ -4,6 +4,7 @@ import type {
   Component,
   ComponentAdvisory,
   ComponentEnrichment,
+  ComponentEvidenceResponse,
   CycloneDxPreviewResponse,
   DependencyPath,
   ExportDescriptor,
@@ -225,6 +226,15 @@ export const api = {
     }),
   getDependencyPath: (scanId: number, componentId: number) =>
     apiClient.get<DependencyPath>(`/scans/${scanId}/components/${componentId}/path`),
+  // v0.8 component evidence drilldown. Read-only summary
+  // of identity, manifest, licence, provider, dependency,
+  // and CycloneDX 1.7 export implications for one
+  // component. Returns 404 when the component is unknown
+  // to the scan; the consumer renders the bounded error.
+  getComponentEvidence: (scanId: number, componentId: number) =>
+    apiClient.get<ComponentEvidenceResponse>(
+      `/scans/${scanId}/components/${componentId}/evidence`
+    ),
 
   // ---- Vulnerabilities ----
   listVulnerabilities: (scanId: number, filters: ListVulnerabilitiesFilters = {}) =>

@@ -2,8 +2,14 @@ import { useEffect, useState } from "react";
 import { useParams } from "react-router-dom";
 
 import { api } from "@/api/api";
+import { ApiClientError, describeError } from "@/api/client";
 import { isNotImplemented } from "@/api/fallback";
-import type { Component, DependencyPath, PageMeta } from "@/api/types";
+import type {
+  Component,
+  ComponentEvidenceResponse,
+  DependencyPath,
+  PageMeta,
+} from "@/api/types";
 import { ComponentIdentity, DependencyPathView } from "@/components/DependencyPath";
 import { DetailsDrawer } from "@/components/DetailsDrawer";
 import { EmptyState } from "@/components/EmptyState";
@@ -13,7 +19,6 @@ import { PageHeader } from "@/components/PageHeader";
 import { Pagination } from "@/components/Pagination";
 import { ResponsiveTable } from "@/components/ResponsiveTable";
 import { Skeleton } from "@/components/Skeleton";
-import { StatusBadge } from "@/components/StatusBadge";
 
 const SCOPE_OPTIONS = [
   { value: "all", label: "All" },
@@ -63,6 +68,14 @@ export function DependencyExplorerPage() {
   const [path, setPath] = useState<DependencyPath | null>(null);
   const [pathLoading, setPathLoading] = useState(false);
   const [notImpl, setNotImpl] = useState(false);
+  // v0.8 evidence drilldown: a second side drawer surfaces
+  // the read-only evidence summary for the same component.
+  // The evidence fetch is lazy: it only fires when the user
+  // clicks the "View evidence" button on a row. The fetch
+  // is aborted on unmount.
+  const [evidence, setEvidence] = useState<ComponentEvidenceResponse | null>(null);
+  const [evidenceError, setEvidenceError] = useState<string | null>(null);
+  const [evidenceLoading, setEvidenceLoading] = useState(false);
 
   useEffect(() => {
     setPage(1);
@@ -128,6 +141,44 @@ export function DependencyExplorerPage() {
       })
       .finally(() => {
         if (!controller.signal.aborted) setPathLoading(false);
+      });
+    return () => controller.abort();
+  }, [sid, selected]);
+
+  // v0.8 evidence drilldown: a separate, lazy fetch that
+  // surfaces the read-only evidence summary for the
+  // currently selected component. The fetch is aborted on
+  // unmount and on component change.
+  useEffect(() => {
+    if (!selected) {
+      setEvidence(null);
+      setEvidenceError(null);
+      return;
+    }
+    if (!Number.isFinite(sid)) return;
+    const controller = new AbortController();
+    setEvidenceLoading(true);
+    setEvidenceError(null);
+    api
+      .getComponentEvidence(sid, selected.id)
+      .then((response) => {
+        if (controller.signal.aborted) return;
+        setEvidence(response);
+      })
+      .catch((err) => {
+        if (controller.signal.aborted) return;
+        if (err instanceof ApiClientError) {
+          if (err.apiError.httpStatus === 404) {
+            setEvidenceError("Evidence is not available for this component.");
+            return;
+          }
+          setEvidenceError(describeError(err));
+          return;
+        }
+        setEvidenceError("Evidence is not available for this component.");
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setEvidenceLoading(false);
       });
     return () => controller.abort();
   }, [sid, selected]);
@@ -201,7 +252,7 @@ export function DependencyExplorerPage() {
       ) : (
         <>
           <ResponsiveTable
-            headers={["Package", "Ecosystem", "Version", "Source", "Direct?", "Scope"]}
+            headers={["Package", "Ecosystem", "Version", "Source", "Direct?", "Scope", "Evidence"]}
           >
             {items.map((component) => (
               <tr
@@ -222,10 +273,27 @@ export function DependencyExplorerPage() {
                   {component.version_source}
                 </td>
                 <td className="table-cell">
-                  <StatusBadge status={component.direct ? "available" : "transitive"} />
+                  <span className="font-mono">{component.direct ? "yes" : "no"}</span>
                 </td>
                 <td className="table-cell text-ink-500">
                   {component.scope ?? "—"}
+                </td>
+                <td className="table-cell">
+                  <button
+                    type="button"
+                    className="rounded border border-ink-300 bg-white px-2 py-1 text-xs font-medium text-ink-800"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setSelected(component);
+                      // The drawer effect picks up the
+                      // selected component and fetches
+                      // the evidence summary.
+                    }}
+                    data-testid={`component-evidence-button-${component.id}`}
+                    aria-label={`View evidence for ${component.package_name}`}
+                  >
+                    View evidence
+                  </button>
                 </td>
               </tr>
             ))}
@@ -270,9 +338,354 @@ export function DependencyExplorerPage() {
                 </ul>
               </div>
             ) : null}
+            <div>
+              <h3 className="label">Component evidence</h3>
+              <ComponentEvidencePanel
+                evidence={evidence}
+                error={evidenceError}
+                loading={evidenceLoading}
+              />
+            </div>
           </div>
         ) : null}
       </DetailsDrawer>
     </>
+  );
+}
+
+/**
+ * v0.8 component evidence panel.
+ *
+ * Renders the read-only evidence summary for the currently
+ * selected component inside the existing DetailsDrawer. The
+ * panel surfaces every documented section (identity, manifest,
+ * licence, provider, dependency, export implications, omissions)
+ * with the evidence-honesty wording the contract guarantees.
+ *
+ * The panel never:
+ *
+ * - describes the component as clean / secure / fixed;
+ * - claims the dependency graph is complete;
+ * - claims the SBOM is a security verdict;
+ * - fabricates missing values.
+ */
+function ComponentEvidencePanel({
+  evidence,
+  error,
+  loading,
+}: {
+  evidence: ComponentEvidenceResponse | null;
+  error: string | null;
+  loading: boolean;
+}) {
+  if (error) {
+    return (
+      <p
+        className="mt-1 rounded border border-rose-200 bg-rose-50 p-2 text-xs text-rose-900"
+        data-testid="component-evidence-error"
+      >
+        {error}
+      </p>
+    );
+  }
+  if (loading && !evidence) {
+    return (
+      <p
+        className="mt-1 text-xs text-ink-500"
+        data-testid="component-evidence-loading"
+      >
+        Loading evidence…
+      </p>
+    );
+  }
+  if (!evidence) {
+    return (
+      <p
+        className="mt-1 text-xs text-ink-500"
+        data-testid="component-evidence-empty"
+      >
+        Evidence is not yet available.
+      </p>
+    );
+  }
+  const c = evidence.component;
+  const impl = evidence.export_implications;
+  return (
+    <div className="mt-1 space-y-3 text-xs" data-testid="component-evidence-panel">
+      <div>
+        <p className="text-[10px] uppercase tracking-wide text-ink-500">Identity</p>
+        <ul className="mt-1 space-y-0.5 text-ink-700">
+          <li>
+            <span className="text-ink-500">Package:</span>{" "}
+            <span className="font-mono" data-testid="ce-package-name">
+              {c.package_name}
+            </span>
+          </li>
+          <li>
+            <span className="text-ink-500">Ecosystem:</span>{" "}
+            <span className="font-mono">{c.ecosystem ?? "—"}</span>
+          </li>
+          <li>
+            <span className="text-ink-500">Version:</span>{" "}
+            <span className="font-mono">{c.version ?? "—"}</span>{" "}
+            <span className="text-ink-500">(source: {c.version_source ?? "—"})</span>
+          </li>
+          <li>
+            <span className="text-ink-500">Direct:</span>{" "}
+            <span className="font-mono">{c.direct ? "yes" : "no"}</span>
+          </li>
+          <li>
+            <span className="text-ink-500">PURL:</span>{" "}
+            <span className="font-mono" data-testid="ce-purl">
+              {c.package_url ?? "—"}
+            </span>
+            {c.package_url_well_formed === false ? (
+              <span className="ml-2 text-rose-700">persisted PURL malformed</span>
+            ) : null}
+            {c.package_url === null && c.purl_constructible ? (
+              <span className="ml-2 text-ink-500">
+                PURL omitted from persistence but constructible from ecosystem + name + version.
+              </span>
+            ) : null}
+          </li>
+        </ul>
+      </div>
+      <EvidenceManifestBlock manifest={evidence.manifest} />
+      <EvidenceLicenceBlock licence={evidence.licence_evidence} />
+      <EvidenceProviderBlock provider={evidence.provider_evidence} />
+      <EvidenceDependencyBlock dependency={evidence.dependency_evidence} />
+      <EvidenceExportImplications impl={impl} />
+      <EvidenceOmissions omissions={evidence.omissions} />
+    </div>
+  );
+}
+
+function EvidenceManifestBlock({
+  manifest,
+}: {
+  manifest: ComponentEvidenceResponse["manifest"];
+}) {
+  if (!manifest.available) {
+    return (
+      <div>
+        <p className="text-[10px] uppercase tracking-wide text-ink-500">
+          Manifest evidence
+        </p>
+        <p className="mt-1 text-ink-700" data-testid="ce-manifest-empty">
+          No persisted manifest association available.
+        </p>
+      </div>
+    );
+  }
+  return (
+    <div>
+      <p className="text-[10px] uppercase tracking-wide text-ink-500">
+        Manifest evidence
+      </p>
+      <ul className="mt-1 space-y-0.5 text-ink-700" data-testid="ce-manifest">
+        <li>
+          <span className="text-ink-500">Path:</span>{" "}
+          <span className="font-mono">{manifest.path ?? "—"}</span>
+        </li>
+        <li>
+          <span className="text-ink-500">Type:</span>{" "}
+          <span className="font-mono">{manifest.manifest_type ?? "—"}</span>
+        </li>
+        <li>
+          <span className="text-ink-500">Parse status:</span>{" "}
+          <span className="font-mono">{manifest.parse_status ?? "—"}</span>
+        </li>
+        <li>
+          <span className="text-ink-500">Warnings:</span>{" "}
+          <span className="font-mono">{manifest.parse_warning_count ?? 0}</span>
+        </li>
+      </ul>
+    </div>
+  );
+}
+
+function EvidenceLicenceBlock({
+  licence,
+}: {
+  licence: ComponentEvidenceResponse["licence_evidence"];
+}) {
+  if (!licence.available) {
+    return (
+      <div>
+        <p className="text-[10px] uppercase tracking-wide text-ink-500">
+          Licence evidence
+        </p>
+        <p className="mt-1 text-ink-700" data-testid="ce-licence-empty">
+          No persisted licence evidence available.
+        </p>
+      </div>
+    );
+  }
+  return (
+    <div>
+      <p className="text-[10px] uppercase tracking-wide text-ink-500">
+        Licence evidence
+      </p>
+      <ul className="mt-1 space-y-0.5 text-ink-700" data-testid="ce-licence">
+        {licence.observations.map((o, idx) => (
+          <li key={`${o.finding_id}-${idx}`}>
+            <span className="font-mono">{o.value}</span>{" "}
+            <span className="text-ink-500">
+              ({o.classification}, {o.provenance})
+            </span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+function EvidenceProviderBlock({
+  provider,
+}: {
+  provider: ComponentEvidenceResponse["provider_evidence"];
+}) {
+  if (!provider.available) {
+    return (
+      <div>
+        <p className="text-[10px] uppercase tracking-wide text-ink-500">
+          Provider / advisory evidence
+        </p>
+        <p className="mt-1 text-ink-700" data-testid="ce-provider-empty">
+          No provider observations or advisories were recorded for this
+          component.
+        </p>
+      </div>
+    );
+  }
+  return (
+    <div>
+      <p className="text-[10px] uppercase tracking-wide text-ink-500">
+        Provider / advisory evidence
+      </p>
+      <ul className="mt-1 space-y-0.5 text-ink-700" data-testid="ce-provider">
+        {provider.observations.map((o) => (
+          <li key={o.id}>
+            <span className="font-mono">{o.provider}</span>{" "}
+            <span className="text-ink-500">({o.operation}):</span>{" "}
+            <span className="font-mono">{o.status}</span>{" "}
+            {o.http_status ? (
+              <span className="text-ink-500">http {o.http_status}</span>
+            ) : null}
+          </li>
+        ))}
+        {provider.advisories.map((a) => (
+          <li key={a.advisory_id}>
+            <span className="font-mono">
+              {a.canonical_id ?? a.source_advisory_id ?? a.advisory_id}
+            </span>{" "}
+            <span className="text-ink-500">
+              ({a.severity_label ?? "unknown"})
+            </span>{" "}
+            {a.confidence === null ? (
+              <span className="text-ink-500">no confidence supplied</span>
+            ) : null}
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+function EvidenceDependencyBlock({
+  dependency,
+}: {
+  dependency: ComponentEvidenceResponse["dependency_evidence"];
+}) {
+  const coverage = dependency.graph_coverage;
+  if (dependency.no_edges_observed) {
+    return (
+      <div>
+        <p className="text-[10px] uppercase tracking-wide text-ink-500">
+          Dependency evidence
+        </p>
+        <p className="mt-1 text-ink-700" data-testid="ce-dependency-empty">
+          No persisted dependency edges for this component. The
+          dependency graph coverage is reported as <span className="font-mono">{coverage}</span>;
+          a partial / unknown graph is not the same as &ldquo;no dependencies&rdquo;.
+        </p>
+      </div>
+    );
+  }
+  return (
+    <div>
+      <p className="text-[10px] uppercase tracking-wide text-ink-500">
+        Dependency evidence
+      </p>
+      <p className="mt-1 text-ink-700" data-testid="ce-dependency">
+        Incoming: {dependency.incoming.length}, outgoing:{" "}
+        {dependency.outgoing.length}. Coverage:{" "}
+        <span className="font-mono">{coverage}</span>.
+      </p>
+    </div>
+  );
+}
+
+function EvidenceExportImplications({
+  impl,
+}: {
+  impl: ComponentEvidenceResponse["export_implications"];
+}) {
+  return (
+    <div>
+      <p className="text-[10px] uppercase tracking-wide text-ink-500">
+        Export implications
+      </p>
+      <ul className="mt-1 space-y-0.5 text-ink-700" data-testid="ce-export">
+        <li>
+          Appears in CycloneDX 1.7:{" "}
+          <span className="font-mono">{impl.appears_in_cyclonedx_17 ? "yes" : "no"}</span>
+        </li>
+        <li>
+          Version omitted from export:{" "}
+          <span className="font-mono">{impl.version_omitted ? "yes" : "no"}</span>
+          {impl.version_omitted ? (
+            <span className="text-ink-500">
+              {" "}
+              — no concrete version was persisted, so the export
+              leaves the version field empty.
+            </span>
+          ) : null}
+        </li>
+        <li>
+          PURL emitted in export:{" "}
+          <span className="font-mono">{impl.purl_emitted ? "yes" : "no"}</span>
+        </li>
+        <li>
+          Dependency relationships emitted:{" "}
+          <span className="font-mono">
+            {impl.dependency_relationships_emitted ? "yes" : "no"}
+          </span>{" "}
+          <span className="text-ink-500">
+            (graph coverage {impl.graph_coverage})
+          </span>
+        </li>
+      </ul>
+    </div>
+  );
+}
+
+function EvidenceOmissions({ omissions }: { omissions: string[] }) {
+  return (
+    <div>
+      <p className="text-[10px] uppercase tracking-wide text-ink-500">
+        Evidence-honesty markers
+      </p>
+      <ul
+        className="mt-1 list-disc space-y-0.5 pl-5 text-ink-700"
+        data-testid="ce-omissions"
+      >
+        {omissions.map((marker) => (
+          <li key={marker}>
+            <span className="font-mono">{marker}</span>
+          </li>
+        ))}
+      </ul>
+    </div>
   );
 }

@@ -30,7 +30,7 @@ describe("version consistency", () => {
       new Response(
         JSON.stringify({
           name: "Lockverity",
-          version: "0.7.0",
+          version: "0.8.0",
           tagline: "Evidence-first software supply-chain assurance",
           environment: "test",
           api_prefix: "/api/v1",
@@ -52,7 +52,7 @@ describe("version consistency", () => {
       </MemoryRouter>
     );
     await waitFor(() => {
-      expect(screen.getByText("v0.7.0")).toBeInTheDocument();
+      expect(screen.getByText("v0.8.0")).toBeInTheDocument();
     });
   });
 
@@ -88,7 +88,7 @@ describe("About page current product copy", () => {
     cleanup();
   });
 
-  it("documents v0.7 capabilities and the defensive-only scope", () => {
+  it("documents v0.8 capabilities and the defensive-only scope", () => {
     render(
       <MemoryRouter initialEntries={["/about"]}>
         <Routes>
@@ -98,11 +98,11 @@ describe("About page current product copy", () => {
         </Routes>
       </MemoryRouter>
     );
-    // The "What v0.7 implements today" section header must be
-    // present. The claim "v0.6" alone is no longer a sufficient
+    // The "What v0.8 implements today" section header must be
+    // present. The claim "v0.7" alone is no longer a sufficient
     // section title.
     expect(
-      screen.getByRole("heading", { name: /what v0\.7 implements today/i })
+      screen.getByRole("heading", { name: /what v0\.8 implements today/i })
     ).toBeInTheDocument();
     // Defensive-only scope remains non-negotiable.
     expect(screen.getByText(/does not execute analyzed code/i)).toBeInTheDocument();

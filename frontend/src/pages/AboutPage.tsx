@@ -31,7 +31,7 @@ export function AboutPage() {
         </p>
 
         <h2 className="mt-6 text-base font-semibold text-ink-900">
-          What v0.7 implements today
+          What v0.8 implements today
         </h2>
         <p className="text-xs uppercase tracking-wide text-ink-500">
           All items in this list have direct, exercised code paths in this
@@ -99,6 +99,21 @@ export function AboutPage() {
             official JSON 1.7 schema validator.
           </li>
           <li>
+            <strong>Component evidence drilldown</strong> on the
+            Dependency Explorer page: a read-only summary at{" "}
+            <code>{"GET /api/v1/scans/{id}/components/{cid}/evidence"}</code>{" "}
+            that surfaces component identity, manifest evidence,
+            licence evidence, provider observations, advisories, and
+            the CycloneDX 1.7 export implications for one component.
+            The endpoint reuses the v0.6 CycloneDX exporter helpers
+            for PURL, bom-ref, licence classification, and graph
+            coverage, so the evidence block never disagrees with the
+            actual SBOM. Missing licence evidence, missing provider
+            evidence, missing dependency edges, and missing versions
+            are surfaced as bounded omissions rather than fabricated
+            values.
+          </li>
+          <li>
             <strong>Local scan worker</strong> with a 10-stage pipeline,
             per-stage status, scan cancellation, and per-scan heartbeat
             monitoring.
@@ -124,7 +139,7 @@ export function AboutPage() {
         </ul>
 
         <h2 className="mt-6 text-base font-semibold text-ink-900">
-          What v0.7 does <em>not</em> include
+          What v0.8 does <em>not</em> include
         </h2>
         <p className="text-xs uppercase tracking-wide text-ink-500">
           Planned for later milestones, not implemented today.

@@ -416,6 +416,62 @@ def get_dependency_path(
     )
 
 
+# v0.8 component evidence drilldown.
+#
+# Declared after the existing ``/components/{component_id}/path``
+# route so the path-bfs handler wins for the dedicated
+# ``/path`` path. The evidence endpoint is a sibling surface
+# for the same component: read-only, deterministic, never
+# generates a BOM, never calls a provider, never writes to
+# the database. A 404 is returned only when the scan id or
+# the component id does not exist (or the component belongs
+# to a different scan); every other scan state returns 200
+# with the appropriate evidence block.
+@router.get(
+    "/{scan_id}/components/{component_id}/evidence",
+    summary=(
+        "Return the v0.8 component evidence drilldown for a "
+        "component in a scan. Read-only summary of identity, "
+        "manifest, licence, provider, dependency, and "
+        "CycloneDX 1.7 export implications."
+    ),
+)
+def get_component_evidence(
+    scan_id: int,
+    component_id: int,
+    session: DBSession,
+) -> dict[str, Any]:
+    """Return the v0.8 component evidence drilldown.
+
+    The endpoint is the single authoritative backend
+    surface for component-level audit. It never calls a
+    provider, never downloads a repository, never executes
+    analyzed code, and never writes to the database. The
+    response is bounded: scan identity, component
+    identity, manifest evidence, licence evidence, provider
+    evidence, dependency evidence, export implications,
+    and the explicit omissions list.
+
+    The route returns 404 when the scan id does not exist
+    or when the component id is unknown to the scan. Every
+    other scan state returns 200; the evidence surface is
+    informational, and the consumer renders the response
+    from a single source of truth."""
+    from app.db import session as _db_session
+    from app.evidence import ComponentEvidenceService
+
+    _get_scan_or_404(session, scan_id)
+    service = ComponentEvidenceService(_db_session.SessionLocal)
+    evidence = service.fetch(scan_run_id=scan_id, component_id=component_id)
+    if evidence is None:
+        raise ApiError(
+            ApiErrorCode.NOT_FOUND,
+            "Component not found for this scan.",
+            details={"scan_id": scan_id, "component_id": component_id},
+        )
+    return evidence
+
+
 # ----------------------------------------------------------------------
 # Vulnerabilities
 # ----------------------------------------------------------------------

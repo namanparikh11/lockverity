@@ -433,9 +433,11 @@ def test_exporter_returns_valid_cyclonedx_1_7_json(session) -> None:
     assert modern_tools, f"Tool block is empty: {body['metadata']}"
     # Every declared tool must identify Lockverity at the
     # current application version.
+    from app._version import __version__ as _lockverity_version
+
     for tool in modern_tools:
         assert tool.get("name") == "lockverity"
-        assert tool.get("version") == "0.7.0"
+        assert tool.get("version") == _lockverity_version
         assert tool.get("vendor") == "Lockverity" or tool.get("publisher") == "Lockverity"
 
 
