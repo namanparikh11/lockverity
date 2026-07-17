@@ -7,8 +7,16 @@ import { isNotImplemented } from "@/api/fallback";
 import type {
   Component,
   ComponentEvidenceResponse,
+  ComponentEvidenceSummaryFacets,
+  ComponentEvidenceSummaryItem,
+  ComponentEvidenceSummaryPagination,
+  ComponentEvidenceSummaryResponse,
   DependencyPath,
-  PageMeta,
+  SummaryFilterBool,
+  SummaryFilterEdges,
+  SummaryFilterPresent,
+  SummaryFilterPurl,
+  SummarySort,
 } from "@/api/types";
 import { ComponentIdentity, DependencyPathView } from "@/components/DependencyPath";
 import { DetailsDrawer } from "@/components/DetailsDrawer";
@@ -20,51 +28,113 @@ import { Pagination } from "@/components/Pagination";
 import { ResponsiveTable } from "@/components/ResponsiveTable";
 import { Skeleton } from "@/components/Skeleton";
 
-const SCOPE_OPTIONS = [
+const DIRECT_OPTIONS = [
   { value: "all", label: "All" },
-  { value: "direct", label: "Direct" },
-  { value: "transitive", label: "Transitive" },
+  { value: "yes", label: "Direct only" },
+  { value: "no", label: "Transitive only" },
 ];
 
-const DEV_OPTIONS = [
+// Single source of truth for the default filter state.
+// ``hasActiveFilters`` compares the current ``filters``
+// against this constant to decide whether the Clear
+// button is meaningful.
+type FilterState = {
+  search: string;
+  ecosystem: string;
+  direct: SummaryFilterBool;
+  version: SummaryFilterPresent;
+  licence_evidence: SummaryFilterPresent;
+  provider_evidence: SummaryFilterPresent;
+  purl: SummaryFilterPurl;
+  dependency_edges: SummaryFilterEdges;
+  cyclonedx_version_omitted: SummaryFilterBool;
+  sort: SummarySort;
+};
+
+const DEFAULT_FILTERS: FilterState = {
+  search: "",
+  ecosystem: "",
+  direct: "all",
+  version: "all",
+  licence_evidence: "all",
+  provider_evidence: "all",
+  purl: "all",
+  dependency_edges: "all",
+  cyclonedx_version_omitted: "all",
+  sort: "package_name",
+};
+
+const PRESENT_OPTIONS = [
   { value: "all", label: "All" },
-  { value: "production", label: "Production" },
-  { value: "development", label: "Development" },
+  { value: "present", label: "Present" },
+  { value: "missing", label: "Missing" },
 ];
 
-const VULN_OPTIONS = [
+const PURL_OPTIONS = [
   { value: "all", label: "All" },
-  { value: "vulnerable", label: "Vulnerable only" },
+  { value: "persisted", label: "Persisted" },
+  { value: "constructible", label: "Constructible" },
+  { value: "omitted", label: "Omitted" },
+];
+
+const EDGES_OPTIONS = [
+  { value: "all", label: "All" },
+  { value: "present", label: "Edges observed" },
+  { value: "none_observed", label: "No persisted edges" },
+];
+
+const YESNO_OPTIONS = [
+  { value: "all", label: "All" },
+  { value: "yes", label: "Yes" },
+  { value: "no", label: "No" },
+];
+
+const SORT_OPTIONS: { value: SummarySort; label: string }[] = [
+  { value: "package_name", label: "Package name" },
+  { value: "ecosystem", label: "Ecosystem" },
+  { value: "version_missing_first", label: "Version missing first" },
+  { value: "licence_missing_first", label: "Licence missing first" },
+  { value: "provider_missing_first", label: "Provider missing first" },
+  { value: "dependency_edges_missing_first", label: "Dependency edges missing first" },
 ];
 
 /**
  * Dependency explorer.
  *
- * Inventory-first view: every component is a row. Filters
- * collapse the list to the subset the operator is investigating.
- * A dependency-path viewer opens in a side drawer.
+ * v0.9 evidence-aware search and filtering surface. The
+ * page renders the ``getComponentsEvidenceSummary`` response
+ * and surfaces the v0.9 filter row, the inline evidence
+ * badges, and the optional facet panel. The "View
+ * evidence" button continues to fetch the v0.8 detail
+ * endpoint lazily when the user opens the drawer.
  */
 export function DependencyExplorerPage() {
   const { scanId } = useParams<{ scanId: string }>();
   const sid = Number.parseInt(scanId ?? "", 10);
-  const [items, setItems] = useState<Component[] | null>(null);
-  const [meta, setMeta] = useState<PageMeta | null>(null);
+  const [items, setItems] = useState<ComponentEvidenceSummaryItem[] | null>(null);
+  const [meta, setMeta] = useState<ComponentEvidenceSummaryPagination | null>(null);
+  const [facets, setFacets] = useState<ComponentEvidenceSummaryFacets | null>(null);
   const [page, setPage] = useState(1);
   const [error, setError] = useState<unknown>(null);
-  const [filters, setFilters] = useState<{
-    search: string;
-    ecosystem: string;
-    scope: "all" | "direct" | "transitive";
-    development: "all" | "production" | "development";
-    vulnerable_only: "all" | "vulnerable";
-  }>({
-    search: "",
-    ecosystem: "",
-    scope: "all",
-    development: "all",
-    vulnerable_only: "all",
-  });
-  const [selected, setSelected] = useState<Component | null>(null);
+  const [filters, setFilters] = useState<FilterState>(DEFAULT_FILTERS);
+  // The Clear button is only meaningful when the user has
+  // moved at least one filter away from its default. The
+  // ``hasActiveFilters`` derivation is the single source of
+  // truth used by the FilterBar (``onClear`` is only
+  // passed when true) and by the regression tests.
+  const hasActiveFilters =
+    filters.search !== "" ||
+    filters.ecosystem !== "" ||
+    filters.direct !== "all" ||
+    filters.version !== "all" ||
+    filters.licence_evidence !== "all" ||
+    filters.provider_evidence !== "all" ||
+    filters.purl !== "all" ||
+    filters.dependency_edges !== "all" ||
+    filters.cyclonedx_version_omitted !== "all" ||
+    filters.sort !== "package_name";
+  const resetFilters = () => setFilters(DEFAULT_FILTERS);
+  const [selected, setSelected] = useState<ComponentEvidenceSummaryItem | null>(null);
   const [path, setPath] = useState<DependencyPath | null>(null);
   const [pathLoading, setPathLoading] = useState(false);
   const [notImpl, setNotImpl] = useState(false);
@@ -90,25 +160,32 @@ export function DependencyExplorerPage() {
     setItems(null);
     setError(null);
     api
-      .listComponents(sid, {
+      .getComponentsEvidenceSummary(sid, {
         page,
         page_size: 50,
         search: filters.search || undefined,
         ecosystem: filters.ecosystem || undefined,
-        scope: filters.scope,
-        development: filters.development,
-        vulnerable_only: filters.vulnerable_only,
+        direct: filters.direct,
+        version: filters.version,
+        licence_evidence: filters.licence_evidence,
+        provider_evidence: filters.provider_evidence,
+        purl: filters.purl,
+        dependency_edges: filters.dependency_edges,
+        cyclonedx_version_omitted: filters.cyclonedx_version_omitted,
+        sort: filters.sort,
       })
-      .then((r) => {
+      .then((r: ComponentEvidenceSummaryResponse) => {
         if (controller.signal.aborted) return;
         setItems(r.items);
         setMeta(r.pagination);
+        setFacets(r.facets);
       })
       .catch((err) => {
         if (controller.signal.aborted) return;
         if (isNotImplemented(err)) {
           setItems([]);
           setMeta({ page: 1, page_size: 0, total: 0, total_pages: 0 });
+          setFacets(null);
           setNotImpl(true);
           return;
         }
@@ -134,7 +211,11 @@ export function DependencyExplorerPage() {
       .catch((err) => {
         if (controller.signal.aborted) return;
         if (isNotImplemented(err)) {
-          setPath({ components: [selected], edges: [], truncated: false });
+          setPath({
+            components: [selected as unknown as Component],
+            edges: [],
+            truncated: false,
+          });
           return;
         }
         setPath(null);
@@ -200,42 +281,92 @@ export function DependencyExplorerPage() {
           searchPlaceholder="Search package name"
           resultCount={meta?.total}
           resultLabel="components"
+          title="Evidence filters"
+          layout="card"
+          onClear={hasActiveFilters ? resetFilters : undefined}
         >
-          <div className="flex items-center gap-2">
-            <label htmlFor="ecosystem" className="text-xs text-ink-500">
+          <div className="flex flex-col gap-1" data-testid="select-filter-ecosystem">
+            <label
+              htmlFor="ecosystem"
+              className="text-xs font-medium text-ink-500"
+            >
               Ecosystem
             </label>
             <input
               id="ecosystem"
-              className="input w-32 font-mono text-xs"
+              className="w-full rounded-md border border-ink-200 bg-white px-2 py-1 text-sm text-ink-700 shadow-sm focus:border-accent-500 focus:outline-none focus:ring-1 focus:ring-accent-500 font-mono"
               placeholder="npm, PyPI, ..."
               value={filters.ecosystem}
               onChange={(e) => setFilters((f) => ({ ...f, ecosystem: e.target.value }))}
             />
           </div>
           <SelectFilter
-            id="scope"
-            label="Scope"
-            value={filters.scope}
-            onChange={(v) => setFilters((f) => ({ ...f, scope: v as "all" | "direct" | "transitive" }))}
-            options={SCOPE_OPTIONS}
+            id="direct"
+            label="Direct"
+            value={filters.direct}
+            onChange={(v) => setFilters((f) => ({ ...f, direct: v as SummaryFilterBool }))}
+            options={DIRECT_OPTIONS}
+            stacked
           />
           <SelectFilter
-            id="development"
-            label="Lifecycle"
-            value={filters.development}
-            onChange={(v) => setFilters((f) => ({ ...f, development: v as "all" | "production" | "development" }))}
-            options={DEV_OPTIONS}
+            id="version"
+            label="Version"
+            value={filters.version}
+            onChange={(v) => setFilters((f) => ({ ...f, version: v as SummaryFilterPresent }))}
+            options={PRESENT_OPTIONS}
+            stacked
           />
           <SelectFilter
-            id="vuln"
-            label="Vulnerable"
-            value={filters.vulnerable_only}
-            onChange={(v) => setFilters((f) => ({ ...f, vulnerable_only: v as "all" | "vulnerable" }))}
-            options={VULN_OPTIONS}
+            id="licence"
+            label="Licence evidence"
+            value={filters.licence_evidence}
+            onChange={(v) => setFilters((f) => ({ ...f, licence_evidence: v as SummaryFilterPresent }))}
+            options={PRESENT_OPTIONS}
+            stacked
+          />
+          <SelectFilter
+            id="provider"
+            label="Provider evidence"
+            value={filters.provider_evidence}
+            onChange={(v) => setFilters((f) => ({ ...f, provider_evidence: v as SummaryFilterPresent }))}
+            options={PRESENT_OPTIONS}
+            stacked
+          />
+          <SelectFilter
+            id="purl"
+            label="PURL"
+            value={filters.purl}
+            onChange={(v) => setFilters((f) => ({ ...f, purl: v as SummaryFilterPurl }))}
+            options={PURL_OPTIONS}
+            stacked
+          />
+          <SelectFilter
+            id="dep-edges"
+            label="Dependency edges"
+            value={filters.dependency_edges}
+            onChange={(v) => setFilters((f) => ({ ...f, dependency_edges: v as SummaryFilterEdges }))}
+            options={EDGES_OPTIONS}
+            stacked
+          />
+          <SelectFilter
+            id="cdx-omit"
+            label="CycloneDX 1.7 version omitted"
+            value={filters.cyclonedx_version_omitted}
+            onChange={(v) => setFilters((f) => ({ ...f, cyclonedx_version_omitted: v as SummaryFilterBool }))}
+            options={YESNO_OPTIONS}
+            stacked
+          />
+          <SelectFilter
+            id="sort"
+            label="Sort"
+            value={filters.sort}
+            onChange={(v) => setFilters((f) => ({ ...f, sort: v as SummarySort }))}
+            options={SORT_OPTIONS}
+            stacked
           />
         </FilterBar>
       </div>
+      {facets ? <FacetsPanel facets={facets} /> : null}
       {error ? (
         <ErrorState error={error} />
       ) : items === null || meta === null ? (
@@ -246,13 +377,13 @@ export function DependencyExplorerPage() {
           description={
             notImpl
               ? "When the backend exposes a paginated components endpoint, this table will appear automatically."
-              : "No components were discovered for this scan. The manifest-discovery or dependency-parsing stage may not have run."
+              : "No components matched the current evidence filters. Try widening the filters or clearing the search box."
           }
         />
       ) : (
         <>
           <ResponsiveTable
-            headers={["Package", "Ecosystem", "Version", "Source", "Direct?", "Scope", "Evidence"]}
+            headers={["Package", "Ecosystem", "Version", "Direct?", "Evidence flags", "Evidence"]}
           >
             {items.map((component) => (
               <tr
@@ -261,7 +392,7 @@ export function DependencyExplorerPage() {
                 onClick={() => setSelected(component)}
               >
                 <td className="table-cell">
-                  <ComponentIdentity component={component} />
+                  <ComponentIdentity component={component as unknown as Component} />
                 </td>
                 <td className="table-cell text-ink-500">
                   {component.ecosystem ?? "—"}
@@ -269,14 +400,11 @@ export function DependencyExplorerPage() {
                 <td className="table-cell text-ink-500">
                   {component.version ?? "—"}
                 </td>
-                <td className="table-cell text-ink-500">
-                  {component.version_source}
-                </td>
                 <td className="table-cell">
                   <span className="font-mono">{component.direct ? "yes" : "no"}</span>
                 </td>
-                <td className="table-cell text-ink-500">
-                  {component.scope ?? "—"}
+                <td className="table-cell">
+                  <EvidenceFlagsCell flags={component.evidence} />
                 </td>
                 <td className="table-cell">
                   <button
@@ -314,11 +442,11 @@ export function DependencyExplorerPage() {
             <div>
               <h3 className="label">Identity</h3>
               <p className="mt-1 text-sm text-ink-800">
-                <ComponentIdentity component={selected} />
+                <ComponentIdentity component={selected as unknown as Component} />
               </p>
               <p className="mt-1 text-xs text-ink-500">
                 Ecosystem: <span className="font-mono">{selected.ecosystem ?? "—"}</span> ·
-                Source: <span className="font-mono">{selected.version_source}</span>
+                Source: <span className="font-mono">{selected.version_source ?? "—"}</span>
               </p>
             </div>
             <div>
@@ -329,15 +457,6 @@ export function DependencyExplorerPage() {
                 <DependencyPathView path={path} />
               )}
             </div>
-            {selected.optional || selected.development ? (
-              <div>
-                <h3 className="label">Lifecycle</h3>
-                <ul className="mt-1 list-disc pl-5 text-sm text-ink-700">
-                  {selected.optional ? <li>Optional dependency</li> : null}
-                  {selected.development ? <li>Development-only dependency</li> : null}
-                </ul>
-              </div>
-            ) : null}
             <div>
               <h3 className="label">Component evidence</h3>
               <ComponentEvidencePanel
@@ -686,6 +805,180 @@ function EvidenceOmissions({ omissions }: { omissions: string[] }) {
           </li>
         ))}
       </ul>
+    </div>
+  );
+}
+
+/**
+ * v0.9 inline evidence badges for the dependency table.
+ *
+ * The cell renders a small badge per evidence flag the
+ * v0.9 summary exposes. The wording is evidence-honest:
+ * missing evidence is rendered as "missing" (not "none"),
+ * dependency edges are rendered as "no persisted edges"
+ * (not "no dependencies"), and the PURL state is rendered
+ * verbatim so the consumer can distinguish a deliberately
+ * omitted PURL from a reconstructed one.
+ */
+function EvidenceFlagsCell({
+  flags,
+}: {
+  flags: {
+    version_present: boolean;
+    licence_observed: boolean;
+    provider_observed: boolean;
+    purl_state: "persisted" | "constructible" | "omitted";
+    edges_observed: boolean;
+    appears_in_cyclonedx_17: boolean;
+    version_omitted_from_cyclonedx_17: boolean;
+    dependency_relationships_emitted_in_cyclonedx_17: boolean;
+  };
+}) {
+  return (
+    <div
+      className="flex flex-wrap gap-1"
+      data-testid="evidence-flags-cell"
+    >
+      <EvidenceBadge
+        tone={flags.version_present ? "ok" : "warn"}
+        label={flags.version_present ? "version present" : "version missing"}
+      />
+      <EvidenceBadge
+        tone={flags.licence_observed ? "ok" : "warn"}
+        label={
+          flags.licence_observed
+            ? "licence observed"
+            : "licence not persisted"
+        }
+      />
+      <EvidenceBadge
+        tone={flags.provider_observed ? "ok" : "warn"}
+        label={
+          flags.provider_observed
+            ? "provider observed"
+            : "provider not persisted"
+        }
+      />
+      <EvidenceBadge
+        tone={flags.purl_state === "persisted" ? "ok" : "muted"}
+        label={`purl ${flags.purl_state}`}
+      />
+      <EvidenceBadge
+        tone={flags.edges_observed ? "ok" : "muted"}
+        label={
+          flags.edges_observed
+            ? "edges observed"
+            : "no persisted edges"
+        }
+      />
+      {flags.version_omitted_from_cyclonedx_17 ? (
+        <EvidenceBadge tone="warn" label="version omitted from cdx 1.7" />
+      ) : null}
+    </div>
+  );
+}
+
+function EvidenceBadge({
+  tone,
+  label,
+}: {
+  tone: "ok" | "warn" | "muted";
+  label: string;
+}) {
+  const classes =
+    tone === "ok"
+      ? "rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] font-medium text-emerald-700"
+      : tone === "warn"
+        ? "rounded-full bg-amber-50 px-2 py-0.5 text-[11px] font-medium text-amber-700"
+        : "rounded-full bg-ink-100 px-2 py-0.5 text-[11px] font-medium text-ink-600";
+  return <span className={classes}>{label}</span>;
+}
+
+/**
+ * v0.9 facet panel. Surfaces the aggregate counts the
+ * backend computes over the full filtered set. The
+ * panel is informational; it never renders a verdict.
+ */
+function FacetsPanel({
+  facets,
+}: {
+  facets: ComponentEvidenceSummaryFacets;
+}) {
+  const ecosystems = Object.entries(facets.ecosystems);
+  return (
+    <section
+      className="mb-4 grid grid-cols-2 gap-3 rounded-md border border-ink-200 bg-ink-50 p-3 text-xs sm:grid-cols-3 lg:grid-cols-5"
+      data-testid="facets-panel"
+    >
+      <FacetItem
+        label="Total components"
+        value={String(
+          ecosystems.reduce((acc, [, n]) => acc + n, 0)
+        )}
+      />
+      <FacetItem
+        label="Ecosystems"
+        value={
+          ecosystems.length === 0
+            ? "—"
+            : ecosystems.map(([e]) => e).join(", ")
+        }
+      />
+      <FacetItem
+        label="Missing version"
+        value={String(facets.missing_version)}
+      />
+      <FacetItem
+        label="Missing licence evidence"
+        value={String(facets.missing_licence_evidence)}
+      />
+      <FacetItem
+        label="Missing provider evidence"
+        value={String(facets.missing_provider_evidence)}
+      />
+      <FacetItem
+        label="PURL persisted"
+        value={String(facets.purl_persisted)}
+      />
+      <FacetItem
+        label="PURL constructible"
+        value={String(facets.purl_constructible)}
+      />
+      <FacetItem
+        label="PURL omitted"
+        value={String(facets.purl_omitted)}
+      />
+      <FacetItem
+        label="Edges observed"
+        value={String(facets.edges_observed)}
+      />
+      <FacetItem
+        label="No persisted edges"
+        value={String(facets.edges_none_observed)}
+      />
+      <FacetItem
+        label="Direct"
+        value={String(facets.direct_yes)}
+      />
+      <FacetItem
+        label="Transitive"
+        value={String(facets.direct_no)}
+      />
+      <FacetItem
+        label="CycloneDX 1.7 version omitted"
+        value={String(facets.cyclonedx_version_omitted)}
+      />
+    </section>
+  );
+}
+
+function FacetItem({ label, value }: { label: string; value: string }) {
+  return (
+    <div>
+      <p className="text-[10px] uppercase tracking-wide text-ink-500">
+        {label}
+      </p>
+      <p className="mt-0.5 font-mono text-sm text-ink-900">{value}</p>
     </div>
   );
 }

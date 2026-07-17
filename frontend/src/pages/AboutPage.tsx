@@ -31,7 +31,7 @@ export function AboutPage() {
         </p>
 
         <h2 className="mt-6 text-base font-semibold text-ink-900">
-          What v0.8 implements today
+          What v0.9 implements today
         </h2>
         <p className="text-xs uppercase tracking-wide text-ink-500">
           All items in this list have direct, exercised code paths in this
@@ -114,6 +114,29 @@ export function AboutPage() {
             values.
           </li>
           <li>
+            <strong>Evidence search and filtering</strong> on the
+            Dependency Explorer page: a read-only surface at{" "}
+            <code>{"GET /api/v1/scans/{id}/components/evidence-summary"}</code>{" "}
+            that lets the operator narrow the component list by text
+            search, ecosystem, direct / transitive, version present /
+            missing, licence evidence present / missing, provider
+            evidence present / missing, PURL persisted / constructible
+            / omitted, dependency edges observed / none observed, and
+            CycloneDX 1.7 export implications (appears, version
+            omitted, dependency relationships emitted). The endpoint
+            reuses the v0.6 and v0.8 helpers for PURL, bom-ref,
+            licence classification, and graph coverage, so the filter
+            state cannot disagree with the detail drawer or the
+            CycloneDX 1.7 SBOM. The summary vocabulary is
+            evidence-honest: missing evidence is rendered as
+            &ldquo;not persisted&rdquo; / &ldquo;none observed&rdquo;,
+            dependency edges use the wording &ldquo;no persisted
+            edges&rdquo; (never &ldquo;no dependencies&rdquo;), and
+            the PURL filter distinguishes a deliberately omitted PURL
+            from a reconstructed one. Facet counts are informational
+            only; the endpoint never returns a verdict.
+          </li>
+          <li>
             <strong>Local scan worker</strong> with a 10-stage pipeline,
             per-stage status, scan cancellation, and per-scan heartbeat
             monitoring.
@@ -139,7 +162,7 @@ export function AboutPage() {
         </ul>
 
         <h2 className="mt-6 text-base font-semibold text-ink-900">
-          What v0.8 does <em>not</em> include
+          What v0.9 does <em>not</em> include
         </h2>
         <p className="text-xs uppercase tracking-wide text-ink-500">
           Planned for later milestones, not implemented today.

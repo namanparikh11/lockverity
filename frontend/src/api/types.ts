@@ -787,6 +787,92 @@ export interface ComponentEvidenceResponse {
   omissions: string[];
 }
 
+// ---- v0.9 evidence search and filtering ----
+
+export type SummaryFilterDirect = "all" | "yes" | "no";
+export type SummaryFilterPresent = "all" | "present" | "missing";
+export type SummaryFilterPurl = "all" | "persisted" | "constructible" | "omitted";
+export type SummaryFilterEdges = "all" | "present" | "none_observed";
+export type SummaryFilterBool = "all" | "yes" | "no";
+
+export type SummarySort =
+  | "package_name"
+  | "ecosystem"
+  | "version_missing_first"
+  | "licence_missing_first"
+  | "provider_missing_first"
+  | "dependency_edges_missing_first";
+
+export interface ComponentEvidenceSummaryFlags {
+  version_present: boolean;
+  licence_observed: boolean;
+  provider_observed: boolean;
+  purl_state: "persisted" | "constructible" | "omitted";
+  edges_observed: boolean;
+  appears_in_cyclonedx_17: boolean;
+  version_omitted_from_cyclonedx_17: boolean;
+  dependency_relationships_emitted_in_cyclonedx_17: boolean;
+}
+
+export interface ComponentEvidenceSummaryItem {
+  id: number;
+  scan_id: number;
+  manifest_id: number;
+  package_name: string;
+  ecosystem: string | null;
+  version: string | null;
+  version_source: string | null;
+  direct: boolean;
+  package_url: string | null;
+  evidence: ComponentEvidenceSummaryFlags;
+}
+
+export interface ComponentEvidenceSummaryFacets {
+  ecosystems: Record<string, number>;
+  missing_version: number;
+  missing_licence_evidence: number;
+  missing_provider_evidence: number;
+  purl_persisted: number;
+  purl_constructible: number;
+  purl_omitted: number;
+  edges_observed: number;
+  edges_none_observed: number;
+  direct_yes: number;
+  direct_no: number;
+  cyclonedx_version_omitted: number;
+}
+
+export interface ComponentEvidenceSummaryPagination {
+  page: number;
+  page_size: number;
+  total: number;
+  total_pages: number;
+}
+
+export interface ComponentEvidenceSummaryResponse {
+  items: ComponentEvidenceSummaryItem[];
+  pagination: ComponentEvidenceSummaryPagination;
+  facets: ComponentEvidenceSummaryFacets;
+  omissions: string[];
+}
+
+export interface ListComponentEvidenceSummaryFilters {
+  search?: string;
+  ecosystem?: string;
+  direct?: SummaryFilterDirect;
+  version?: SummaryFilterPresent;
+  licence_evidence?: SummaryFilterPresent;
+  provider_evidence?: SummaryFilterPresent;
+  purl?: SummaryFilterPurl;
+  dependency_edges?: SummaryFilterEdges;
+  cyclonedx_appears?: SummaryFilterBool;
+  cyclonedx_version_omitted?: SummaryFilterBool;
+  cyclonedx_relationships_emitted?: SummaryFilterBool;
+  sort?: SummarySort;
+  page?: number;
+  page_size?: number;
+}
+
 // ---- Pagination ----
 
 export interface PageMeta {

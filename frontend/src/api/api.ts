@@ -5,6 +5,7 @@ import type {
   ComponentAdvisory,
   ComponentEnrichment,
   ComponentEvidenceResponse,
+  ComponentEvidenceSummaryResponse,
   CycloneDxPreviewResponse,
   DependencyPath,
   ExportDescriptor,
@@ -16,6 +17,7 @@ import type {
   FindingStatus,
   HealthResponse,
   LicenceAssertion,
+  ListComponentEvidenceSummaryFilters,
   OpenSSFCheck,
   Paginated,
   ProviderHealthEntry,
@@ -234,6 +236,36 @@ export const api = {
   getComponentEvidence: (scanId: number, componentId: number) =>
     apiClient.get<ComponentEvidenceResponse>(
       `/scans/${scanId}/components/${componentId}/evidence`
+    ),
+  // v0.9 evidence-aware component search and filtering.
+  // Returns a paginated, sorted, faceted list of
+  // components with their evidence flags. The consumer
+  // renders the response as a discovery surface; the
+  // endpoint never returns a verdict.
+  getComponentsEvidenceSummary: (
+    scanId: number,
+    filters: ListComponentEvidenceSummaryFilters = {}
+  ) =>
+    apiClient.get<ComponentEvidenceSummaryResponse>(
+      `/scans/${scanId}/components/evidence-summary`,
+      {
+        query: buildQuery({
+          search: filters.search,
+          ecosystem: filters.ecosystem,
+          direct: filters.direct,
+          version: filters.version,
+          licence_evidence: filters.licence_evidence,
+          provider_evidence: filters.provider_evidence,
+          purl: filters.purl,
+          dependency_edges: filters.dependency_edges,
+          cyclonedx_appears: filters.cyclonedx_appears,
+          cyclonedx_version_omitted: filters.cyclonedx_version_omitted,
+          cyclonedx_relationships_emitted: filters.cyclonedx_relationships_emitted,
+          sort: filters.sort,
+          page: filters.page,
+          page_size: filters.page_size,
+        }),
+      }
     ),
 
   // ---- Vulnerabilities ----
