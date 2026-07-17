@@ -1,0 +1,292 @@
+# Lockverity v1.0 demo walkthrough
+
+This is a portfolio / client-review friendly guide to running
+Lockverity v1.0 locally and showing the v1.0 evidence surfaces
+end-to-end. It is intentionally short and assumes a single
+engineer can run the product on a laptop.
+
+## Scope of the demo
+
+The demo shows that Lockverity v1.0 can:
+
+- Inventory components and manifests from a deterministic
+  dataset.
+- Surface a read-only evidence filter row that narrows the
+  component list by text search, ecosystem, direct / transitive,
+  version present / missing, licence evidence, provider evidence,
+  PURL state, dependency edges, and CycloneDX 1.7 export
+  implications.
+- Open a read-only component evidence drilldown.
+- Surface a CycloneDX 1.7 SBOM evidence preview and produce a
+  schema-validated SBOM download.
+- Surface a human-readable Markdown evidence report preview
+  and produce a deterministic Markdown download.
+
+The demo does **not** claim:
+
+- The SBOM is a security verdict.
+- The evidence report is a certification.
+- The dependency graph is complete.
+- A missing provider is the same as "no findings".
+
+See `security-boundaries.md` and `provider-honesty.md` for the
+full boundary statements.
+
+## Local URLs
+
+| Surface | URL |
+|---|---|
+| Frontend (Vite) | `http://127.0.0.1:5173` |
+| Backend (uvicorn) | `http://127.0.0.1:8765` |
+| Health check | `http://127.0.0.1:8765/api/v1/health` |
+| System info | `http://127.0.0.1:8765/api/v1/system/info` |
+| Export Center (scan 1) | `http://127.0.0.1:5173/scans/1/exports` |
+| Dependency Explorer (scan 1) | `http://127.0.0.1:5173/scans/1/dependencies` |
+| About page | `http://127.0.0.1:5173/about` |
+
+The Vite dev-server proxies `/api` to the backend via the
+`VITE_API_PROXY_TARGET` env var. The default is
+`http://127.0.0.1:8000`; for the demo, set
+`VITE_API_PROXY_TARGET=http://127.0.0.1:8765` so Vite proxies
+to the backend on the recommended port.
+
+## Manual-review dataset
+
+The dataset used for the demo is
+`backend/var/manual-review/review.sqlite` (gitignored; produced
+by the local review setup). The seeded scan ids and their
+expected states are:
+
+| Scan id | Status | Expected evidence |
+|---|---|---|
+| 1 | `completed` | 3 components (left-pad, left-pad-deprecated, stay), 1 manifest, 0 persisted dependency edges, no persisted licence / provider evidence, all `npm` packages with constructible PURLs |
+| 2 | `partial` | 3 components, mixed evidence, provider-degraded |
+| 3 | `failed` | 0 components, `not_applicable` coverage, CycloneDX 1.7 export ineligible |
+| 4 | `cancelled` | 0 components, `not_applicable` coverage, CycloneDX 1.7 export ineligible |
+
+Failed and cancelled scans return 200 with the bounded
+`not_applicable` coverage verdict. The UI shows an honest empty
+state rather than a fake success.
+
+## Step-by-step demo flow
+
+### 1. Health and system info
+
+```bash
+curl http://127.0.0.1:5173/api/v1/health
+# {"status":"ok","database":"ok","version":"1.0.1", ...}
+
+curl http://127.0.0.1:5173/api/v1/system/info | jq .version
+# "1.0.1"
+```
+
+The AppShell sidebar shows the same version (e.g. `v1.0.1`).
+
+### 2. Dashboard / scan list
+
+Open `http://127.0.0.1:5173/`. The scan list shows the four
+seeded scans with their statuses (completed / partial / failed /
+cancelled). The status badges are honest: failed and cancelled
+scans do not claim a "clean" result.
+
+### 3. Dependency Explorer
+
+Open `http://127.0.0.1:5173/scans/1/dependencies`. The page
+renders:
+
+- The page header (`Dependencies · scan #1`).
+- A structured "Evidence filters" card with a title, the
+  component count, a `Clear` button (hidden by default, shown
+  when a filter is active), the search input (with a stable
+  minimum width of 240-384px), and a responsive filter grid
+  (1-4 columns) of all 9 v0.9 filters + sort.
+- A facets panel with 13 aggregate counts.
+- The component table with columns: Package, Ecosystem, Version,
+  Direct?, Evidence flags, Evidence (button).
+- Per-row inline evidence badges (version present / missing,
+  licence observed / not persisted, provider observed / not
+  persisted, PURL state, edges observed / no persisted edges,
+  version omitted from CycloneDX 1.7 when applicable).
+
+#### Filter the table
+
+In the search box, type `left`. The table narrows to 2 rows
+(left-pad, left-pad-deprecated). Facet counts update. The
+`Clear` button appears in the card header.
+
+Click `Clear`. The button disappears, the search input clears,
+and the table returns to 3 rows.
+
+#### Component evidence drilldown
+
+Click the `View evidence` button on the `left-pad` row. The
+existing side-drawer opens and shows the read-only v0.8 evidence
+panel with 6 sections:
+
+- Identity (package, ecosystem, version, direct, PURL, optional
+  "PURL omitted from persistence but constructible from ecosystem
+  + name + version" note).
+- Manifest evidence (path, type, parse status, warnings).
+- Licence evidence ("No persisted licence evidence available"
+  on this dataset).
+- Provider evidence ("No provider observations or advisories
+  were recorded for this component").
+- Dependency evidence ("No persisted dependency edges for this
+  component. The dependency graph coverage is reported as
+  `partial`; a partial / unknown graph is not the same as
+  'no dependencies'.").
+- Export implications (appears in CycloneDX 1.7, version
+  omitted, PURL emitted, dependency relationships emitted,
+  graph coverage).
+- Evidence-honesty markers list.
+
+Close the drawer.
+
+### 4. Export Center
+
+Open `http://127.0.0.1:5173/scans/1/exports`. The page renders:
+
+- A header with the v0.6/v0.7/v0.8/v0.9 export rows
+  (CycloneDX 1.5, CycloneDX 1.7, findings JSON, findings CSV,
+  SARIF).
+- The CycloneDX 1.7 evidence preview block (v0.7, lazy).
+- The Evidence report panel (v1.0, lazy).
+- A data-completeness notice at the bottom.
+
+#### CycloneDX 1.7 evidence preview
+
+Click "Show CycloneDX 1.7 evidence preview". The lazy fetch
+fires. The panel expands with:
+
+- Scan identity (scan id, repository id, status, trigger,
+  resolved commit SHA, analyzer version).
+- Eligibility verdict (`eligible` / `Scan completed with
+  persisted local-analysis evidence.`).
+- Inventory summary (component count, manifest count,
+  ecosystems, direct / transitive, missing version, duplicate
+  observations).
+- Evidence coverage (inventory / dependency graph / provider).
+- SBOM output facts (format, spec version, media type, filename
+  template, schema URI, validation, generation source).
+- Omissions block.
+- Legacy export relationship note.
+
+Click the "Download" button on the CycloneDX 1.7 row. The
+browser saves `lockverity-scan-1.cdx.json`. The file is a
+schema-validated CycloneDX 1.7 SBOM.
+
+#### Evidence report preview
+
+Click "Show report summary" on the new v1.0 Evidence report
+card. The lazy fetch fires. The panel expands with:
+
+- Bounded disclaimer block ("This is an evidence report, not a
+  security verdict, not a certification, and not a compliance
+  pass-or-fail.").
+- Scan section (status, components, manifests).
+- Evidence gaps (missing version, missing licence evidence,
+  missing provider evidence, no persisted dependency edges).
+- CycloneDX 1.7 relationship (eligible, appear in BOM,
+  dependency relationships emitted).
+- Evidence coverage (inventory / dependency graph / provider).
+- Closing footer ("Not a certification. Not a security verdict.
+  Not a compliance pass-or-fail.").
+
+Click "Download Markdown". The browser saves
+`lockverity-scan-1.evidence-report.md`. Open the file: it
+contains a GitHub-flavoured Markdown report with all 7 sections
+(metadata, scan identity, scan summary, evidence coverage,
+evidence gaps, component table, export relationship,
+evidence-honesty markers) and the bounded disclaimer as a
+quote block at the top.
+
+#### Failed / cancelled scan reports
+
+Navigate to `http://127.0.0.1:5173/scans/3/exports` (failed)
+or `http://127.0.0.1:5173/scans/4/exports` (cancelled). The
+Evidence report card renders a preview with:
+
+- 0 components, 0 manifests.
+- `not_applicable` coverage on all three dimensions.
+- CycloneDX 1.7 export eligibility: `no`.
+- The bounded "no components recorded" message in the
+  Markdown body.
+
+This is the honest empty state. The UI does not fabricate a
+clean verdict for a failed or cancelled scan.
+
+### 5. About page
+
+Open `http://127.0.0.1:5173/about`. The page lists the v1.0
+milestone, the human-readable evidence report capability, and
+the bounded "What v1.0 does not include" section. The defensive
+provider-honesty and non-execution guarantees are repeated
+verbatim from the source code.
+
+## What a reviewer should look for
+
+- **Honest empty states**: failed and cancelled scans return
+  bounded `not_applicable` coverage, not a fabricated success.
+- **Bounded wording**: "no persisted edges" (not "no
+  dependencies"), "not a security verdict" (not a clean bill of
+  health), "not a certification" (not a trust assertion).
+- **Deterministic Markdown**: the same persisted evidence
+  produces byte-stable Markdown. Open the downloaded file twice
+  and `diff` them; they should be identical.
+- **Schema-validated SBOM**: the CycloneDX 1.7 SBOM passes the
+  official `JsonStrictValidator(SchemaVersion.V1_7)`.
+- **No surprise network calls**: Lockverity never calls a
+  provider during the demo; the manual-review dataset is
+  deterministic.
+
+## What not to claim during a demo
+
+- Do not call the report "a security scan result". It is an
+  evidence report.
+- Do not call the SBOM "a certified bill of materials". It is
+  evidence.
+- Do not say "the dependency graph is complete" unless a
+  positive persisted signal exists. The v0.6 helper returns
+  `partial` for this dataset.
+- Do not say "no findings" because the manifest is missing a
+  lockfile. Missing lockfile is a v0.5 finding rule, not a
+  silent omission.
+
+## Recommended screenshots
+
+The repo does not store screenshots; capture them in a separate
+portfolio folder if needed. Recommended captures:
+
+1. **Default state**: Dependency Explorer for scan 1 with no
+   filters, showing 3 components and the 13 facet counts.
+2. **Search filter**: Dependency Explorer after typing `left`
+   in the search box; the table narrows to 2 rows, the `Clear`
+   button appears.
+3. **Component evidence drawer**: opened on the `left-pad`
+   row, showing the 6 evidence sections and the omissions list.
+4. **CycloneDX 1.7 evidence preview**: expanded on the Export
+   Center, showing the eligibility verdict and the SBOM output
+   facts.
+5. **Downloaded SBOM**: the `lockverity-scan-1.cdx.json` file
+   open in a JSON viewer.
+6. **Evidence report preview**: expanded on the Export Center,
+   showing the disclaimer and the bounded sections.
+7. **Downloaded Markdown report**: the
+   `lockverity-scan-1.evidence-report.md` file open in a
+   Markdown viewer.
+8. **Failed / cancelled report**: scans 3 / 4 on the Export
+   Center, showing the `not_applicable` coverage and the
+   "no components recorded" wording.
+
+## Stopping the demo
+
+```bash
+# Backend on 127.0.0.1:8765
+# Vite on 127.0.0.1:5173
+Get-NetTCPConnection -LocalPort 8765 | ForEach-Object { Stop-Process -Id $_.OwningProcess -Force }
+Get-NetTCPConnection -LocalPort 5173 | ForEach-Object { Stop-Process -Id $_.OwningProcess -Force }
+```
+
+The demo servers are local-only and do not write to a remote
+service. The manual-review SQLite database is the only
+persistent state.
