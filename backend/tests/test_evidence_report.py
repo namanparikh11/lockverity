@@ -21,7 +21,7 @@ import pytest
 # Compatibility: the evidence module re-exports the version
 # symbol so callers can introspect the running app version
 # without an explicit circular import.
-from app._version import __version__  # noqa: F401
+from app._version import __version__
 from app.db.base import Base
 from app.main import app
 from app.models.component import Component, ComponentVersionSource
@@ -259,7 +259,7 @@ class TestPreviewResponse:
         meta = report["metadata"]
         assert meta["report_name"] == "Lockverity Evidence Report"
         assert meta["generator"] == "lockverity"
-        assert meta["generator_version"] == "1.0.0"
+        assert meta["generator_version"] == __version__
         assert meta["report_format"] == "markdown"
         assert meta["report_format_version"] == "1.0"
         assert "scan_id" in meta
@@ -367,7 +367,7 @@ class TestMarkdownRendering:
         md = render_evidence_report_markdown(report)
         assert "# Lockverity Evidence Report" in md
         assert "Generator: `lockverity`" in md
-        assert "Generator version: `1.0.0`" in md
+        assert f"Generator version: `{__version__}`" in md
         assert "Report format: `markdown`" in md
         assert "Report format version: `1.0`" in md
         assert "Scan id: `1`" in md
