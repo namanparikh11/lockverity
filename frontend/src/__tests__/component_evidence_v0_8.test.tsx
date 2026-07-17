@@ -32,7 +32,11 @@ function jsonResponse(body: unknown, status = 200): Response {
   });
 }
 
-function makeComponent(id: number, package_name: string): Record<string, unknown> {
+function makeComponent(
+  id: number,
+  package_name: string,
+  overrides: Partial<Record<string, unknown>> = {}
+): Record<string, unknown> {
   return {
     id,
     scan_run_id: 1,
@@ -41,15 +45,65 @@ function makeComponent(id: number, package_name: string): Record<string, unknown
     package_name,
     version: "1.0.0",
     version_source: "manifest",
-    package_url: `pkg:npm/${package_name}@1.0.0`,
-    scope: "runtime",
-    relationship: "runtime",
     direct: true,
-    development: false,
-    optional: false,
-    integrity: null,
-    created_at: "2026-07-16T00:00:00Z",
-    updated_at: "2026-07-16T00:00:00Z",
+    package_url: `pkg:npm/${package_name}@1.0.0`,
+    evidence: {
+      version_present: true,
+      licence_observed: false,
+      provider_observed: false,
+      purl_state: "persisted",
+      edges_observed: false,
+      appears_in_cyclonedx_17: true,
+      version_omitted_from_cyclonedx_17: false,
+      dependency_relationships_emitted_in_cyclonedx_17: false,
+    },
+    ...overrides,
+  };
+}
+
+function makeSummaryResponse(overrides: {
+  items?: Record<string, unknown>[];
+  total?: number;
+  facets?: Record<string, unknown>;
+} = {}) {
+  const items =
+    overrides.items ??
+    [makeComponent(1, "left-pad")];
+  return {
+    items,
+    pagination: {
+      page: 1,
+      page_size: 50,
+      total: overrides.total ?? items.length,
+      total_pages: Math.max(
+        1,
+        Math.ceil((overrides.total ?? items.length) / 50)
+      ),
+    },
+    facets:
+      overrides.facets ?? {
+        ecosystems: { npm: items.length },
+        missing_version: 0,
+        missing_licence_evidence: items.length,
+        missing_provider_evidence: items.length,
+        purl_persisted: items.length,
+        purl_constructible: 0,
+        purl_omitted: 0,
+        edges_observed: 0,
+        edges_none_observed: items.length,
+        direct_yes: items.length,
+        direct_no: 0,
+        cyclonedx_version_omitted: 0,
+      },
+    omissions: [
+      "no_clean_verdict",
+      "no_security_verdict",
+      "no_complete_dependency_graph_claim",
+      "no_remediation_claim",
+      "no_repository_code_execution",
+      "no_inferred_dependency_edges",
+      "no_fabricated_evidence_absence",
+    ],
   };
 }
 
@@ -165,15 +219,6 @@ function makeEvidenceResponse(overrides: Partial<Record<string, unknown>> = {}) 
   };
 }
 
-function makeListResponse() {
-  return {
-    items: [
-      makeComponent(1, "left-pad"),
-    ],
-    pagination: { page: 1, page_size: 50, total: 1, total_pages: 1 },
-  };
-}
-
 function renderExplorer() {
   return render(
     <MemoryRouter initialEntries={["/scans/1/dependencies"]}>
@@ -197,16 +242,16 @@ describe("v0.8 component evidence drilldown", () => {
     // cases.
     fetchMock.mockImplementation((input: RequestInfo | URL) => {
       const url = typeof input === "string" ? input : input.toString();
-      if (url.includes("/components/") && url.includes("/evidence")) {
+      if (url.includes("/components/evidence-summary")) {
+        return Promise.resolve(jsonResponse(makeSummaryResponse()));
+      }
+      if (/\/components\/\d+\/evidence/.test(url)) {
         return Promise.resolve(jsonResponse(makeEvidenceResponse()));
       }
-      if (url.includes("/components/") && url.includes("/path")) {
+      if (/\/components\/\d+\/path/.test(url)) {
         return Promise.resolve(
           jsonResponse({ components: [], edges: [], truncated: false })
         );
-      }
-      if (url.includes("/components")) {
-        return Promise.resolve(jsonResponse(makeListResponse()));
       }
       return Promise.resolve(jsonResponse({ items: [] }));
     });
@@ -258,6 +303,15 @@ describe("v0.8 component evidence drilldown", () => {
     const fetchMock = vi.mocked(globalThis.fetch);
     fetchMock.mockImplementation((input: RequestInfo | URL) => {
       const url = typeof input === "string" ? input : input.toString();
+      if (url.includes("/components/evidence-summary")) {
+        return Promise.resolve(jsonResponse(makeSummaryResponse()));
+      }
+      if (url.includes("/components/evidence-summary")) {
+        return Promise.resolve(jsonResponse(makeSummaryResponse()));
+      }
+      if (url.includes("/components/evidence-summary")) {
+        return Promise.resolve(jsonResponse(makeSummaryResponse()));
+      }
       if (url.includes("/evidence")) {
         return Promise.resolve(
           jsonResponse(
@@ -283,13 +337,10 @@ describe("v0.8 component evidence drilldown", () => {
           )
         );
       }
-      if (url.includes("/components/") && url.includes("/path")) {
+      if (/\/components\/\d+\/path/.test(url)) {
         return Promise.resolve(
           jsonResponse({ components: [], edges: [], truncated: false })
         );
-      }
-      if (url.includes("/components")) {
-        return Promise.resolve(jsonResponse(makeListResponse()));
       }
       return Promise.resolve(jsonResponse({ items: [] }));
     });
@@ -313,6 +364,15 @@ describe("v0.8 component evidence drilldown", () => {
     const fetchMock = vi.mocked(globalThis.fetch);
     fetchMock.mockImplementation((input: RequestInfo | URL) => {
       const url = typeof input === "string" ? input : input.toString();
+      if (url.includes("/components/evidence-summary")) {
+        return Promise.resolve(jsonResponse(makeSummaryResponse()));
+      }
+      if (url.includes("/components/evidence-summary")) {
+        return Promise.resolve(jsonResponse(makeSummaryResponse()));
+      }
+      if (url.includes("/components/evidence-summary")) {
+        return Promise.resolve(jsonResponse(makeSummaryResponse()));
+      }
       if (url.includes("/evidence")) {
         return Promise.resolve(
           jsonResponse(
@@ -345,13 +405,10 @@ describe("v0.8 component evidence drilldown", () => {
           )
         );
       }
-      if (url.includes("/components/") && url.includes("/path")) {
+      if (/\/components\/\d+\/path/.test(url)) {
         return Promise.resolve(
           jsonResponse({ components: [], edges: [], truncated: false })
         );
-      }
-      if (url.includes("/components")) {
-        return Promise.resolve(jsonResponse(makeListResponse()));
       }
       return Promise.resolve(jsonResponse({ items: [] }));
     });
@@ -386,6 +443,15 @@ describe("v0.8 component evidence drilldown", () => {
     const fetchMock = vi.mocked(globalThis.fetch);
     fetchMock.mockImplementation((input: RequestInfo | URL) => {
       const url = typeof input === "string" ? input : input.toString();
+      if (url.includes("/components/evidence-summary")) {
+        return Promise.resolve(jsonResponse(makeSummaryResponse()));
+      }
+      if (url.includes("/components/evidence-summary")) {
+        return Promise.resolve(jsonResponse(makeSummaryResponse()));
+      }
+      if (url.includes("/components/evidence-summary")) {
+        return Promise.resolve(jsonResponse(makeSummaryResponse()));
+      }
       if (url.includes("/evidence")) {
         return Promise.resolve(
           jsonResponse(
@@ -400,13 +466,10 @@ describe("v0.8 component evidence drilldown", () => {
           )
         );
       }
-      if (url.includes("/components/") && url.includes("/path")) {
+      if (/\/components\/\d+\/path/.test(url)) {
         return Promise.resolve(
           jsonResponse({ components: [], edges: [], truncated: false })
         );
-      }
-      if (url.includes("/components")) {
-        return Promise.resolve(jsonResponse(makeListResponse()));
       }
       return Promise.resolve(jsonResponse({ items: [] }));
     });
@@ -429,6 +492,15 @@ describe("v0.8 component evidence drilldown", () => {
     const fetchMock = vi.mocked(globalThis.fetch);
     fetchMock.mockImplementation((input: RequestInfo | URL) => {
       const url = typeof input === "string" ? input : input.toString();
+      if (url.includes("/components/evidence-summary")) {
+        return Promise.resolve(jsonResponse(makeSummaryResponse()));
+      }
+      if (url.includes("/components/evidence-summary")) {
+        return Promise.resolve(jsonResponse(makeSummaryResponse()));
+      }
+      if (url.includes("/components/evidence-summary")) {
+        return Promise.resolve(jsonResponse(makeSummaryResponse()));
+      }
       if (url.includes("/evidence")) {
         return Promise.resolve(
           jsonResponse(
@@ -458,13 +530,10 @@ describe("v0.8 component evidence drilldown", () => {
           )
         );
       }
-      if (url.includes("/components/") && url.includes("/path")) {
+      if (/\/components\/\d+\/path/.test(url)) {
         return Promise.resolve(
           jsonResponse({ components: [], edges: [], truncated: false })
         );
-      }
-      if (url.includes("/components")) {
-        return Promise.resolve(jsonResponse(makeListResponse()));
       }
       return Promise.resolve(jsonResponse({ items: [] }));
     });
@@ -488,6 +557,15 @@ describe("v0.8 component evidence drilldown", () => {
     const fetchMock = vi.mocked(globalThis.fetch);
     fetchMock.mockImplementation((input: RequestInfo | URL) => {
       const url = typeof input === "string" ? input : input.toString();
+      if (url.includes("/components/evidence-summary")) {
+        return Promise.resolve(jsonResponse(makeSummaryResponse()));
+      }
+      if (url.includes("/components/evidence-summary")) {
+        return Promise.resolve(jsonResponse(makeSummaryResponse()));
+      }
+      if (url.includes("/components/evidence-summary")) {
+        return Promise.resolve(jsonResponse(makeSummaryResponse()));
+      }
       if (url.includes("/evidence")) {
         return Promise.resolve(
           jsonResponse(
@@ -518,13 +596,10 @@ describe("v0.8 component evidence drilldown", () => {
           )
         );
       }
-      if (url.includes("/components/") && url.includes("/path")) {
+      if (/\/components\/\d+\/path/.test(url)) {
         return Promise.resolve(
           jsonResponse({ components: [], edges: [], truncated: false })
         );
-      }
-      if (url.includes("/components")) {
-        return Promise.resolve(jsonResponse(makeListResponse()));
       }
       return Promise.resolve(jsonResponse({ items: [] }));
     });
@@ -547,6 +622,15 @@ describe("v0.8 component evidence drilldown", () => {
     const fetchMock = vi.mocked(globalThis.fetch);
     fetchMock.mockImplementation((input: RequestInfo | URL) => {
       const url = typeof input === "string" ? input : input.toString();
+      if (url.includes("/components/evidence-summary")) {
+        return Promise.resolve(jsonResponse(makeSummaryResponse()));
+      }
+      if (url.includes("/components/evidence-summary")) {
+        return Promise.resolve(jsonResponse(makeSummaryResponse()));
+      }
+      if (url.includes("/components/evidence-summary")) {
+        return Promise.resolve(jsonResponse(makeSummaryResponse()));
+      }
       if (url.includes("/evidence")) {
         return Promise.resolve(
           jsonResponse(
@@ -561,13 +645,10 @@ describe("v0.8 component evidence drilldown", () => {
           )
         );
       }
-      if (url.includes("/components/") && url.includes("/path")) {
+      if (/\/components\/\d+\/path/.test(url)) {
         return Promise.resolve(
           jsonResponse({ components: [], edges: [], truncated: false })
         );
-      }
-      if (url.includes("/components")) {
-        return Promise.resolve(jsonResponse(makeListResponse()));
       }
       return Promise.resolve(jsonResponse({ items: [] }));
     });
@@ -597,16 +678,19 @@ describe("v0.8 component evidence drilldown", () => {
     const fetchMock = vi.mocked(globalThis.fetch);
     fetchMock.mockImplementation((input: RequestInfo | URL) => {
       const url = typeof input === "string" ? input : input.toString();
+      if (url.includes("/components/evidence-summary")) {
+        return Promise.resolve(jsonResponse(makeSummaryResponse()));
+      }
+      if (url.includes("/components/evidence-summary")) {
+        return Promise.resolve(jsonResponse(makeSummaryResponse()));
+      }
       if (url.includes("/evidence")) {
         return Promise.resolve(jsonResponse(makeEvidenceResponse()));
       }
-      if (url.includes("/components/") && url.includes("/path")) {
+      if (/\/components\/\d+\/path/.test(url)) {
         return Promise.resolve(
           jsonResponse({ components: [], edges: [], truncated: false })
         );
-      }
-      if (url.includes("/components")) {
-        return Promise.resolve(jsonResponse(makeListResponse()));
       }
       return Promise.resolve(jsonResponse({ items: [] }));
     });
@@ -638,6 +722,9 @@ describe("v0.8 component evidence drilldown", () => {
     const fetchMock = vi.mocked(globalThis.fetch);
     fetchMock.mockImplementation((input: RequestInfo | URL) => {
       const url = typeof input === "string" ? input : input.toString();
+      if (url.includes("/components/evidence-summary")) {
+        return Promise.resolve(jsonResponse(makeSummaryResponse()));
+      }
       if (url.includes("/evidence")) {
         return Promise.resolve(
           new Response(
@@ -646,13 +733,10 @@ describe("v0.8 component evidence drilldown", () => {
           )
         );
       }
-      if (url.includes("/components/") && url.includes("/path")) {
+      if (/\/components\/\d+\/path/.test(url)) {
         return Promise.resolve(
           jsonResponse({ components: [], edges: [], truncated: false })
         );
-      }
-      if (url.includes("/components")) {
-        return Promise.resolve(jsonResponse(makeListResponse()));
       }
       return Promise.resolve(jsonResponse({ items: [] }));
     });
@@ -711,12 +795,7 @@ describe("v0.8 component evidence drilldown", () => {
     const fetchMock = vi.mocked(globalThis.fetch);
     fetchMock.mockImplementation((input: RequestInfo | URL) => {
       const url = typeof input === "string" ? input : input.toString();
-      if (url.includes("/components/") && url.includes("/path")) {
-        return Promise.resolve(
-          jsonResponse({ components: [], edges: [], truncated: false })
-        );
-      }
-      if (url.includes("/components")) {
+      if (url.includes("/components/evidence-summary")) {
         return Promise.resolve(
           jsonResponse({
             items: [
@@ -750,8 +829,10 @@ describe("v0.8 component evidence drilldown", () => {
     const rows = Array.from(table.querySelectorAll("tbody tr"));
     const firstRowCells = Array.from(rows[0].querySelectorAll("td"));
     const secondRowCells = Array.from(rows[1].querySelectorAll("td"));
-    const firstDirectCell = firstRowCells[4].textContent ?? "";
-    const secondDirectCell = secondRowCells[4].textContent ?? "";
+    // v0.9 column order: Package, Ecosystem, Version,
+    // Direct?, Evidence flags, Evidence (button).
+    const firstDirectCell = firstRowCells[3].textContent ?? "";
+    const secondDirectCell = secondRowCells[3].textContent ?? "";
     expect(firstDirectCell.trim()).toBe("yes");
     expect(secondDirectCell.trim()).toBe("no");
     // The "available" badge must not appear in the

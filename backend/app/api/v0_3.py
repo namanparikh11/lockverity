@@ -472,6 +472,97 @@ def get_component_evidence(
     return evidence
 
 
+# v0.9 evidence-aware search and filtering.
+#
+# Declared after the v0.8 evidence detail route so the
+# detail route keeps the more specific path component.
+# The summary endpoint is the v0.9 read-only surface that
+# surfaces the persisted evidence flags the consumer
+# needs to filter / sort / facet the dependency table.
+# The endpoint reuses the same v0.6 CycloneDX helpers the
+# v0.8 detail endpoint uses, so the summary cannot
+# disagree with the per-row drawer.
+@router.get(
+    "/{scan_id}/components/evidence-summary",
+    summary=(
+        "Read-only evidence-aware component search and "
+        "filtering surface for a scan. Returns a filtered, "
+        "sorted, paginated list of components with their "
+        "evidence flags and aggregate facet counts."
+    ),
+)
+def get_components_evidence_summary(
+    scan_id: int,
+    session: DBSession,
+    search: str | None = Query(default=None),
+    ecosystem: str | None = Query(default=None),
+    direct: str = Query(default="all", pattern="^(all|yes|no)$"),
+    version: str = Query(default="all", pattern="^(all|present|missing)$"),
+    licence_evidence: str = Query(default="all", pattern="^(all|present|missing)$"),
+    provider_evidence: str = Query(default="all", pattern="^(all|present|missing)$"),
+    purl: str = Query(default="all", pattern="^(all|persisted|constructible|omitted)$"),
+    dependency_edges: str = Query(default="all", pattern="^(all|present|none_observed)$"),
+    cyclonedx_appears: str = Query(default="all", pattern="^(all|yes|no)$"),
+    cyclonedx_version_omitted: str = Query(default="all", pattern="^(all|yes|no)$"),
+    cyclonedx_relationships_emitted: str = Query(default="all", pattern="^(all|yes|no)$"),
+    sort: str = Query(
+        default="package_name",
+        pattern="^(package_name|ecosystem|version_missing_first|"
+        "licence_missing_first|provider_missing_first|"
+        "dependency_edges_missing_first)$",
+    ),
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=50, ge=1, le=200),
+) -> dict[str, Any]:
+    """Return the v0.9 evidence summary for ``scan_id``.
+
+    The route is the v0.9 search / filter / sort / paginate
+    surface for the components table. The endpoint never
+    generates a full BOM, never calls a provider, never
+    downloads a repository, never executes analyzed code,
+    and never writes to the database.
+
+    A 404 is returned only when the scan id does not
+    exist. Every other scan state (including queued,
+    running, failed, cancelled, partial, completed) returns
+    200 with the filtered summary; the consumer renders
+    the response as a discovery surface, not a verdict.
+    """
+    from app.db import session as _db_session
+    from app.evidence.summary import ComponentEvidenceSummaryService
+
+    _get_scan_or_404(session, scan_id)
+    service = ComponentEvidenceSummaryService(_db_session.SessionLocal)
+    summary = service.fetch(
+        scan_run_id=scan_id,
+        search=search,
+        ecosystem=ecosystem,
+        direct=direct,
+        version=version,
+        licence_evidence=licence_evidence,
+        provider_evidence=provider_evidence,
+        purl=purl,
+        dependency_edges=dependency_edges,
+        cyclonedx_appears=cyclonedx_appears,
+        cyclonedx_version_omitted=cyclonedx_version_omitted,
+        cyclonedx_relationships_emitted=cyclonedx_relationships_emitted,
+        sort=sort,
+        page=page,
+        page_size=page_size,
+    )
+    if summary is None:
+        # The scan row was deleted between the 404 check
+        # and the service call. The bounded 404 envelope
+        # is the right answer; the consumer never sees a
+        # half-built summary.
+        raise ApiError(
+            ApiErrorCode.NOT_FOUND,
+            f"Scan {scan_id} not found.",
+            details={"scan_id": scan_id},
+        )
+    return summary
+
+
 # ----------------------------------------------------------------------
 # Vulnerabilities
 # ----------------------------------------------------------------------

@@ -30,7 +30,7 @@ describe("version consistency", () => {
       new Response(
         JSON.stringify({
           name: "Lockverity",
-          version: "0.8.0",
+          version: "0.9.0",
           tagline: "Evidence-first software supply-chain assurance",
           environment: "test",
           api_prefix: "/api/v1",
@@ -52,7 +52,7 @@ describe("version consistency", () => {
       </MemoryRouter>
     );
     await waitFor(() => {
-      expect(screen.getByText("v0.8.0")).toBeInTheDocument();
+      expect(screen.getByText("v0.9.0")).toBeInTheDocument();
     });
   });
 
@@ -88,7 +88,7 @@ describe("About page current product copy", () => {
     cleanup();
   });
 
-  it("documents v0.8 capabilities and the defensive-only scope", () => {
+  it("documents v0.9 capabilities and the defensive-only scope", () => {
     render(
       <MemoryRouter initialEntries={["/about"]}>
         <Routes>
@@ -98,19 +98,32 @@ describe("About page current product copy", () => {
         </Routes>
       </MemoryRouter>
     );
-    // The "What v0.8 implements today" section header must be
-    // present. The claim "v0.7" alone is no longer a sufficient
-    // section title.
+    // The "What v0.9 implements today" section header must be
+    // present. The About page is the single source of truth
+    // for the current milestone and must be kept in sync with
+    // ``backend/app/_version.py``.
     expect(
-      screen.getByRole("heading", { name: /what v0\.8 implements today/i })
+      screen.getByRole("heading", { name: /what v0\.9 implements today/i })
     ).toBeInTheDocument();
-    // Defensive-only scope remains non-negotiable.
-    expect(screen.getByText(/does not execute analyzed code/i)).toBeInTheDocument();
-    // Provider-honesty policy is still called out by name.
+    // The v0.9 evidence search / filtering capability is
+    // described with the evidence-honest wording
+    // (&ldquo;not persisted&rdquo; / &ldquo;none observed&rdquo; /
+    // &ldquo;no persisted edges&rdquo;) and the endpoint path.
+    expect(
+      screen.getByText(/evidence search and filtering/i)
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        /\/api\/v1\/scans\/\{id\}\/components\/evidence-summary/
+      )
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(/does not execute analyzed code/i)
+    ).toBeInTheDocument();
     expect(screen.getByText(/provider-honesty policy/i)).toBeInTheDocument();
-    // The About page must not claim to do something that is not
-    // in the codebase: authentication / multi-tenancy / billing.
-    expect(screen.getByText(/authentication, multi-tenancy, billing/i)).toBeInTheDocument();
+    expect(
+      screen.getByText(/authentication, multi-tenancy, billing/i)
+    ).toBeInTheDocument();
   });
 
   it("does not regress to describing v0.1 as the current milestone", () => {

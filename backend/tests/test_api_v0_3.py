@@ -860,3 +860,365 @@ def test_component_evidence_endpoint_response_is_deterministic(app_config, works
     assert r1.status_code == 200
     assert r2.status_code == 200
     assert r1.json() == r2.json()
+
+
+# v0.9 evidence-aware search and filtering — API tests.
+#
+# The endpoint is a sibling of the existing
+# ``/components/{component_id}/evidence`` route. The
+# fixture mirrors the dependency-path test: a small
+# persisted manifest + components + an optional licence
+# finding + an optional provider observation + an
+# optional dependency edge.
+
+
+def test_evidence_summary_default_returns_all_components(app_config, workspace_root) -> None:
+    with _db_session.SessionLocal() as s:
+        scan_id, _repo_id, _ = _setup_scan_with_zip(s, workspace_root)
+        scan_service.transition_scan(s, scan_id, target=ScanStatus.RUNNING)
+        scan_service.transition_scan(s, scan_id, target=ScanStatus.COMPLETED)
+        manifest = Manifest(
+            scan_run_id=scan_id,
+            path="package.json",
+            manifest_type="package_json",
+            ecosystem="npm",
+            parse_status=ManifestParseStatus.PARSED,
+        )
+        s.add(manifest)
+        s.flush()
+        for name in ("left-pad", "lodash", "stay"):
+            _make_or_get_component(s, scan_id=scan_id, manifest_id=manifest.id, name=name)
+        s.commit()
+    client = TestClient(app)
+    r = client.get(f"/api/v1/scans/{scan_id}/components/evidence-summary")
+    assert r.status_code == 200
+    body = r.json()
+    assert set(body.keys()) == {
+        "items",
+        "pagination",
+        "facets",
+        "omissions",
+    }
+    assert body["pagination"]["total"] == 3
+    # The default sort is package_name.
+    names = [it["package_name"] for it in body["items"]]
+    assert names == sorted(names, key=str.lower)
+
+
+def test_evidence_summary_search_filter_narrows_results(app_config, workspace_root) -> None:
+    with _db_session.SessionLocal() as s:
+        scan_id, _repo_id, _ = _setup_scan_with_zip(s, workspace_root)
+        scan_service.transition_scan(s, scan_id, target=ScanStatus.RUNNING)
+        scan_service.transition_scan(s, scan_id, target=ScanStatus.COMPLETED)
+        manifest = Manifest(
+            scan_run_id=scan_id,
+            path="package.json",
+            manifest_type="package_json",
+            ecosystem="npm",
+            parse_status=ManifestParseStatus.PARSED,
+        )
+        s.add(manifest)
+        s.flush()
+        for name in ("left-pad", "lodash", "stay"):
+            _make_or_get_component(s, scan_id=scan_id, manifest_id=manifest.id, name=name)
+        s.commit()
+    client = TestClient(app)
+    r = client.get(f"/api/v1/scans/{scan_id}/components/evidence-summary?search=pad")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["pagination"]["total"] == 1
+    assert body["items"][0]["package_name"] == "left-pad"
+
+
+def test_evidence_summary_direct_filter(app_config, workspace_root) -> None:
+    with _db_session.SessionLocal() as s:
+        scan_id, _repo_id, _ = _setup_scan_with_zip(s, workspace_root)
+        scan_service.transition_scan(s, scan_id, target=ScanStatus.RUNNING)
+        scan_service.transition_scan(s, scan_id, target=ScanStatus.COMPLETED)
+        manifest = Manifest(
+            scan_run_id=scan_id,
+            path="package.json",
+            manifest_type="package_json",
+            ecosystem="npm",
+            parse_status=ManifestParseStatus.PARSED,
+        )
+        s.add(manifest)
+        s.flush()
+        _make_or_get_component(
+            s,
+            scan_id=scan_id,
+            manifest_id=manifest.id,
+            name="left-pad",
+            direct=True,
+        )
+        _make_or_get_component(
+            s,
+            scan_id=scan_id,
+            manifest_id=manifest.id,
+            name="lodash",
+            direct=False,
+        )
+        s.commit()
+    client = TestClient(app)
+    r = client.get(f"/api/v1/scans/{scan_id}/components/evidence-summary?direct=yes")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["pagination"]["total"] == 1
+    assert body["items"][0]["direct"] is True
+    r = client.get(f"/api/v1/scans/{scan_id}/components/evidence-summary?direct=no")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["pagination"]["total"] == 1
+    assert body["items"][0]["direct"] is False
+
+
+def test_evidence_summary_version_missing_filter(app_config, workspace_root) -> None:
+    with _db_session.SessionLocal() as s:
+        scan_id, _repo_id, _ = _setup_scan_with_zip(s, workspace_root)
+        scan_service.transition_scan(s, scan_id, target=ScanStatus.RUNNING)
+        scan_service.transition_scan(s, scan_id, target=ScanStatus.COMPLETED)
+        manifest = Manifest(
+            scan_run_id=scan_id,
+            path="package.json",
+            manifest_type="package_json",
+            ecosystem="npm",
+            parse_status=ManifestParseStatus.PARSED,
+        )
+        s.add(manifest)
+        s.flush()
+        _make_or_get_component(
+            s,
+            scan_id=scan_id,
+            manifest_id=manifest.id,
+            name="left-pad",
+            version="1.0.0",
+        )
+        _make_or_get_component(
+            s,
+            scan_id=scan_id,
+            manifest_id=manifest.id,
+            name="unresolved",
+            version=None,
+        )
+        s.commit()
+    client = TestClient(app)
+    r = client.get(f"/api/v1/scans/{scan_id}/components/evidence-summary?version=missing")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["pagination"]["total"] == 1
+    assert body["items"][0]["package_name"] == "unresolved"
+    assert body["items"][0]["version"] is None
+    assert body["items"][0]["evidence"]["version_present"] is False
+    assert body["items"][0]["evidence"]["version_omitted_from_cyclonedx_17"] is True
+
+
+def test_evidence_summary_purl_persisted_filter(app_config, workspace_root) -> None:
+    with _db_session.SessionLocal() as s:
+        scan_id, _repo_id, _ = _setup_scan_with_zip(s, workspace_root)
+        scan_service.transition_scan(s, scan_id, target=ScanStatus.RUNNING)
+        scan_service.transition_scan(s, scan_id, target=ScanStatus.COMPLETED)
+        manifest = Manifest(
+            scan_run_id=scan_id,
+            path="package.json",
+            manifest_type="package_json",
+            ecosystem="npm",
+            parse_status=ManifestParseStatus.PARSED,
+        )
+        s.add(manifest)
+        s.flush()
+        _make_or_get_component(
+            s,
+            scan_id=scan_id,
+            manifest_id=manifest.id,
+            name="left-pad",
+            package_url="pkg:npm/left-pad@1.0.0",
+        )
+        _make_or_get_component(
+            s,
+            scan_id=scan_id,
+            manifest_id=manifest.id,
+            name="lodash",
+            package_url=None,
+        )
+        s.commit()
+    client = TestClient(app)
+    r = client.get(f"/api/v1/scans/{scan_id}/components/evidence-summary?purl=persisted")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["pagination"]["total"] == 1
+    assert body["items"][0]["package_name"] == "left-pad"
+    r = client.get(f"/api/v1/scans/{scan_id}/components/evidence-summary?purl=constructible")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["pagination"]["total"] == 1
+    assert body["items"][0]["package_name"] == "lodash"
+    assert body["items"][0]["evidence"]["purl_state"] == "constructible"
+
+
+def test_evidence_summary_dependency_edges_present_filter(app_config, workspace_root) -> None:
+    with _db_session.SessionLocal() as s:
+        scan_id, _repo_id, _ = _setup_scan_with_zip(s, workspace_root)
+        scan_service.transition_scan(s, scan_id, target=ScanStatus.RUNNING)
+        scan_service.transition_scan(s, scan_id, target=ScanStatus.COMPLETED)
+        manifest = Manifest(
+            scan_run_id=scan_id,
+            path="package.json",
+            manifest_type="package_json",
+            ecosystem="npm",
+            parse_status=ManifestParseStatus.PARSED,
+        )
+        s.add(manifest)
+        s.flush()
+        parent = _make_or_get_component(
+            s,
+            scan_id=scan_id,
+            manifest_id=manifest.id,
+            name="left-pad",
+        )
+        child = _make_or_get_component(
+            s,
+            scan_id=scan_id,
+            manifest_id=manifest.id,
+            name="lodash",
+        )
+        s.add(
+            DependencyEdge(
+                scan_run_id=scan_id,
+                parent_component_id=parent.id,
+                child_component_id=child.id,
+                depth=1,
+            )
+        )
+        s.commit()
+    client = TestClient(app)
+    r = client.get(f"/api/v1/scans/{scan_id}/components/evidence-summary?dependency_edges=present")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["pagination"]["total"] == 1
+    assert body["items"][0]["id"] == parent.id
+    r = client.get(
+        f"/api/v1/scans/{scan_id}/components/evidence-summary?dependency_edges=none_observed"
+    )
+    assert r.status_code == 200
+    body = r.json()
+    assert body["pagination"]["total"] == 1
+    assert body["items"][0]["id"] == child.id
+    # The summary must not claim "no dependencies" for the
+    # child component. The filter vocabulary is bounded
+    # to ``present`` / ``none_observed``.
+    text = json.dumps(body).lower()
+    assert "no dependencies" not in text
+
+
+def test_evidence_summary_facets_match_filtered_set(app_config, workspace_root) -> None:
+    with _db_session.SessionLocal() as s:
+        scan_id, _repo_id, _ = _setup_scan_with_zip(s, workspace_root)
+        scan_service.transition_scan(s, scan_id, target=ScanStatus.RUNNING)
+        scan_service.transition_scan(s, scan_id, target=ScanStatus.COMPLETED)
+        manifest = Manifest(
+            scan_run_id=scan_id,
+            path="package.json",
+            manifest_type="package_json",
+            ecosystem="npm",
+            parse_status=ManifestParseStatus.PARSED,
+        )
+        s.add(manifest)
+        s.flush()
+        _make_or_get_component(
+            s,
+            scan_id=scan_id,
+            manifest_id=manifest.id,
+            name="left-pad",
+            version="1.0.0",
+        )
+        _make_or_get_component(
+            s,
+            scan_id=scan_id,
+            manifest_id=manifest.id,
+            name="unresolved",
+            version=None,
+        )
+        s.commit()
+    client = TestClient(app)
+    r = client.get(f"/api/v1/scans/{scan_id}/components/evidence-summary")
+    assert r.status_code == 200
+    body = r.json()
+    facets = body["facets"]
+    # One of two components is missing its version.
+    assert facets["missing_version"] == 1
+    # Both components are npm, no other ecosystem.
+    assert facets["ecosystems"] == {"npm": 2}
+    # Two direct components.
+    assert facets["direct_yes"] == 2
+    assert facets["direct_no"] == 0
+    # One component has its version omitted from the
+    # CycloneDX 1.7 export.
+    assert facets["cyclonedx_version_omitted"] == 1
+
+
+def test_evidence_summary_returns_404_for_unknown_scan(app_config, workspace_root) -> None:
+    client = TestClient(app)
+    r = client.get("/api/v1/scans/999999/components/evidence-summary")
+    assert r.status_code == 404
+
+
+def test_evidence_summary_response_is_deterministic(app_config, workspace_root) -> None:
+    with _db_session.SessionLocal() as s:
+        scan_id, _repo_id, _ = _setup_scan_with_zip(s, workspace_root)
+        scan_service.transition_scan(s, scan_id, target=ScanStatus.RUNNING)
+        scan_service.transition_scan(s, scan_id, target=ScanStatus.COMPLETED)
+        manifest = Manifest(
+            scan_run_id=scan_id,
+            path="package.json",
+            manifest_type="package_json",
+            ecosystem="npm",
+            parse_status=ManifestParseStatus.PARSED,
+        )
+        s.add(manifest)
+        s.flush()
+        for name in ("left-pad", "lodash", "stay"):
+            _make_or_get_component(s, scan_id=scan_id, manifest_id=manifest.id, name=name)
+        s.commit()
+    client = TestClient(app)
+    r1 = client.get(f"/api/v1/scans/{scan_id}/components/evidence-summary")
+    r2 = client.get(f"/api/v1/scans/{scan_id}/components/evidence-summary")
+    assert r1.status_code == 200
+    assert r2.status_code == 200
+    assert r1.json() == r2.json()
+
+
+def _make_or_get_component(
+    session,
+    *,
+    scan_id: int,
+    manifest_id: int,
+    name: str,
+    version: str | None = "1.0.0",
+    direct: bool = True,
+    package_url: str | None = "pkg:npm/example@1.0.0",
+) -> Component:
+    """Insert a unique component row.
+
+    Each test uses a fresh scan, so the package name does
+    not need to be disambiguated.
+    """
+    component = Component(
+        scan_run_id=scan_id,
+        manifest_id=manifest_id,
+        ecosystem="npm",
+        package_name=name,
+        version=version,
+        version_source=(
+            ComponentVersionSource.UNRESOLVED
+            if version is None
+            else ComponentVersionSource.MANIFEST
+        ),
+        package_url=package_url,
+        direct=direct,
+        development=False,
+        optional=False,
+        integrity=None,
+    )
+    session.add(component)
+    session.flush()
+    return component
