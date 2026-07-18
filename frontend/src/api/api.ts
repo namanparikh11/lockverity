@@ -188,6 +188,18 @@ export const api = {
     }),
   createScan: (repositoryId: number, payload: ScanCreatePayload = {}) =>
     apiClient.post<Scan>(`/repositories/${repositoryId}/scans`, payload),
+  // v1.6.1: workspace-preserving rescan. The backend
+  // route ``POST /api/v1/repositories/{id}/rescan``
+  // creates a fresh scan row, a fresh workspace, and
+  // re-materialises the source evidence (GitHub
+  // tarball or upload workspace copy) before
+  // returning. The historical scan and workspace
+  // are never mutated. When the source is no longer
+  // available, the route returns
+  // ``rescan_source_unavailable`` and no queued row
+  // is persisted.
+  rescanRepository: (repositoryId: number, payload: ScanCreatePayload = {}) =>
+    apiClient.post<Scan>(`/repositories/${repositoryId}/rescan`, payload),
   // v1.6: explicit scan start. The intake endpoints
   // create a queued scan but do not start execution; the
   // caller must POST to ``/scans/{id}/run`` to schedule

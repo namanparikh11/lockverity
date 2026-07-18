@@ -56,6 +56,14 @@ def _status_for_code(code: str) -> int:
         ApiErrorCode.FORBIDDEN.value: 403,
         ApiErrorCode.RATE_LIMITED.value: 429,
         ApiErrorCode.INTERNAL.value: 500,
+        # v1.6.1: the rescan route surfaces this code
+        # when the original source evidence is no
+        # longer available (e.g., the original
+        # uploaded archive was cleaned up). 422 is
+        # the right semantic: the request is well-
+        # formed but the underlying state cannot
+        # support a rescan.
+        ApiErrorCode.RESCAN_SOURCE_UNAVAILABLE.value: 422,
     }
     return mapping.get(code, 500)
 

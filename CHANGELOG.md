@@ -5,7 +5,38 @@ follow [Semantic Versioning](https://semver.org/). Lockverity is
 pre-1.0 in the sense that the public API may evolve; the
 underlying data model and Alembic migrations are stable.
 
-## v1.6 — Scan execution controls + live stage progress (current)
+## v1.6.1 — Workspace-preserving rescan repair (current)
+
+- **Workspace-preserving rescan.** New
+  `POST /api/v1/repositories/{id}/rescan` route and
+  `RescanService` create a fresh scan, a fresh
+  workspace, and re-materialise the source
+  evidence (re-download the GitHub tarball or
+  safely copy the previous upload workspace)
+  before returning. The historical scan and
+  workspace are never mutated.
+- **Source-unavailable guard.** When the original
+  uploaded source is no longer available, the
+  route returns a bounded
+  `rescan_source_unavailable` error before any
+  queued row is persisted. The frontend renders
+  the bounded guidance; the workbench never
+  navigates to a new scan that is known to be
+  unrunnable.
+- **Action error carries its pending state.** The
+  `ScanActions` component now stores the error
+  alongside the action that produced it, so the
+  bounded error title survives the
+  `finally` block that resets the pending flag.
+- **Frontend update.** `api.rescanRepository`
+  wraps the new route; the v1.6 `api.createScan`
+  still wraps the low-level route that creates
+  only a queued scan row (kept for the orchestrator
+  tests).
+- **No new providers, no new export standards, no
+  new evidence contracts, no migration.**
+
+## v1.6 — Scan execution controls + live stage progress
 
 - **Scan workbench at `/scans/:scanId`.** The existing
   scan detail page is upgraded with a truthful

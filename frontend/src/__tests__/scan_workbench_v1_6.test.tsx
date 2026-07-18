@@ -474,7 +474,7 @@ describe("v1.6 scan workbench + execution controls", () => {
         if (url.endsWith("/api/v1/system/info")) {
           return jsonResponse(SYSTEM_INFO);
         }
-        if (url.match(/\/api\/v1\/repositories\/\d+\/scans$/) && init?.method === "POST") {
+        if (url.match(/\/api\/v1\/repositories\/\d+\/rescan$/) && init?.method === "POST") {
           return jsonResponse(makeScan({ id: 99, status: "queued" }), 201);
         }
         if (url.match(/\/api\/v1\/scans\/\d+\/run$/) && init?.method === "POST") {
