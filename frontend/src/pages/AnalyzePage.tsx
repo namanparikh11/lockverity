@@ -76,6 +76,9 @@ function GitHubIntakeCard() {
   const [urlError, setUrlError] = useState<string | null>(null);
   const [refError, setRefError] = useState<string | null>(null);
   const [scanId, setScanId] = useState<number | null>(null);
+  const [startError, setStartError] = useState<unknown>(null);
+  const [starting, setStarting] = useState(false);
+  const [started, setStarted] = useState(false);
 
   function validate(): boolean {
     let ok = true;
@@ -100,6 +103,8 @@ function GitHubIntakeCard() {
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setError(null);
+    setStartError(null);
+    setStarted(false);
     if (!validate()) return;
     setSubmitting(true);
     try {
@@ -108,10 +113,37 @@ function GitHubIntakeCard() {
         ...(ref.trim() ? { requested_ref: ref.trim() } : {}),
       });
       setScanId(result.scan.id);
+      // v1.6: the intake route creates a queued scan but
+      // does not start execution. The frontend must call
+      // ``/scans/{id}/run`` explicitly so the work is
+      // scheduled on the local worker.
+      setStarting(true);
+      try {
+        await api.runScan(result.scan.id);
+        setStarted(true);
+      } catch (err) {
+        setStartError(err);
+      } finally {
+        setStarting(false);
+      }
     } catch (err) {
       setError(err);
     } finally {
       setSubmitting(false);
+    }
+  }
+
+  async function retryStart() {
+    if (scanId === null || starting || started) return;
+    setStartError(null);
+    setStarting(true);
+    try {
+      await api.runScan(scanId);
+      setStarted(true);
+    } catch (err) {
+      setStartError(err);
+    } finally {
+      setStarting(false);
     }
   }
 
@@ -207,11 +239,65 @@ function GitHubIntakeCard() {
           )}
         </div>
       ) : null}
-      {scanId !== null ? (
+      {scanId !== null && starting ? (
+        <div
+          className="rounded-md border border-accent-200 bg-accent-50 p-3 text-sm text-accent-900"
+          role="status"
+          aria-live="polite"
+        >
+          <p className="font-semibold">
+            Repository registered. Starting scan #{scanId}&hellip;
+          </p>
+        </div>
+      ) : null}
+      {scanId !== null && started ? (
         <ScanStatusPanel
           scanId={scanId}
           onOpenScan={(id) => navigate(`/scans/${id}`)}
         />
+      ) : null}
+      {scanId !== null && startError ? (
+        <div
+          className="space-y-2 rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900"
+          role="alert"
+          aria-live="assertive"
+        >
+          <p className="font-semibold">
+            Repository intake completed, but scan execution did not start.
+          </p>
+          <p className="text-xs text-amber-800">
+            The repository and the queued scan are persisted. The local
+            worker did not accept the run request.
+          </p>
+          {startError instanceof ApiClientError ? (
+            <ErrorState
+              error={startError}
+              title="Could not start the scan"
+            />
+          ) : (
+            <ErrorState
+              error={startError}
+              title="Could not start the scan"
+            />
+          )}
+          <div className="flex flex-wrap justify-end gap-2">
+            <button
+              type="button"
+              className="btn-secondary"
+              onClick={() => navigate(`/scans/${scanId}`)}
+            >
+              Open scan
+            </button>
+            <button
+              type="button"
+              className="btn-primary"
+              onClick={retryStart}
+              disabled={starting}
+            >
+              {starting ? "Retrying&hellip;" : "Retry start"}
+            </button>
+          </div>
+        </div>
       ) : null}
       <div className="flex justify-end gap-2">
         <button
@@ -254,6 +340,9 @@ function UploadIntakeCard() {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<unknown>(null);
   const [scanId, setScanId] = useState<number | null>(null);
+  const [startError, setStartError] = useState<unknown>(null);
+  const [starting, setStarting] = useState(false);
+  const [started, setStarted] = useState(false);
   const [dragOver, setDragOver] = useState(false);
   const inputRef = useRef<HTMLInputElement | null>(null);
 
@@ -280,6 +369,20 @@ function UploadIntakeCard() {
     setFile(next);
   }
 
+  async function retryStart() {
+    if (scanId === null || starting || started) return;
+    setStartError(null);
+    setStarting(true);
+    try {
+      await api.runScan(scanId);
+      setStarted(true);
+    } catch (err) {
+      setStartError(err);
+    } finally {
+      setStarting(false);
+    }
+  }
+
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!file) {
@@ -288,14 +391,24 @@ function UploadIntakeCard() {
     }
     setSubmitting(true);
     setError(null);
+    setStartError(null);
+    setStarted(false);
     try {
       // v1.5: the upload route returns the full
-      // ``IntakeResultRead`` shape. The page navigates
-      // to the new scan detail page; the existing
-      // /repositories/{id} view remains reachable from
-      // the scan header.
+      // ``IntakeResultRead`` shape. v1.6: the page then
+      // calls ``/scans/{id}/run`` to schedule execution
+      // on the local worker.
       const result = await api.createRepositoryUpload(file);
       setScanId(result.scan.id);
+      setStarting(true);
+      try {
+        await api.runScan(result.scan.id);
+        setStarted(true);
+      } catch (err) {
+        setStartError(err);
+      } finally {
+        setStarting(false);
+      }
     } catch (err) {
       setError(err);
     } finally {
@@ -380,11 +493,65 @@ function UploadIntakeCard() {
           )}
         </div>
       ) : null}
-      {scanId !== null ? (
+      {scanId !== null && starting ? (
+        <div
+          className="rounded-md border border-accent-200 bg-accent-50 p-3 text-sm text-accent-900"
+          role="status"
+          aria-live="polite"
+        >
+          <p className="font-semibold">
+            Archive registered. Starting scan #{scanId}&hellip;
+          </p>
+        </div>
+      ) : null}
+      {scanId !== null && started ? (
         <ScanStatusPanel
           scanId={scanId}
           onOpenScan={(id) => navigate(`/scans/${id}`)}
         />
+      ) : null}
+      {scanId !== null && startError ? (
+        <div
+          className="space-y-2 rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900"
+          role="alert"
+          aria-live="assertive"
+        >
+          <p className="font-semibold">
+            Archive intake completed, but scan execution did not start.
+          </p>
+          <p className="text-xs text-amber-800">
+            The repository and the queued scan are persisted. The local
+            worker did not accept the run request.
+          </p>
+          {startError instanceof ApiClientError ? (
+            <ErrorState
+              error={startError}
+              title="Could not start the scan"
+            />
+          ) : (
+            <ErrorState
+              error={startError}
+              title="Could not start the scan"
+            />
+          )}
+          <div className="flex flex-wrap justify-end gap-2">
+            <button
+              type="button"
+              className="btn-secondary"
+              onClick={() => navigate(`/scans/${scanId}`)}
+            >
+              Open scan
+            </button>
+            <button
+              type="button"
+              className="btn-primary"
+              onClick={retryStart}
+              disabled={starting}
+            >
+              {starting ? "Retrying&hellip;" : "Retry start"}
+            </button>
+          </div>
+        </div>
       ) : null}
       <div className="flex justify-end gap-2">
         <button

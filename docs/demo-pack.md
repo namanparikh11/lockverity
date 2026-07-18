@@ -13,20 +13,28 @@ screenshot checklist and manual capture instructions see
 
 ## Current version
 
-`v1.5` — Guided intake / scan launch.
+`v1.6` — Scan execution controls + live stage progress.
 
 The current milestone is a product-usability milestone.
-The release adds an in-app `/analyze` page that wraps the
-existing intake APIs (`POST /api/v1/repositories/github`
-for a public GitHub URL and
-`POST /api/v1/repositories/upload` for a `zip` source
-archive). The page navigates to the new scan, polls
-status using the existing `usePolling` hook, and
-surfaces the bounded non-execution / archive-hostility
-wording. No new backend endpoints, no new providers, no
+The release upgrades the existing `/scans/:scanId` page
+into a scan workbench with a truthful
+`ScanStatusExplanation` block (queued / running /
+completed / partial / failed / cancelled), a
+`StageProgressSummary` that derives from persisted stage
+rows only ("N of M stages reached a terminal state —
+terminal does not imply successful"), and execution
+controls: Start scan
+(`POST /api/v1/scans/{id}/run`), Cancel scan (with a
+destructive confirmation dialog), and Run another scan
+/ Retry as new scan (creates a fresh scan for the same
+repository; the historical scan is never mutated). The
+v1.5 `/analyze` page now calls `/scans/{id}/run`
+immediately after intake and surfaces a bounded
+partial-success card when the worker does not start the
+scan. No new backend endpoints, no new providers, no
 new export standards, no new evidence contracts, no
-migration. The v1.4 release added the in-app `/demo`
-page and the `Demo` AppShell primary nav entry.
+migration. The v1.5 release added the `/analyze` page
+and the `Analyze` AppShell primary nav entry.
 
 ## How to run the demo
 

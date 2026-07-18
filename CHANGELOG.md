@@ -5,7 +5,42 @@ follow [Semantic Versioning](https://semver.org/). Lockverity is
 pre-1.0 in the sense that the public API may evolve; the
 underlying data model and Alembic migrations are stable.
 
-## v1.5 — Guided intake / scan launch (current)
+## v1.6 — Scan execution controls + live stage progress (current)
+
+- **Scan workbench at `/scans/:scanId`.** The existing
+  scan detail page is upgraded with a truthful
+  `ScanStatusExplanation` block (queued / running /
+  completed / partial / failed / cancelled) and a
+  `StageProgressSummary` block ("N of M stages reached
+  a terminal state — terminal does not imply
+  successful") that derives from persisted stage rows
+  only. No percentage progress is ever shown.
+- **Execution controls.** A new `ScanActions` component
+  surfaces Start scan (`POST /api/v1/scans/{id}/run`),
+  Cancel scan (`POST /api/v1/scans/{id}/cancel` with
+  a destructive-styled confirmation dialog), and
+  Run another scan / Retry as new scan (creates a
+  fresh scan for the same repository; the historical
+  scan is never mutated). The actions disable while
+  pending so duplicate submissions are blocked.
+- **Intake-to-execution flow.** The v1.5 `/analyze`
+  page now calls `/scans/{id}/run` immediately after
+  successful intake. If the start fails, the page
+  surfaces a bounded partial-success card: the
+  repository and scan are persisted, the worker did
+  not start the scan, and a Retry start button is
+  offered. The card never claims the scan started.
+- **API client additions.** `api.runScan(scanId)` and
+  `api.cancelScan(scanId, payload)` wrap the existing
+  executor endpoints. No new backend endpoints.
+- **Polling.** The workbench reuses the existing
+  `usePolling` hook (2s interval, terminal-set stop,
+  abort on unmount) via a new `useWorkbenchPolling`
+  wrapper.
+- **No new providers, no new export standards, no new
+  evidence contracts, no migration.**
+
+## v1.5 — Guided intake / scan launch
 
 - **New `/analyze` route.** `frontend/src/pages/AnalyzePage.tsx`
   wraps the existing intake APIs in a guided flow with two
