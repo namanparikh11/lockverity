@@ -15,7 +15,8 @@ an explicit omission marker.
 ## Quick links
 
 - Demo walkthrough: [`docs/demo-walkthrough.md`](docs/demo-walkthrough.md)
-- Screenshot checklist: [`docs/screenshots.md`](docs/screenshots.md)
+- Demo pack (60-second script + public/private recommendation): [`docs/demo-pack.md`](docs/demo-pack.md)
+- Screenshot checklist + manual capture guide: [`docs/screenshots.md`](docs/screenshots.md)
 - Security boundaries: [`docs/security-boundaries.md`](docs/security-boundaries.md)
 - Provider-honesty policy: [`docs/provider-honesty.md`](docs/provider-honesty.md)
 - Changelog: [`CHANGELOG.md`](CHANGELOG.md)
@@ -293,6 +294,27 @@ hosted services.
 The full reviewer walkthrough lives in
 [`docs/demo-walkthrough.md`](docs/demo-walkthrough.md).
 
+## Screenshots
+
+The v1.3 release ships a screenshot **checklist and manual
+capture guide**, not a tracked set of image files. The 9
+recommended captures, the per-capture expected visible
+state, and the browser-agnostic capture shortcuts are in
+[`docs/screenshots.md`](docs/screenshots.md). The
+reviewer-facing 60-second walkthrough script and the
+public/private recommendation are in
+[`docs/demo-pack.md`](docs/demo-pack.md).
+
+The captures are intentionally manual: see "Status of the
+screenshot assets" in `docs/screenshots.md` for the
+rationale (no headless-browser dependency, the live demo
+is the canonical evidence, and the bounded wording in
+the application must be verifiable on a running
+application, not on a frozen image). A reviewer captures
+the 9 PNGs into a local portfolio folder such as
+`~/lockverity-portfolio/v1.3/`; the screenshots are not
+pushed to the repository.
+
 ## Architecture overview
 
 ```
@@ -427,13 +449,23 @@ npm test -- --run src/__tests__/evidence_report_v1_0.test.tsx  # v1.0 evidence r
 
 ## Current milestone
 
-**v1.2.1 — GitHub portfolio final pass.** A documentation
-and polish-only milestone. No product change, no new
-providers, no new export standards, no change to the v0.5–
-v1.2 evidence contracts. Adds `CHANGELOG.md` and
-`RELEASE_NOTES.md`, a `Quick links` block at the top of
-`README.md`, and a `30-second overview` answering the five
-questions a reviewer asks first. Version bumped to `1.2.1`.
+**v1.3 — Screenshot assets + private portfolio demo pack.**
+A documentation and review-pack milestone. No product
+change from v1.2.1, no new providers, no new export
+standards, no change to the v0.5–v1.2 evidence contracts.
+Adds the `## Screenshots` section to `README.md` (manual
+capture only, no tracked image files), the new
+[`docs/demo-pack.md`](docs/demo-pack.md) with the
+60-second reviewer walkthrough script and the
+public/private recommendation, and a major rewrite of
+[`docs/screenshots.md`](docs/screenshots.md) into a
+9-capture checklist with browser-agnostic manual capture
+instructions. Version bumped to `1.3.0`.
+
+`v1.2.1` was the GitHub portfolio final pass: added
+`CHANGELOG.md`, `RELEASE_NOTES.md`, the `Quick links` block
+at the top of `README.md`, and the `30-second overview`
+answering the five questions a reviewer asks first.
 
 `v1.2` introduced the deterministic demo loader's
 reviewer-friendly console output, the
@@ -455,7 +487,7 @@ No new features, no new providers, no new export standards.
 and a lazy JSON preview endpoint. No new providers, no new
 export standards.
 
-## What v1.2.1 does not include
+## What v1.3 does not include
 
 Planned for later milestones, not implemented today:
 
@@ -463,10 +495,10 @@ Planned for later milestones, not implemented today:
   signup.
 - Continuous / scheduled scans. v0.5+ scans are explicit
   operator actions.
-- Private GitHub repository analysis (v1.2.1 is
-  public-only; the `LOCKVERITY_GITHUB_TOKEN` environment
-  variable is honoured for public rate limits but private
-  endpoints are out of scope).
+- Private GitHub repository analysis (v1.3 is public-only;
+  the `LOCKVERITY_GITHUB_TOKEN` environment variable is
+  honoured for public rate limits but private endpoints are
+  out of scope).
 - LLM-driven analysis, exploit generation, or any other
   offensive feature.
 - PDF, DOCX, HTML, signed attestations, or certification
@@ -477,6 +509,9 @@ Planned for later milestones, not implemented today:
 - Public deployment of the application itself. The repository
   is a private portfolio baseline, not a hosted service.
   See `RELEASE_NOTES.md`.
+- Tracked screenshot image files. The v1.3 captures are
+  intentionally manual; see `## Status of the screenshot
+  assets` in `docs/screenshots.md` for the rationale.
 
 ## Provider-honesty policy
 

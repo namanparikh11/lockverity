@@ -115,13 +115,13 @@ state rather than a fake success.
 
 ```bash
 curl http://127.0.0.1:5173/api/v1/health
-# {"status":"ok","database":"ok","version":"1.2.1", ...}
+# {"status":"ok","database":"ok","version":"1.3.0", ...}
 
 curl http://127.0.0.1:5173/api/v1/system/info | jq .version
-# "1.2.1"
+# "1.3.0"
 ```
 
-The AppShell sidebar shows the same version (e.g. `v1.2.1`).
+The AppShell sidebar shows the same version (e.g. `v1.3.0`).
 
 ### 2. Dashboard / scan list
 
