@@ -393,6 +393,7 @@ export type ErrorCategory =
   | "rate_limited"
   | "provider_unavailable"
   | "duplicate"
+  | "rescan_source_unavailable"
   | "server"
   | "unknown";
 
@@ -408,12 +409,22 @@ export function categorizeError(err: unknown): ErrorCategory {
     if (code === "unauthorized" || status === 401) return "unauthorized";
     if (code === "forbidden" || status === 403) return "forbidden";
     if (code === "not_found" || status === 404) return "not_found";
-    if (code === "validation_error" || status === 422) return "validation";
     if (code === "rate_limited" || status === 429) return "rate_limited";
     if (code === "duplicate" || status === 409) return "duplicate";
     if (code === "provider_unavailable" || status === 502 || status === 503) {
       return "provider_unavailable";
     }
+    // v1.6.1: rescan_source_unavailable must be
+    // checked before ``status === 422`` (which the
+    // route uses) so the workbench can render the
+    // bounded "source is no longer available"
+    // guidance. The check is code-first because the
+    // stable error code is the source of truth; the
+    // status code is a fallback.
+    if (code === "rescan_source_unavailable") {
+      return "rescan_source_unavailable";
+    }
+    if (code === "validation_error" || status === 422) return "validation";
     if (status >= 500) return "server";
     return "unknown";
   }

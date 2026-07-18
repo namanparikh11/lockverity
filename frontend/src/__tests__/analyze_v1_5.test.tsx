@@ -113,7 +113,7 @@ describe("v1.5 guided intake / analyze flow", () => {
     global.fetch = vi.fn().mockResolvedValue(
       jsonResponse({
         name: "Lockverity",
-        version: "1.6.0",
+        version: "1.6.1",
         tagline: "Evidence-first software supply-chain assurance",
         environment: "test",
         api_prefix: "/api/v1",
@@ -161,7 +161,7 @@ describe("v1.5 guided intake / analyze flow", () => {
 
     // The AppShell footer reports the v1.5.0 version.
     await waitFor(() => {
-      expect(screen.getByText("v1.6.0")).toBeInTheDocument();
+      expect(screen.getByText("v1.6.1")).toBeInTheDocument();
     });
   });
 
@@ -172,7 +172,7 @@ describe("v1.5 guided intake / analyze flow", () => {
         return Promise.resolve(
           jsonResponse({
             name: "Lockverity",
-            version: "1.6.0",
+            version: "1.6.1",
             tagline: "Evidence-first software supply-chain assurance",
             environment: "test",
             api_prefix: "/api/v1",
@@ -302,7 +302,7 @@ describe("v1.5 guided intake / analyze flow", () => {
         if (url.endsWith("/api/v1/system/info")) {
           return jsonResponse({
             name: "Lockverity",
-            version: "1.6.0",
+            version: "1.6.1",
             tagline: "Evidence-first software supply-chain assurance",
             environment: "test",
             api_prefix: "/api/v1",
@@ -417,7 +417,7 @@ describe("v1.5 guided intake / analyze flow", () => {
         if (url.endsWith("/api/v1/system/info")) {
           return jsonResponse({
             name: "Lockverity",
-            version: "1.6.0",
+            version: "1.6.1",
             tagline: "Evidence-first software supply-chain assurance",
             environment: "test",
             api_prefix: "/api/v1",
@@ -489,7 +489,7 @@ describe("v1.5 guided intake / analyze flow", () => {
         if (url.endsWith("/api/v1/system/info")) {
           return jsonResponse({
             name: "Lockverity",
-            version: "1.6.0",
+            version: "1.6.1",
             tagline: "Evidence-first software supply-chain assurance",
             environment: "test",
             api_prefix: "/api/v1",

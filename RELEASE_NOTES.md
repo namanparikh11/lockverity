@@ -33,24 +33,25 @@ The product is built around three guarantees:
 
 The repository is a **private portfolio-ready baseline**, not
 a production SaaS, not a hosted service, and not a CI vendor.
-The current milestone (`v1.6`) is a product-usability pass
-on top of `v1.5`. The v1.6 release upgrades the existing
-`/scans/:scanId` page into a scan workbench with a truthful
-`ScanStatusExplanation` block (queued / running / completed /
-partial / failed / cancelled), a `StageProgressSummary` that
-derives from persisted stage rows only ("N of M stages
-reached a terminal state — terminal does not imply
-successful"), and execution controls: Start scan
-(`POST /api/v1/scans/{id}/run`), Cancel scan (with a
-destructive confirmation dialog), and Run another scan /
-Retry as new scan (creates a fresh scan for the same
-repository; the historical scan is never mutated). The
-v1.5 `/analyze` page now calls `/scans/{id}/run` immediately
-after intake and surfaces a bounded partial-success card
-when the worker does not start the scan. The v1.5 release
-added a guided intake flow at `/analyze` (with a new
-`Analyze` nav entry) that wraps the existing intake APIs in
-two clearly separated methods. There is:
+The current milestone (`v1.6.1`) is a focused repair
+milestone on top of `v1.6`. The v1.6.1 release repairs the
+v1.6 retry/rescan workflow: the v1.6 workbench called
+`POST /repositories/{id}/scans` which created a queued
+scan with no associated workspace; the orchestrator then
+failed the archive validation stage with
+`failure_code="not_found"`. The v1.6.1 fix adds
+`POST /repositories/{id}/rescan` and a new `RescanService`
+that creates a fresh scan, a fresh workspace, and
+re-materialises the source evidence (re-download the GitHub
+tarball or safely copy the previous upload workspace) before
+returning. The historical scan and workspace are never
+mutated. When the original source is no longer available,
+the route returns a bounded `rescan_source_unavailable`
+error before any queued row is persisted; the frontend
+renders the bounded guidance and never navigates to an
+unrunnable scan. The v1.6 release added Start scan, Cancel
+scan, and Run another scan / Retry as new scan to the scan
+workbench. There is:
 
 - **No multi-tenancy** and no authentication. A reviewer runs
   the application on their own laptop.

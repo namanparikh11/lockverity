@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 
 import { api } from "@/api/api";
@@ -43,10 +43,25 @@ export function ScanActions({
   refreshKey?: number;
 }) {
   const navigate = useNavigate();
-  const [actionError, setActionError] = useState<unknown>(null);
+  // The action error is paired with the pending
+  // action that produced it. Storing both together
+  // ensures the bounded error title survives the
+  // ``finally`` block that resets ``pending`` to
+  // null after the action settles.
+  const [actionError, setActionError] = useState<
+    | { error: unknown; action: "start" | "cancel" | "rescan" }
+    | null
+  >(null);
   const [pending, setPending] = useState<null | "start" | "cancel" | "rescan">(null);
   const [confirmCancel, setConfirmCancel] = useState(false);
   const [lastRescan, setLastRescan] = useState<{ scan_id: number } | null>(null);
+  // Synchronous guard for rapid duplicate clicks.
+  // The ``pending`` state is React-asynchronous, so
+  // two synchronous clicks can both pass the
+  // ``if (pending) return`` check before the state
+  // propagates. The ref check is synchronous and
+  // blocks the second call immediately.
+  const pendingRef = useRef(false);
 
   // Reset any stale action error / pending state when
   // the parent refetches the scan.
@@ -54,37 +69,44 @@ export function ScanActions({
     setActionError(null);
   }, [refreshKey]);
 
+  const actionErrorAction = actionError?.action ?? pending;
+
   const isTerminal = TERMINAL_SCAN_STATUSES.has(scan.status);
 
   async function startScan() {
-    if (pending) return;
+    if (pending || pendingRef.current) return;
+    pendingRef.current = true;
     setActionError(null);
     setPending("start");
     try {
       await api.runScan(scan.id);
     } catch (err) {
-      setActionError(err);
+      setActionError({ error: err, action: "start" });
     } finally {
       setPending(null);
+      pendingRef.current = false;
     }
   }
 
   async function cancelScan() {
-    if (pending) return;
+    if (pending || pendingRef.current) return;
+    pendingRef.current = true;
     setActionError(null);
     setPending("cancel");
     try {
       await api.cancelScan(scan.id, { reason: "operator_cancelled_via_ui" });
     } catch (err) {
-      setActionError(err);
+      setActionError({ error: err, action: "cancel" });
     } finally {
       setPending(null);
+      pendingRef.current = false;
       setConfirmCancel(false);
     }
   }
 
   async function rescan() {
-    if (pending) return;
+    if (pending || pendingRef.current) return;
+    pendingRef.current = true;
     setActionError(null);
     setPending("rescan");
     try {
@@ -92,7 +114,7 @@ export function ScanActions({
       // scan for the same repository. The historical
       // scan is never mutated; the v0.5+ terminal-state
       // rule is preserved by design.
-      const newScan = await api.createScan(scan.repository_id, {
+      const newScan = await api.rescanRepository(scan.repository_id, {
         trigger_type: scan.trigger_type,
         requested_ref: scan.requested_ref ?? undefined,
       });
@@ -107,13 +129,14 @@ export function ScanActions({
         // Partial success: the new scan exists but the
         // worker did not start it. The new workbench
         // surfaces a retry-start button.
-        setActionError(err);
+        setActionError({ error: err, action: "rescan" });
       }
       navigate(`/scans/${newScan.id}`);
     } catch (err) {
-      setActionError(err);
+      setActionError({ error: err, action: "rescan" });
     } finally {
       setPending(null);
+      pendingRef.current = false;
     }
   }
 
@@ -167,15 +190,22 @@ export function ScanActions({
       </div>
       {actionError ? (
         <div role="alert" data-testid="scan-action-error">
-          {actionError instanceof ApiClientError ? (
+          {actionError.error instanceof ApiClientError ? (
             <ErrorState
-              error={actionError}
-              title={actionErrorTitleFor(categorizeError(actionError), pending)}
+              error={actionError.error}
+              title={actionErrorTitleFor(
+                categorizeError(actionError.error),
+                actionErrorAction
+              )}
             />
           ) : (
             <ErrorState
-              error={actionError}
-              title={pending ? `Could not ${pending} the scan` : "Could not perform the action"}
+              error={actionError.error}
+              title={
+                actionErrorAction
+                  ? `Could not ${actionErrorAction} the scan`
+                  : "Could not perform the action"
+              }
             />
           )}
         </div>
@@ -248,6 +278,9 @@ function actionErrorTitleFor(
     return "Could not cancel the scan";
   }
   if (pending === "rescan") {
+    if (category === "rescan_source_unavailable") {
+      return "Rescan source is no longer available";
+    }
     if (category === "validation") return "Scan request rejected by the server";
     return "Could not create a new scan";
   }

@@ -24,6 +24,12 @@ class ApiErrorCode(str, Enum):
     FORBIDDEN = "forbidden"
     RATE_LIMITED = "rate_limited"
     INTERNAL = "internal_error"
+    # v1.6.1: a rescan was requested but the original
+    # source evidence is no longer available (for
+    # example, the original uploaded archive was
+    # cleaned up). The route must return this code
+    # before creating a broken queued scan.
+    RESCAN_SOURCE_UNAVAILABLE = "rescan_source_unavailable"
 
 
 class ApiError(Exception):

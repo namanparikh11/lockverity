@@ -33,6 +33,7 @@ from app.services import (
 )
 from app.services.executor_service import ScanTask, new_executor_id
 from app.services.orchestrator_service import ScanOrchestrator, _CancellationToken
+from app.services.rescan_service import RescanService
 from app.singletons import get_executor
 from app.utils.datetime import utcnow
 from app.utils.errors import ApiError, ApiErrorCode
@@ -79,6 +80,15 @@ def create_scan(
 
     The scan starts in ``queued`` state. The worker picks it up
     when the caller invokes ``POST /scans/{id}/run``.
+
+    The v1.6.1 "Retry as new scan" / "Run another scan"
+    flow uses the dedicated
+    ``POST /repositories/{id}/rescan`` route, which
+    creates a fresh workspace and re-materialises
+    the source before returning. This route stays
+    as the low-level scan-record creator used by the
+    orchestrator tests and by callers that need to
+    create a queued scan without a workspace.
     """
     if payload is None:
         payload = ScanCreate.model_validate({})
@@ -89,6 +99,42 @@ def create_scan(
         requested_ref=payload.requested_ref,
     )
     return scan_to_read(scan)
+
+
+@repository_scans.post(
+    "/{repository_id}/rescan",
+    response_model=ScanRead,
+    status_code=status.HTTP_201_CREATED,
+    summary="Create a runnable new scan for the repository with a prepared workspace.",
+)
+def rescan_repository(
+    repository_id: int,
+    session: DBSession,
+    payload: ScanCreate | None = None,
+) -> ScanRead:
+    """Workspace-preserving rescan for an existing repository.
+
+    v1.6.1: the route performs the full rescan
+    semantics — it creates a fresh scan row, a
+    fresh workspace, and re-materialises the source
+    evidence (re-download the GitHub tarball, or
+    safely copy the previous upload workspace). The
+    historical scan and workspace are never mutated.
+
+    When the original source evidence is no longer
+    available, the route returns a bounded
+    ``rescan_source_unavailable`` error before any
+    queued row is persisted.
+    """
+    if payload is None:
+        payload = ScanCreate.model_validate({})
+    rescan = RescanService(session)
+    result = rescan.rescan_repository(
+        repository_id,
+        trigger_type=payload.trigger_type or ScanTriggerType.MANUAL,
+        requested_ref=payload.requested_ref,
+    )
+    return scan_to_read(result.scan)
 
 
 @repository_scans.get(
