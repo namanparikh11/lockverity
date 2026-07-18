@@ -33,10 +33,14 @@ The product is built around three guarantees:
 
 The repository is a **private portfolio-ready baseline**, not
 a production SaaS, not a hosted service, and not a CI vendor.
-The current milestone (`v1.3`) is a documentation and
-review-pack pass on top of `v1.2.1`; the application source
-tree is unchanged from `v1.2.1`. The v1.3 release adds a
-[`docs/demo-pack.md`](docs/demo-pack.md) with a 60-second
+The current milestone (`v1.4`) is a product-demo polish pass
+on top of `v1.3`; the application source tree is unchanged
+from `v1.3`. The v1.4 release adds an in-app reviewer flow at
+`/demo` (with a new `Demo` nav entry) and surfaces the demo
+dataset's nature, the five reviewer pages, the "what to look
+for" and "what not to claim" framings, and a short command
+reminder on a single read-only page. The v1.3 release added
+a [`docs/demo-pack.md`](docs/demo-pack.md) with a 60-second
 reviewer walkthrough script and a major rewrite of
 [`docs/screenshots.md`](docs/screenshots.md) into a manual
 9-capture checklist. There is:

@@ -35,6 +35,13 @@ npm install
 npm run dev
 ```
 
+After both servers are up, open **`http://127.0.0.1:5173/demo`**
+in a browser. The `/demo` page is the in-app reviewer
+walkthrough: it lists the demo dataset's nature, the five
+links a reviewer should click, the "what to look for" and
+"what not to claim" framings, and a short command reminder.
+The same five URLs are listed below for direct navigation.
+
 The loader's success-path output already prints all five
 demo URLs and the cross-platform startup commands. The
 five URLs are:

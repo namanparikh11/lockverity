@@ -5,7 +5,39 @@ follow [Semantic Versioning](https://semver.org/). Lockverity is
 pre-1.0 in the sense that the public API may evolve; the
 underlying data model and Alembic migrations are stable.
 
-## v1.3 — Screenshot assets + private portfolio demo pack (current)
+## v1.4 — In-app demo home + reviewer flow (current)
+
+- **In-app reviewer flow.** New `/demo` route and
+  `DemoHomePage` page. The page surfaces five sections
+  (demo dataset status, reviewer flow, what to look for,
+  what not to claim, quick command reminder) and a
+  bounded "this is a demo, not a hosted service" footer.
+  The page repeats the synthetic-dataset disclosure and
+  the bounded "not a verdict / not a certification / not
+  a compliance pass-or-fail" wording so a reviewer can
+  never mistake the demo for a real provider scan result.
+- **AppShell nav entry.** New `Demo` entry in the primary
+  navigation, between `Dashboard` and `Repositories`. The
+  link points at `/demo` and uses the `PlayCircle` icon.
+- **New focused test** at
+  `frontend/src/__tests__/demo_home_v1_4.test.tsx` covers
+  all five sections, the five reviewer links, the bounded
+  wording, the new nav entry, and the synthetic-dataset
+  disclosure.
+- **No product change.** No new providers, no new export
+  standards, no new evidence contracts, no new API
+  endpoints. The page is read-only and self-contained; it
+  does not call any backend endpoint.
+- **Docs.** `README.md` 30-second overview updated to
+  mention `/demo`. `docs/demo-pack.md` "How to run the
+  demo" section updated to point at `/demo` first.
+- **Version.** Bumped `__version__` to `1.4.0`. The
+  frontend `version_about` test mock now expects `1.4.0`.
+- **Status.** Private portfolio-ready baseline. Not a
+  production SaaS, not a hosted service, not a CI vendor.
+  See `RELEASE_NOTES.md` for the full status.
+
+## v1.3 — Screenshot assets + private portfolio demo pack
 
 - **Demo pack.** New `docs/demo-pack.md` with the 60-second
   reviewer walkthrough script, the public/private
