@@ -5,7 +5,38 @@ follow [Semantic Versioning](https://semver.org/). Lockverity is
 pre-1.0 in the sense that the public API may evolve; the
 underlying data model and Alembic migrations are stable.
 
-## v1.2.1 — GitHub portfolio final pass (current)
+## v1.3 — Screenshot assets + private portfolio demo pack (current)
+
+- **Demo pack.** New `docs/demo-pack.md` with the 60-second
+  reviewer walkthrough script, the public/private
+  recommendation, the "what to say" + "what not to claim"
+  framing, and a cross-reference list to the other
+  reviewer-facing docs.
+- **Screenshot checklist rewrite.** `docs/screenshots.md`
+  is now a 9-capture reviewer checklist with browser-
+  agnostic manual capture instructions (macOS, Windows,
+  Linux shortcuts), a pre-capture sensitive-data checklist,
+  a post-capture sensitive-data checklist, and an explicit
+  rationale for **not** shipping tracked image files. No
+  headless-browser dependency is added; the live demo is
+  the canonical evidence.
+- **README polish.** New `## Screenshots` section under
+  the existing `### What not to claim` block explaining the
+  manual-capture strategy and pointing at
+  `docs/demo-pack.md`. New `docs/demo-pack.md` entry in the
+  `## Quick links` block.
+- **No product change.** No new providers, no new export
+  standards, no new evidence contracts, no new API
+  endpoints. All v0.5–v1.2 surfaces continue to work
+  unchanged. The application source tree is the same as
+  v1.2.1.
+- **Version.** Bumped `__version__` to `1.3.0`. The
+  frontend `version_about` test mock now expects `1.3.0`.
+- **Status.** Private portfolio-ready baseline. Not a
+  production SaaS, not a hosted service, not a CI vendor.
+  See `RELEASE_NOTES.md` for the full status.
+
+## v1.2.1 — GitHub portfolio final pass
 
 - **Repository presentation.** Added `CHANGELOG.md` (this file)
   and `RELEASE_NOTES.md` for a reviewer reading the repo on

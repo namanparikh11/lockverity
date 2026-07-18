@@ -33,8 +33,13 @@ The product is built around three guarantees:
 
 The repository is a **private portfolio-ready baseline**, not
 a production SaaS, not a hosted service, and not a CI vendor.
-The current milestone (`v1.2.1`) is a documentation and
-polish pass on top of `v1.2`. There is:
+The current milestone (`v1.3`) is a documentation and
+review-pack pass on top of `v1.2.1`; the application source
+tree is unchanged from `v1.2.1`. The v1.3 release adds a
+[`docs/demo-pack.md`](docs/demo-pack.md) with a 60-second
+reviewer walkthrough script and a major rewrite of
+[`docs/screenshots.md`](docs/screenshots.md) into a manual
+9-capture checklist. There is:
 
 - **No multi-tenancy** and no authentication. A reviewer runs
   the application on their own laptop.
@@ -175,7 +180,7 @@ The provider-honesty policy is in
 - **Continuous / scheduled scans.** Scans are explicit
   operator actions (manual trigger, archive upload, or
   `api`).
-- **Private GitHub repository analysis.** v1.2.1 is
+- **Private GitHub repository analysis.** v1.3 is
   public-only; the `LOCKVERITY_GITHUB_TOKEN` environment
   variable is honoured for public rate limits but private
   endpoints are out of scope.
