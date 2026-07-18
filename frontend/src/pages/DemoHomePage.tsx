@@ -264,6 +264,44 @@ npm install
 npm run dev`}</code></pre>
         </section>
 
+        <section aria-labelledby="demo-beyond" className="card">
+          <h2
+            id="demo-beyond"
+            className="flex items-center gap-2 text-base font-semibold text-ink-900"
+          >
+            <Sparkles aria-hidden="true" className="h-4 w-4 text-accent-700" />
+            Beyond the demo
+          </h2>
+          <p className="mt-2 text-sm text-ink-700">
+            The v1.5 guided intake page lets you analyze a public
+            GitHub repository or upload a <code>.zip</code> source
+            archive on top of the seeded demo. The page reuses the
+            same intake endpoints the rest of the application uses;
+            it does not duplicate business logic in the frontend.
+          </p>
+          <ul className="mt-2 ml-5 list-disc space-y-1 text-sm text-ink-700">
+            <li>
+              <Link
+                to="/analyze"
+                className="font-mono text-accent-700 hover:text-accent-800"
+              >
+                /analyze
+              </Link>{" "}
+              &mdash; Public GitHub URL or ZIP upload, navigate to the new scan.
+            </li>
+            <li>
+              Public repositories only. Lockverity never asks for,
+              stores, or sends a personal access token from the
+              browser.
+            </li>
+            <li>
+              Archives are treated as hostile input. Entries are
+              validated before extraction; uploaded code is never
+              executed.
+            </li>
+          </ul>
+        </section>
+
         <DataCompletenessNotice
           title="This is a demo, not a hosted service"
           description="The application has no authentication, no multi-tenancy, and no hosted control plane. The reviewer runs the demo on their own laptop; Lockverity makes no provider calls during the demo. The current status is a private portfolio-ready baseline; the public/private recommendation is in docs/demo-pack.md."

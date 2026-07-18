@@ -99,11 +99,16 @@ export function ScansIndexPage() {
       {items.length === 0 ? (
         <EmptyState
           title="No scans yet"
-          description="Add a repository and queue a scan to populate this list."
+          description="Analyze a public GitHub repository or upload a source archive to start your first scan. You can also open the demo guide to walk through a seeded synthetic dataset."
           action={
-            <Link to="/repositories" className="btn-primary">
-              Go to repositories
-            </Link>
+            <div className="flex flex-wrap items-center justify-center gap-2">
+              <Link to="/analyze" className="btn-primary">
+                Analyze repository
+              </Link>
+              <Link to="/demo" className="btn-secondary">
+                Open demo guide
+              </Link>
+            </div>
           }
         />
       ) : (

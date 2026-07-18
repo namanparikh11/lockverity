@@ -312,7 +312,14 @@ async function requestUpload<T>(
   const timer = window.setTimeout(() => timeoutController.abort(), timeoutMs);
   const signal = combineSignals(options.signal, timeoutController);
   const form = new FormData();
-  form.append("archive", file);
+  // The backend's intake route accepts the upload under
+  // the ``file`` form field (see
+  // ``backend/app/api/intake.py:create_uploaded_repository``).
+  // An earlier client used ``archive`` which the FastAPI
+  // handler would silently bind to ``None`` and surface as
+  // a 422 validation error. The v1.5 guided intake flow
+  // pins the field name to match the backend contract.
+  form.append("file", file);
   const init: RequestInit = {
     method: "POST",
     headers: { Accept: "application/json" },
