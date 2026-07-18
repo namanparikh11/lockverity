@@ -5,7 +5,66 @@ follow [Semantic Versioning](https://semver.org/). Lockverity is
 pre-1.0 in the sense that the public API may evolve; the
 underlying data model and Alembic migrations are stable.
 
-## v1.6.1 — Workspace-preserving rescan repair (current)
+## v1.7.0 — Findings triage and evidence review (current)
+
+- **Findings triage and evidence review workbench.**
+  The existing `/scans/:scanId/findings` page
+  becomes a scan-scoped, evidence-first review
+  surface. Reviewers can:
+  - read a scan context header (scan id,
+    repository, status, source type, finding
+    count) with links back to the workbench,
+    dependencies, and exports;
+  - search findings server-side across title,
+    summary, rule id, and the raw `evidence_json`
+    (so package names, PURLs, advisories, and
+    aliases are reachable from one search box);
+  - filter server-side by category, severity,
+    confidence, status, provider, rule id, and
+    path; previous client-only filters are wired
+    to the API;
+  - sort by bounded fields (`id`, `rule_id`,
+    `category`, `severity`, `confidence`,
+    `status`, `updated_at`); Lockverity never
+    invents a universal risk ranking;
+  - open an evidence detail drawer that fetches
+    the freshest payload via the single-finding
+    endpoint, renders advisory identity (primary
+    id, aliases, provider, source URL), shows
+    the evidence provenance block, and surfaces
+    cross-links to the workbench, dependencies,
+    vulnerabilities, and exports;
+  - persist filter / search / sort state in the
+    URL so the analyst queue is shareable;
+  - read a partial / failed / cancelled scan
+    notice whenever the scan did not complete
+    normally; the page never implies the
+    finding set is complete in those cases.
+- **Zero-result wording is bounded.** Empty
+  states use "No finding records are available
+  for the current filters. This does not
+  establish that the repository is
+  vulnerability-free." Lockverity never claims a
+  clean / secure / safe / certified / compliant
+  state.
+- **Backend bounded additions.** New query
+  parameters on
+  `GET /api/v1/scans/{id}/findings`: `q`,
+  `confidence`, `status`, `provider`, `rule_id`,
+  `path`, `sort`. Page size is capped at 100.
+  Invalid sort values map to `id` so paging stays
+  deterministic. New
+  `GET /api/v1/scans/{id}/findings/{finding_id}`
+  route enforces scan-scoped isolation. No
+  migration; all additions reuse existing
+  persisted columns.
+- **Persistent analyst disposition is not
+  implemented.** v1.7 is read-only; review
+  decisions are intentionally not stored in
+  localStorage or in any new database column.
+  This is reported as future work.
+
+## v1.6.1 — Workspace-preserving rescan repair
 
 - **Workspace-preserving rescan.** New
   `POST /api/v1/repositories/{id}/rescan` route and

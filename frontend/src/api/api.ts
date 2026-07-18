@@ -62,9 +62,17 @@ export interface ListFindingsFilters {
   rule_id?: string;
   path?: string;
   status?: FindingStatus | "all";
-  direct_transitive?: "all" | "direct" | "transitive";
   provider?: string;
-  search?: string;
+  // v1.7: free-text search across title, summary,
+  // rule id, and evidence_json. The backend route
+  // accepts this as the ``q`` query parameter; the
+  // API client remaps the friendly ``q`` field name
+  // to the wire form.
+  q?: string;
+  // v1.7: bounded sort field. Bounded to:
+  // id, rule_id, category, severity, confidence,
+  // status, updated_at. Invalid values map to id.
+  sort?: string;
 }
 
 export interface ListComponentsFilters {
@@ -231,11 +239,17 @@ export const api = {
         rule_id: filters.rule_id,
         path: filters.path,
         status: filters.status,
-        direct_transitive: filters.direct_transitive,
         provider: filters.provider,
-        search: filters.search,
+        q: filters.q,
+        sort: filters.sort,
       }),
     }),
+  // v1.7: scan-scoped single-finding lookup. The
+  // backend enforces scan-scoped isolation so a
+  // finding from one scan cannot be read through
+  // another scan's URL. Used by the evidence detail
+  // drawer to fetch the freshest evidence payload
+  // without re-listing the page.
   getFinding: (scanId: number, findingId: number) =>
     apiClient.get<Finding>(`/scans/${scanId}/findings/${findingId}`),
 
