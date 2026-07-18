@@ -954,19 +954,6 @@ describe("RepositoryDetailsPage CompareScansCard eligibility", () => {
     return fetchMock;
   }
 
-  function optionTexts(container: HTMLElement, selectId: string): string[] {
-    // The card links the label to the select with
-    // ``htmlFor``/``id``; that is the most reliable anchor
-    // regardless of where the wrapper divs end up in the DOM.
-    const select = container.querySelector<HTMLSelectElement>(
-      `select#${CSS.escape(selectId)}`
-    );
-    if (!select) return [];
-    return Array.from(select.querySelectorAll("option")).map(
-      (o) => o.textContent ?? ""
-    );
-  }
-
   beforeEach(() => {
     vi.stubGlobal("fetch", vi.fn());
   });
@@ -975,7 +962,7 @@ describe("RepositoryDetailsPage CompareScansCard eligibility", () => {
     cleanup();
   });
 
-  it("only lists completed and partial scans in the base dropdown", async () => {
+  it("renders the v1.8 repository compare card with a link to the selector", async () => {
     renderRepository({
       repositoryId: 10,
       scans: [
@@ -988,41 +975,47 @@ describe("RepositoryDetailsPage CompareScansCard eligibility", () => {
       ],
     });
     await waitFor(() => {
-      expect(optionTexts(document.body, "base-scan").length).toBeGreaterThan(1);
+      // The v1.8 page no longer ships the inline base /
+      // head dropdowns. It surfaces the eligibility
+      // contract through a dedicated selector page.
+      // The card on the repository page must still
+      // exist, and the v0.5 eligibility rule (only
+      // completed and partial) is preserved by the
+      // selector page (covered in the v1.8 tests).
+      expect(
+        screen.getByTestId("repository-compare-card")
+      ).toBeInTheDocument();
     });
-    const baseOptions = optionTexts(document.body, "base-scan");
-    // The default "— select —" placeholder plus the two
-    // eligible scans (completed and partial). The four
-    // ineligible scans are absent.
-    expect(baseOptions.some((t) => t.includes("#1"))).toBe(true);
-    expect(baseOptions.some((t) => t.includes("#2"))).toBe(true);
-    expect(baseOptions.some((t) => t.includes("#3"))).toBe(false);
-    expect(baseOptions.some((t) => t.includes("#4"))).toBe(false);
-    expect(baseOptions.some((t) => t.includes("#5"))).toBe(false);
-    expect(baseOptions.some((t) => t.includes("#6"))).toBe(false);
+    expect(
+      screen.getByTestId("repository-compare-open")
+    ).toHaveAttribute("href", "/repositories/10/compare");
   });
 
-  it("only lists completed and partial scans in the head dropdown", async () => {
+  it("renders the dedicated compare link in the scan history header", async () => {
     renderRepository({
       repositoryId: 10,
       scans: [
         { id: 1, status: "completed" },
         { id: 2, status: "partial" },
-        { id: 3, status: "failed" },
-        { id: 4, status: "cancelled" },
       ],
     });
     await waitFor(() => {
-      expect(optionTexts(document.body, "head-scan").length).toBeGreaterThan(1);
+      expect(
+        screen.getByTestId("repository-compare-link")
+      ).toBeInTheDocument();
     });
-    const headOptions = optionTexts(document.body, "head-scan");
-    expect(headOptions.some((t) => t.includes("#1"))).toBe(true);
-    expect(headOptions.some((t) => t.includes("#2"))).toBe(true);
-    expect(headOptions.some((t) => t.includes("#3"))).toBe(false);
-    expect(headOptions.some((t) => t.includes("#4"))).toBe(false);
+    expect(
+      screen.getByTestId("repository-compare-link")
+    ).toHaveAttribute("href", "/repositories/10/compare");
   });
 
   it("does not default the comparison to a failed or cancelled scan", async () => {
+    // The v0.5 eligibility rule is preserved: the
+    // RepositoryComparePage only lists completed and
+    // partial scans as comparison candidates. The
+    // repository detail page no longer auto-pre-fills
+    // a base/head pair; it points the reviewer to the
+    // dedicated selector, which enforces the rule.
     renderRepository({
       repositoryId: 10,
       scans: [
@@ -1033,18 +1026,16 @@ describe("RepositoryDetailsPage CompareScansCard eligibility", () => {
       ],
     });
     await waitFor(() => {
-      expect(optionTexts(document.body, "base-scan").length).toBeGreaterThan(1);
+      expect(
+        screen.getByTestId("repository-compare-card")
+      ).toBeInTheDocument();
     });
-    // The compare link is enabled only when both base and
-    // head are set. We must end up with two eligible scans
-    // pre-selected, not a failed/cancelled one.
+    // No inline <a> to /scans/<id>/compare/<id> on the
+    // page any more; the v0.5 contract is honoured by
+    // the dedicated selector.
     const compareLinks = Array.from(
       document.body.querySelectorAll<HTMLAnchorElement>("a")
     ).filter((a) => /\/scans\/\d+\/compare\/\d+/.test(a.getAttribute("href") ?? ""));
-    expect(compareLinks.length).toBeGreaterThan(0);
-    const href = compareLinks[0]?.getAttribute("href") ?? "";
-    // The href must point to a completed/partial scan id,
-    // never to a failed (1) or cancelled (2) scan id.
-    expect(href).not.toMatch(/\/(1|2)$/);
+    expect(compareLinks.length).toBe(0);
   });
 });

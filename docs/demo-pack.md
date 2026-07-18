@@ -1,6 +1,6 @@
 # Lockverity — Private Portfolio Demo Pack
 
-This is the v1.7 portfolio demo pack. It is a one-page
+This is the v1.8 portfolio demo pack. It is a one-page
 reviewer reference: the current version, the demo command
 flow, the screenshot list, the 60-second demo script, the
 "what to say" + "what not to claim" framing, and the current
@@ -13,48 +13,36 @@ screenshot checklist and manual capture instructions see
 
 ## Current version
 
-`v1.7` — Findings triage and evidence review.
+`v1.8` — Repository history, rescan, and evidence
+comparison.
 
-The current milestone upgrades the existing
-`/scans/:scanId/findings` page into a scan-scoped,
-evidence-first review workbench. It adds a scan context
-header (scan id, repository, status, source type, finding
-count, links back to the workbench / dependencies /
-exports), server-side search across title / summary /
-rule id / `evidence_json` (so package names, PURLs,
-advisories, and aliases are reachable from one search
-box), server-side filters for confidence / status /
-provider / rule id / path, bounded sort vocabulary
-(id, rule_id, category, severity, confidence, status,
-updated_at — never a universal risk ranking), URL-
-persisted filter state, and a freshest-payload evidence
-detail drawer that surfaces advisory identity (primary
-id, aliases, provider, source URL), evidence provenance,
-and cross-links to the workbench / dependencies /
-vulnerabilities / exports. The page renders a bounded
-partial / failed / cancelled notice whenever the scan
-did not complete normally; the result set is never
-presented as complete in those cases. Empty states use
-the wording "This does not establish that the
-repository is vulnerability-free." Severity is always
-labelled as provider-attributed. Backend additions are
-additive: new query parameters on
-`GET /api/v1/scans/{id}/findings` (q, confidence,
-status, provider, rule_id, path, sort), a page-size cap
-of 100, and a new
-`GET /api/v1/scans/{id}/findings/{finding_id}` endpoint
-that enforces scan-scoped isolation. Persistent
-analyst disposition (false positive / accepted risk /
-remediated / assigned / suppressed) is intentionally
-not implemented; v1.7 is read-only. The v1.6 scan
-workbench (Start scan, Cancel scan, Run another scan /
-Retry as new scan) and the v1.6.1 workspace-preserving
-rescan repair remain in place. The v1.5 `/analyze` page
-calls `/scans/{id}/run` immediately after intake and
-surfaces a bounded partial-success card when the worker
-does not start the scan. No new providers, no new
-export standards, no new evidence contracts, no
-migration.
+The current milestone is a coherent repository lifecycle
+upgrade. The `/repositories/:repositoryId` page becomes a
+scan-history workbench with URL-persisted status / trigger /
+page filters, bounded partial / failed / cancelled notices,
+and per-row cross-links to workbench / findings /
+dependencies / exports. The "Run another scan" action uses
+the v1.6.1 workspace-preserving rescan endpoint
+(`POST /repositories/{id}/rescan`) and never the low-level
+scan-record creator; a `rescan_source_unavailable` error
+renders bounded guidance rather than a generic failure. A
+new `/repositories/:repositoryId/compare` page hosts the
+baseline / comparison selector with URL state
+(`?baseline=&comparison=`); only completed and partial scans
+are eligible, same-scan selection is blocked, and
+cross-repository ids are rejected as bounded errors. The
+selector defers to the existing v0.5 `ScanComparisonPage`
+with a "Repository → Compare" breadcrumb; the comparator
+itself is unchanged. v1.8 does not introduce a new
+comparison algorithm. The v0.5 removed-finding disclaimer
+and honesty rules carry over verbatim; the page never
+claims security improved, security worsened, risk
+increased, risk decreased, fixed, or remediated. The v1.7
+findings workbench, the v1.6 scan workbench, the v1.6.1
+workspace-preserving rescan repair, the v1.5 guided
+intake, and the v1.0 evidence report remain in place. No
+new providers, no new export standards, no new evidence
+contracts, no migration.
 
 ## How to run the demo
 
@@ -150,12 +138,14 @@ section.
    honest — failed and cancelled do not claim a clean
    result." **Do not** say "Lockverity found zero
    vulnerabilities in this scan."
-2. **0:10 – 0:20.** Click scan 1. Open
-   `http://127.0.0.1:5173/scans/1/dependencies`. *Say*:
-   "The dependency explorer has 9 evidence filter fields
-   and 13 facet counts. The vocabulary is evidence-honest:
-   missing evidence is rendered as missing, never as a
-   clean bill of health."
+2. **0:10 – 0:20.** Click the demo repository. Open
+   `http://127.0.0.1:5173/repositories/1`. *Say*: "The
+   v1.8 repository history workbench. The scan history
+   is newest-first with status, ref, and timestamps;
+   each row links to the workbench, findings,
+   dependencies, and exports. The Run another scan
+   button uses the v1.6.1 rescan endpoint — the
+   historical scan is never mutated."
 3. **0:20 – 0:30.** Type `left` in the search box.
    *Say*: "The table narrows to one row, the facets
    update, the Clear button appears." Click `View evidence`
@@ -175,11 +165,18 @@ section.
    boundary notice: this is an evidence record, not a
    security verdict."
 5. **0:40 – 0:50.** Close the drawer. Open
-   `http://127.0.0.1:5173/scans/1/exports`. Click
-   `Show CycloneDX 1.7 evidence preview`. *Say*: "The
-   export is eligible, schema-validated, and the omissions
-   block names the things the export does not claim."
-   Click `Download`. The browser saves
+   `http://127.0.0.1:5173/repositories/1/compare`. *Say*:
+   "The v1.8 repository comparison selector. Pick a
+   baseline and a comparison; only completed and partial
+   scans are eligible, same-scan selection is blocked,
+   and the URL preserves the choice." Click "Use most
+   recent eligible pair". The v0.5 comparator renders
+   the diff in evidence-honest terms: newly observed,
+   still observed, no longer observed, changed
+   observation, coverage changed, comparison
+   indeterminate. A row that disappeared is shown as
+   "no longer observed", never as "fixed" or
+   "remediated". Click `Download`. The browser saves
    `lockverity-scan-1.cdx.json`.
 6. **0:50 – 1:00.** Click `Show report summary` on the
    Evidence report card. *Say*: "The v1.0 evidence report
@@ -212,6 +209,13 @@ reviewer asks for a deep dive, switch to the full
   remediated / assigned / suppressed) is intentionally
   not implemented; review decisions are not stored in the
   database or in localStorage."
+- "The v1.8 repository comparison shows differences in
+  persisted evidence between two scans. It does not
+  determine whether security improved or worsened.
+  A newer scan is not automatically better or safer;
+  added findings do not automatically mean risk
+  increased; removed findings do not automatically mean
+  remediation occurred."
 
 ## What not to claim
 

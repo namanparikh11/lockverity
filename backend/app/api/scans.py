@@ -39,7 +39,7 @@ from app.services import (
 )
 from app.services.executor_service import ScanTask, new_executor_id
 from app.services.orchestrator_service import ScanOrchestrator, _CancellationToken
-from app.services.rescan_service import RescanService
+from app.services.rescan_service import RescanService, _RescanError
 from app.singletons import get_executor
 from app.utils.datetime import utcnow
 from app.utils.errors import ApiError, ApiErrorCode
@@ -135,11 +135,31 @@ def rescan_repository(
     if payload is None:
         payload = ScanCreate.model_validate({})
     rescan = RescanService(session)
-    result = rescan.rescan_repository(
-        repository_id,
-        trigger_type=payload.trigger_type or ScanTriggerType.MANUAL,
-        requested_ref=payload.requested_ref,
-    )
+    try:
+        result = rescan.rescan_repository(
+            repository_id,
+            trigger_type=payload.trigger_type or ScanTriggerType.MANUAL,
+            requested_ref=payload.requested_ref,
+        )
+    except _RescanError as exc:
+        # v1.8: surface bounded materialisation errors to
+        # the caller. The internal _RescanError carries a
+        # code (e.g. ``github_error``) and a redacted
+        # message. The route maps it to a stable envelope
+        # so the frontend renders honest guidance rather
+        # than a generic 500. The new scan row was
+        # persisted in a ``failed`` state by the service,
+        # so the audit trail is preserved.
+        raise ApiError(
+            ApiErrorCode.PROVIDER_UNAVAILABLE
+            if exc.code == "github_error"
+            else ApiErrorCode.RESCAN_SOURCE_UNAVAILABLE,
+            exc.message,
+            details={
+                "rescan_code": exc.code,
+                "repository_id": repository_id,
+            },
+        ) from exc
     return scan_to_read(result.scan)
 
 
