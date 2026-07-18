@@ -48,14 +48,34 @@ import { formatTimestamp } from "@/utils/time";
  * "no differences observed" summary is always qualified by a
  * coverage statement so the operator can never mistake a
  * quiet comparison for an all-clear.
+ *
+ * v1.8: the page also accepts optional ``breadcrumbs`` so
+ * the repository-scoped selection page can render the same
+ * comparison body with a "Repository → Compare" trail.
+ * When the props are not supplied, the page falls back to
+ * the URL params ``:scanId`` (head) and ``:baseScanId`` for
+ * backward compatibility with the existing
+ * ``/scans/:scanId/compare/:baseScanId`` route and the
+ * existing v0.5 tests.
  */
-export function ScanComparisonPage() {
-  const { scanId, baseScanId } = useParams<{
+export function ScanComparisonPage(props: {
+  headId?: number;
+  baseId?: number;
+  breadcrumbs?: { label: string; to?: string }[];
+} = {}) {
+  const params = useParams<{
     scanId: string;
     baseScanId: string;
   }>();
-  const headId = Number.parseInt(scanId ?? "", 10);
-  const baseId = Number.parseInt(baseScanId ?? "", 10);
+  const headId =
+    props.headId ?? Number.parseInt(params.scanId ?? "", 10);
+  const baseId =
+    props.baseId ?? Number.parseInt(params.baseScanId ?? "", 10);
+  const breadcrumbs =
+    props.breadcrumbs ?? [
+      { label: "Scan", to: `/scans/${headId}` },
+      { label: `Compare with #${baseId}` },
+    ];
   const [data, setData] = useState<ScanComparison | null>(null);
   const [error, setError] = useState<unknown>(null);
   const [loading, setLoading] = useState(true);
@@ -98,10 +118,7 @@ export function ScanComparisonPage() {
       <PageHeader
         title={`Compare scans #${baseId} → #${headId}`}
         description="A read-only diff of two terminal scans. Rows are described in evidence-honest terms (newly observed, still observed, no longer observed, changed observation, coverage changed, comparison indeterminate). A row is never marked fixed or resolved."
-        breadcrumbs={[
-          { label: "Scan", to: `/scans/${headId}` },
-          { label: `Compare with #${baseId}` },
-        ]}
+        breadcrumbs={breadcrumbs}
       />
       {loading ? (
         <Skeleton rows={6} />

@@ -14,6 +14,7 @@ import { NotFoundPage } from "@/pages/NotFoundPage";
 import { OpenSSFPosturePage } from "@/pages/OpenSSFPosturePage";
 import { ProviderHealthPage } from "@/pages/ProviderHealthPage";
 import { RepositoriesPage } from "@/pages/RepositoriesPage";
+import { RepositoryComparePage } from "@/pages/RepositoryComparePage";
 import { RepositoryDetailsPage } from "@/pages/RepositoryDetailsPage";
 import { ScanComparisonPage } from "@/pages/ScanComparisonPage";
 import { ScanCompareSelectPage } from "@/pages/ScanCompareSelectPage";
@@ -39,6 +40,10 @@ export const router = createBrowserRouter([
       {
         path: "/repositories/:repositoryId",
         element: <RepositoryDetailsPage />,
+      },
+      {
+        path: "/repositories/:repositoryId/compare",
+        element: <RepositoryComparePage />,
       },
 
       // Scans

@@ -5,7 +5,55 @@ follow [Semantic Versioning](https://semver.org/). Lockverity is
 pre-1.0 in the sense that the public API may evolve; the
 underlying data model and Alembic migrations are stable.
 
-## v1.7.0 — Findings triage and evidence review (current)
+## v1.8.0 — Repository history, rescan, and evidence comparison (current)
+
+- **Repository history workbench.** The
+  `/repositories/:repositoryId` page is upgraded into a
+  coherent scan-history surface: scan rows are listed
+  newest-first with status, ref, started/completed
+  timestamps, and per-row cross-links to workbench /
+  findings / dependencies / exports.
+- **URL-persisted filters.** Status, trigger type, and
+  page number are reflected in the URL query string so
+  the history view is shareable and survives reload.
+- **Bounded scan-state notices.** Filtering to partial,
+  failed, or cancelled surfaces a `DataCompletenessNotice`
+  with copy that does not claim a clean or complete
+  result.
+- **Run another scan uses the v1.6.1 rescan endpoint.**
+  The "Run another scan" action calls
+  `api.rescanRepository` (workspace-preserving) and never
+  the low-level `api.createScan` path. The new scan is
+  then started via `/scans/{id}/run` and the page
+  navigates to the new workbench. The historical scan
+  is never mutated.
+- **Bounded rescan error rendering.** A
+  `rescan_source_unavailable` error renders bounded
+  guidance rather than a generic failure.
+- **Repository-scoped comparison selector.** A new
+  `/repositories/:repositoryId/compare` page hosts the
+  baseline / comparison selector with URL state
+  (`?baseline=&comparison=`). The selector preserves the
+  v0.5 eligibility rules: only completed and partial
+  scans are listed; same-scan selection is blocked;
+  cross-repository ids are rejected as bounded errors.
+- **Reuses the v0.5 comparison engine.** The selector
+  page defers to the existing `ScanComparisonPage`
+  with a "Repository → Compare" breadcrumb. The
+  comparator itself is unchanged; v1.8 does not
+  introduce a new comparison algorithm.
+- **Removed-finding disclaimer and zero-improvement
+  claim.** The v0.5 wording ("is not described as fixed
+  or resolved") is preserved; the v1.8 page never
+  claims security improved, security worsened, risk
+  increased, risk decreased, fixed, or remediated.
+- **No new backend endpoints.** The existing
+  `/api/v1/repositories/{id}/rescan`,
+  `/api/v1/repositories/{id}/scans`, and
+  `/api/v1/scans/{id}/compare/{base}` routes are
+  reused. No migration.
+
+## v1.7.0 — Findings triage and evidence review
 
 - **Findings triage and evidence review workbench.**
   The existing `/scans/:scanId/findings` page
