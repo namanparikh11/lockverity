@@ -13,15 +13,19 @@ export function DataCompletenessNotice({
   description,
   tone = "info",
   children,
+  detail,
 }: {
   title: string;
   description?: string;
-  tone?: "info" | "warn" | "muted";
+  tone?: "info" | "warn" | "muted" | "danger";
   children?: ReactNode;
+  detail?: string | null;
 }) {
   const toneClass =
     tone === "warn"
       ? "border-amber-200 bg-amber-50 text-amber-800"
+      : tone === "danger"
+      ? "border-rose-200 bg-rose-50 text-rose-800"
       : tone === "muted"
       ? "border-ink-200 bg-ink-50 text-ink-700"
       : "border-accent-200 bg-accent-50 text-accent-800";
@@ -34,6 +38,7 @@ export function DataCompletenessNotice({
       <div>
         <p className="font-semibold">{title}</p>
         {description ? <p className="mt-1">{description}</p> : null}
+        {detail ? <p className="mt-1 text-xs">{detail}</p> : null}
         {children}
       </div>
     </div>

@@ -13,10 +13,16 @@ from app.api.mappers import (
     scan_to_read,
     stage_to_read,
 )
-from app.models.finding import FindingCategory, FindingSeverity
+from app.models.finding import (
+    FindingCategory,
+    FindingConfidence,
+    FindingSeverity,
+    FindingStatus,
+)
 from app.models.provider_observation import ProviderStatus
 from app.models.scan_job import ScanJobState
 from app.models.scan_run import ScanStatus, ScanTriggerType
+from app.repositories.finding_repo import MAX_PAGE_SIZE
 from app.schemas.common import SchemaModel
 from app.schemas.intake import ScanCancelRequest, ScanRunRequest
 from app.schemas.scan import (
@@ -226,31 +232,91 @@ def list_stages(scan_id: int, session: DBSession) -> PaginatedStages:
 @scans.get(
     "/{scan_id}/findings",
     response_model=PaginatedFindings,
-    summary="List findings produced by a scan.",
+    summary="List findings produced by a scan with bounded analyst-review filters.",
 )
 def list_findings(
     scan_id: int,
     session: DBSession,
-    page_params: PageParamsDep,
+    page: int = Query(1, ge=1, description="1-indexed page number"),
+    page_size: int = Query(
+        50,
+        ge=1,
+        le=MAX_PAGE_SIZE,
+        description="Page size, capped at the findings API max.",
+    ),
     category: FindingCategory | None = Query(default=None),
     severity: FindingSeverity | None = Query(default=None),
+    confidence: FindingConfidence | None = Query(default=None),
+    status: FindingStatus | None = Query(default=None),
+    provider: str | None = Query(
+        default=None,
+        description="Substring match on the provider recorded in evidence_json.",
+    ),
+    rule_id: str | None = Query(
+        default=None,
+        description="Exact match on the rule id.",
+    ),
+    path: str | None = Query(
+        default=None,
+        description="Substring match on the location path.",
+    ),
+    q: str | None = Query(
+        default=None,
+        description=("Free-text search across title, summary, rule id, and evidence_json."),
+    ),
+    sort: str | None = Query(
+        default=None,
+        description=(
+            "Sort field. Bounded to: id, rule_id, category, severity, "
+            "confidence, status, updated_at. Invalid values map to id."
+        ),
+    ),
 ) -> PaginatedFindings:
     items, total = finding_service.list_findings_for_scan(
         session,
         scan_id,
-        page=page_params.page,
-        page_size=page_params.page_size,
+        page=page,
+        page_size=page_size,
         category=category,
         severity=severity,
+        confidence=confidence,
+        status=status,
+        provider=provider,
+        rule_id=rule_id,
+        path=path,
+        q=q,
+        sort=sort,
     )
     return PaginatedFindings(
         items=[finding_to_read(item) for item in items],
         pagination=pagination(
-            page=page_params.page,
-            page_size=page_params.page_size,
+            page=page,
+            page_size=page_size,
             total=total,
         ).model_dump(),
     )
+
+
+@scans.get(
+    "/{scan_id}/findings/{finding_id}",
+    response_model=FindingRead,
+    summary="Get a single finding by id within a scan.",
+)
+def get_finding(
+    scan_id: int,
+    finding_id: int,
+    session: DBSession,
+) -> FindingRead:
+    """Return one finding by id, scoped to the scan.
+
+    v1.7: the analyst review workbench uses this
+    endpoint to open the evidence detail drawer
+    without re-listing the page. The route enforces
+    scan-scoped isolation so a finding from one
+    scan cannot be read through another scan's URL.
+    """
+    finding = finding_service.get_finding_for_scan_or_404(session, scan_id, finding_id)
+    return finding_to_read(finding)
 
 
 @scans.get(

@@ -1,6 +1,6 @@
 # Lockverity — Private Portfolio Demo Pack
 
-This is the v1.3 portfolio demo pack. It is a one-page
+This is the v1.7 portfolio demo pack. It is a one-page
 reviewer reference: the current version, the demo command
 flow, the screenshot list, the 60-second demo script, the
 "what to say" + "what not to claim" framing, and the current
@@ -13,28 +13,48 @@ screenshot checklist and manual capture instructions see
 
 ## Current version
 
-`v1.6` — Scan execution controls + live stage progress.
+`v1.7` — Findings triage and evidence review.
 
-The current milestone is a product-usability milestone.
-The release upgrades the existing `/scans/:scanId` page
-into a scan workbench with a truthful
-`ScanStatusExplanation` block (queued / running /
-completed / partial / failed / cancelled), a
-`StageProgressSummary` that derives from persisted stage
-rows only ("N of M stages reached a terminal state —
-terminal does not imply successful"), and execution
-controls: Start scan
-(`POST /api/v1/scans/{id}/run`), Cancel scan (with a
-destructive confirmation dialog), and Run another scan
-/ Retry as new scan (creates a fresh scan for the same
-repository; the historical scan is never mutated). The
-v1.5 `/analyze` page now calls `/scans/{id}/run`
-immediately after intake and surfaces a bounded
-partial-success card when the worker does not start the
-scan. No new backend endpoints, no new providers, no
-new export standards, no new evidence contracts, no
-migration. The v1.5 release added the `/analyze` page
-and the `Analyze` AppShell primary nav entry.
+The current milestone upgrades the existing
+`/scans/:scanId/findings` page into a scan-scoped,
+evidence-first review workbench. It adds a scan context
+header (scan id, repository, status, source type, finding
+count, links back to the workbench / dependencies /
+exports), server-side search across title / summary /
+rule id / `evidence_json` (so package names, PURLs,
+advisories, and aliases are reachable from one search
+box), server-side filters for confidence / status /
+provider / rule id / path, bounded sort vocabulary
+(id, rule_id, category, severity, confidence, status,
+updated_at — never a universal risk ranking), URL-
+persisted filter state, and a freshest-payload evidence
+detail drawer that surfaces advisory identity (primary
+id, aliases, provider, source URL), evidence provenance,
+and cross-links to the workbench / dependencies /
+vulnerabilities / exports. The page renders a bounded
+partial / failed / cancelled notice whenever the scan
+did not complete normally; the result set is never
+presented as complete in those cases. Empty states use
+the wording "This does not establish that the
+repository is vulnerability-free." Severity is always
+labelled as provider-attributed. Backend additions are
+additive: new query parameters on
+`GET /api/v1/scans/{id}/findings` (q, confidence,
+status, provider, rule_id, path, sort), a page-size cap
+of 100, and a new
+`GET /api/v1/scans/{id}/findings/{finding_id}` endpoint
+that enforces scan-scoped isolation. Persistent
+analyst disposition (false positive / accepted risk /
+remediated / assigned / suppressed) is intentionally
+not implemented; v1.7 is read-only. The v1.6 scan
+workbench (Start scan, Cancel scan, Run another scan /
+Retry as new scan) and the v1.6.1 workspace-preserving
+rescan repair remain in place. The v1.5 `/analyze` page
+calls `/scans/{id}/run` immediately after intake and
+surfaces a bounded partial-success card when the worker
+does not start the scan. No new providers, no new
+export standards, no new evidence contracts, no
+migration.
 
 ## How to run the demo
 
@@ -142,24 +162,32 @@ section.
    on `left-pad`. *Say*: "The v0.8 evidence drilldown has
    six sections plus an evidence-honesty markers list.
    The component is what it is — not a verdict."
-4. **0:30 – 0:45.** Close the drawer. Open
+4. **0:30 – 0:40.** Open
+   `http://127.0.0.1:5173/scans/1/findings`. *Say*: "The
+   v1.7 findings triage workbench. The scan context
+   header at the top shows scan id, repository, status,
+   and source type. Search hits the backend across title,
+   summary, rule id, and the raw evidence JSON. Sort is
+   bounded — no universal risk ranking, ever." Click a
+   finding row to open the evidence detail drawer.
+   *Say*: "The drawer shows advisory identity, provider
+   attribution, the raw evidence payload, and a bounded
+   boundary notice: this is an evidence record, not a
+   security verdict."
+5. **0:40 – 0:50.** Close the drawer. Open
    `http://127.0.0.1:5173/scans/1/exports`. Click
    `Show CycloneDX 1.7 evidence preview`. *Say*: "The
    export is eligible, schema-validated, and the omissions
    block names the things the export does not claim."
    Click `Download`. The browser saves
    `lockverity-scan-1.cdx.json`.
-5. **0:45 – 0:55.** Click `Show report summary` on the
+6. **0:50 – 1:00.** Click `Show report summary` on the
    Evidence report card. *Say*: "The v1.0 evidence report
    has seven sections plus a bounded disclaimer: not a
    security verdict, not a certification, not a compliance
-   pass-or-fail." Click `Download Markdown`. The browser
-   saves `lockverity-scan-1.evidence-report.md`.
-6. **0:55 – 1:00.** Open
-   `http://127.0.0.1:5173/scans/3/exports`. *Say*: "A
-   failed scan returns 200 with a bounded `not_applicable`
-   empty state. The UI does not fabricate a clean verdict
-   for a failed or cancelled scan." End on the About page.
+   pass-or-fail." End on the About page. The failed scan
+   (`http://127.0.0.1:5173/scans/3/exports`) is referenced
+   if the reviewer asks about failed-state honesty.
 
 The script is intentionally short and bounded. If a
 reviewer asks for a deep dive, switch to the full
@@ -179,6 +207,11 @@ reviewer asks for a deep dive, switch to the full
   a clean verdict for a failed or cancelled scan."
 - "A missing provider is rendered as `not_persisted` or
   `not_observed` — never as a clean bill of health."
+- "The v1.7 findings workbench is read-only. Persistent
+  analyst disposition (false positive / accepted risk /
+  remediated / assigned / suppressed) is intentionally
+  not implemented; review decisions are not stored in the
+  database or in localStorage."
 
 ## What not to claim
 

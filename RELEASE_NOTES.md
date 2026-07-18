@@ -33,25 +33,38 @@ The product is built around three guarantees:
 
 The repository is a **private portfolio-ready baseline**, not
 a production SaaS, not a hosted service, and not a CI vendor.
-The current milestone (`v1.6.1`) is a focused repair
-milestone on top of `v1.6`. The v1.6.1 release repairs the
-v1.6 retry/rescan workflow: the v1.6 workbench called
-`POST /repositories/{id}/scans` which created a queued
-scan with no associated workspace; the orchestrator then
-failed the archive validation stage with
-`failure_code="not_found"`. The v1.6.1 fix adds
-`POST /repositories/{id}/rescan` and a new `RescanService`
-that creates a fresh scan, a fresh workspace, and
-re-materialises the source evidence (re-download the GitHub
-tarball or safely copy the previous upload workspace) before
-returning. The historical scan and workspace are never
-mutated. When the original source is no longer available,
-the route returns a bounded `rescan_source_unavailable`
-error before any queued row is persisted; the frontend
-renders the bounded guidance and never navigates to an
-unrunnable scan. The v1.6 release added Start scan, Cancel
-scan, and Run another scan / Retry as new scan to the scan
-workbench. There is:
+The current milestone (`v1.7`) is a focused
+**findings-triage-and-evidence-review** upgrade on top of
+`v1.6.1`. The v1.7 release upgrades the existing
+`/scans/:scanId/findings` page into a scan-scoped,
+evidence-first review workbench. It adds a scan context
+header (scan id, repository, status, source type, finding
+count), server-side search across title / summary / rule id /
+`evidence_json` (so package names, PURLs, advisories, and
+aliases are reachable from one search box), server-side
+filters for confidence / status / provider / rule id / path,
+bounded sort vocabulary (no universal risk ranking), URL-
+persisted filter state, and a freshest-payload evidence
+detail drawer that surfaces advisory identity, provider
+attribution, and cross-links to the workbench, dependencies,
+vulnerabilities, and exports. Backend additions are
+additive: new query parameters on the existing
+`GET /api/v1/scans/{id}/findings` route (q, confidence,
+status, provider, rule_id, path, sort), a page-size cap of
+100, and a new
+`GET /api/v1/scans/{id}/findings/{finding_id}` endpoint
+that enforces scan-scoped isolation. The v1.7 release
+intentionally does not persist any analyst disposition
+(false positive / accepted risk / remediated / assigned /
+suppressed); the existing `Finding.status` enum is read-
+only in v1.7. Empty states use the bounded wording
+"This does not establish that the repository is
+vulnerability-free." Lockverity never invents a universal
+risk ranking, and severity is always labelled as
+provider-attributed. The v1.6.1 release was the workspace-
+preserving rescan repair. The v1.6 release added Start scan,
+Cancel scan, and Run another scan / Retry as new scan to
+the scan workbench. There is:
 
 - **No multi-tenancy** and no authentication. A reviewer runs
   the application on their own laptop.
