@@ -33,23 +33,24 @@ The product is built around three guarantees:
 
 The repository is a **private portfolio-ready baseline**, not
 a production SaaS, not a hosted service, and not a CI vendor.
-The current milestone (`v1.5`) is a product-usability pass
-on top of `v1.4`. The v1.5 release adds a guided intake
-flow at `/analyze` (with a new `Analyze` nav entry) that
-wraps the existing intake APIs in two clearly separated
-methods: a public GitHub URL form and a `zip` source
-archive upload. The first-run scan-list empty state now
-offers two clear actions: `Analyze repository` (linking
-to `/analyze`) and `Open demo guide` (linking to `/demo`).
-The v1.4 release added an in-app reviewer flow at `/demo`
-(with a new `Demo` nav entry) that surfaces the demo
-dataset's nature, the five reviewer pages, the "what to look
-for" and "what not to claim" framings, and a short command
-reminder on a single read-only page. The v1.3 release added
-a [`docs/demo-pack.md`](docs/demo-pack.md) with a 60-second
-reviewer walkthrough script and a major rewrite of
-[`docs/screenshots.md`](docs/screenshots.md) into a manual
-9-capture checklist. There is:
+The current milestone (`v1.6`) is a product-usability pass
+on top of `v1.5`. The v1.6 release upgrades the existing
+`/scans/:scanId` page into a scan workbench with a truthful
+`ScanStatusExplanation` block (queued / running / completed /
+partial / failed / cancelled), a `StageProgressSummary` that
+derives from persisted stage rows only ("N of M stages
+reached a terminal state — terminal does not imply
+successful"), and execution controls: Start scan
+(`POST /api/v1/scans/{id}/run`), Cancel scan (with a
+destructive confirmation dialog), and Run another scan /
+Retry as new scan (creates a fresh scan for the same
+repository; the historical scan is never mutated). The
+v1.5 `/analyze` page now calls `/scans/{id}/run` immediately
+after intake and surfaces a bounded partial-success card
+when the worker does not start the scan. The v1.5 release
+added a guided intake flow at `/analyze` (with a new
+`Analyze` nav entry) that wraps the existing intake APIs in
+two clearly separated methods. There is:
 
 - **No multi-tenancy** and no authentication. A reviewer runs
   the application on their own laptop.

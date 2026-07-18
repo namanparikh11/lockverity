@@ -113,7 +113,7 @@ describe("v1.5 guided intake / analyze flow", () => {
     global.fetch = vi.fn().mockResolvedValue(
       jsonResponse({
         name: "Lockverity",
-        version: "1.5.0",
+        version: "1.6.0",
         tagline: "Evidence-first software supply-chain assurance",
         environment: "test",
         api_prefix: "/api/v1",
@@ -161,7 +161,7 @@ describe("v1.5 guided intake / analyze flow", () => {
 
     // The AppShell footer reports the v1.5.0 version.
     await waitFor(() => {
-      expect(screen.getByText("v1.5.0")).toBeInTheDocument();
+      expect(screen.getByText("v1.6.0")).toBeInTheDocument();
     });
   });
 
@@ -172,7 +172,7 @@ describe("v1.5 guided intake / analyze flow", () => {
         return Promise.resolve(
           jsonResponse({
             name: "Lockverity",
-            version: "1.5.0",
+            version: "1.6.0",
             tagline: "Evidence-first software supply-chain assurance",
             environment: "test",
             api_prefix: "/api/v1",
@@ -188,6 +188,29 @@ describe("v1.5 guided intake / analyze flow", () => {
         init?.method === "POST"
       ) {
         return Promise.resolve(jsonResponse(makeIntakeResult({ scanId: 42 }), 201));
+      }
+      // v1.6: the page now also calls ``/scans/{id}/run``
+      // to schedule execution on the local worker. The
+      // mock returns a 200 with the scan shape so the
+      // scan is recorded as ``started``.
+      if (url.match(/\/api\/v1\/scans\/\d+\/run$/) && init?.method === "POST") {
+        return Promise.resolve(
+          jsonResponse({
+            id: 42,
+            repository_id: 7,
+            status: "running",
+            trigger_type: "manual",
+            requested_ref: null,
+            resolved_commit_sha: null,
+            analyzer_version: "lockverity 1.6.0",
+            started_at: "2026-07-18T00:00:00Z",
+            completed_at: null,
+            failure_code: null,
+            failure_summary: null,
+            created_at: "2026-07-18T00:00:00Z",
+            updated_at: "2026-07-18T00:00:00Z",
+          })
+        );
       }
       // The status poll: the page keeps polling the scan
       // after intake. We respond with a terminal "completed"
@@ -279,7 +302,7 @@ describe("v1.5 guided intake / analyze flow", () => {
         if (url.endsWith("/api/v1/system/info")) {
           return jsonResponse({
             name: "Lockverity",
-            version: "1.5.0",
+            version: "1.6.0",
             tagline: "Evidence-first software supply-chain assurance",
             environment: "test",
             api_prefix: "/api/v1",
@@ -302,6 +325,25 @@ describe("v1.5 guided intake / analyze flow", () => {
           expect(form.has("file")).toBe(true);
           expect(form.has("archive")).toBe(false);
           return jsonResponse(makeIntakeResult({ scanId: 99, repositoryId: 13 }), 201);
+        }
+        // v1.6: the page also calls ``/scans/{id}/run`` to
+        // schedule execution on the local worker.
+        if (url.match(/\/api\/v1\/scans\/\d+\/run$/) && init?.method === "POST") {
+          return jsonResponse({
+            id: 99,
+            repository_id: 13,
+            status: "running",
+            trigger_type: "upload",
+            requested_ref: null,
+            resolved_commit_sha: null,
+            analyzer_version: "lockverity 1.6.0",
+            started_at: "2026-07-18T00:00:00Z",
+            completed_at: null,
+            failure_code: null,
+            failure_summary: null,
+            created_at: "2026-07-18T00:00:00Z",
+            updated_at: "2026-07-18T00:00:00Z",
+          });
         }
         if (url.match(/\/api\/v1\/scans\/\d+$/)) {
           return jsonResponse({
@@ -375,7 +417,7 @@ describe("v1.5 guided intake / analyze flow", () => {
         if (url.endsWith("/api/v1/system/info")) {
           return jsonResponse({
             name: "Lockverity",
-            version: "1.5.0",
+            version: "1.6.0",
             tagline: "Evidence-first software supply-chain assurance",
             environment: "test",
             api_prefix: "/api/v1",
@@ -447,7 +489,7 @@ describe("v1.5 guided intake / analyze flow", () => {
         if (url.endsWith("/api/v1/system/info")) {
           return jsonResponse({
             name: "Lockverity",
-            version: "1.5.0",
+            version: "1.6.0",
             tagline: "Evidence-first software supply-chain assurance",
             environment: "test",
             api_prefix: "/api/v1",
@@ -522,7 +564,7 @@ describe("v1.5 guided intake / analyze flow", () => {
     global.fetch = vi.fn().mockResolvedValue(
       jsonResponse({
         name: "Lockverity",
-        version: "1.5.0",
+        version: "1.6.0",
         tagline: "Evidence-first software supply-chain assurance",
         environment: "test",
         api_prefix: "/api/v1",
@@ -550,7 +592,7 @@ describe("v1.5 guided intake / analyze flow", () => {
     global.fetch = vi.fn().mockResolvedValue(
       jsonResponse({
         name: "Lockverity",
-        version: "1.5.0",
+        version: "1.6.0",
         tagline: "Evidence-first software supply-chain assurance",
         environment: "test",
         api_prefix: "/api/v1",

@@ -2,13 +2,18 @@ import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 
 import { api } from "@/api/api";
-import { usePolling } from "@/api/hooks";
 import type { FindingCategory, Scan, ScanStage } from "@/api/types";
 import { CopyableIdentifier } from "@/components/CopyableIdentifier";
 import { DataCompletenessNotice } from "@/components/DataCompletenessNotice";
 import { ErrorState } from "@/components/ErrorState";
 import { PageHeader } from "@/components/PageHeader";
 import { PipelineFailureAlert, ScanTimeline } from "@/components/ScanTimeline";
+import { ScanActions } from "@/components/ScanActions";
+import {
+  ScanStatusExplanation,
+  StageProgressSummary,
+} from "@/components/ScanWorkbenchHelpers";
+import { useWorkbenchPolling } from "@/api/scanPolling";
 import { Skeleton } from "@/components/Skeleton";
 import { StatusBadge } from "@/components/StatusBadge";
 import { SummaryCard } from "@/components/SummaryCard";
@@ -17,39 +22,36 @@ import { findingCategoryLabel, scanStatusLabel, scanTriggerLabel } from "@/utils
 import { formatTimestamp } from "@/utils/time";
 
 /**
- * Terminal scan states. The polling hook stops the moment a
- * scan enters one of these states; the page renders a
- * "live" badge while the scan is still in flight.
+ * v1.6 scan workbench.
+ *
+ * Renders the truthful scan identity, status, pipeline,
+ * and exploration links for a single scan. The page is
+ * the destination for the v1.5 guided intake page once
+ * execution starts, and the source of truth for the
+ * reviewer's "what is this scan doing right now?"
+ * question.
+ *
+ * The page uses the existing ``usePolling`` hook via
+ * the ``useWorkbenchPolling`` wrapper so the polling
+ * interval, terminal-set, and abort-on-unmount
+ * behaviour are consistent with the rest of the
+ * application.
  */
-const TERMINAL_SCAN_STATUSES: ReadonlySet<Scan["status"]> = new Set([
-  "completed",
-  "partial",
-  "failed",
-  "cancelled",
-]);
-
 export function ScanDetailsPage() {
   const { scanId } = useParams<{ scanId: string }>();
   const sid = Number.parseInt(scanId ?? "", 10);
   const valid = Number.isFinite(sid);
-  // The scan object is polled. We keep a separate ``stages``
-  // cache that is refreshed once per poll. The stages are not
-  // polled separately because the orchestrator updates both
-  // rows in the same transaction; the scan poll is the
-  // single source of truth for "is the work done yet?".
+  // The scan object is polled. We keep a separate
+  // ``stages`` cache that is refreshed once per poll.
+  // The stages are not polled separately because the
+  // orchestrator updates both rows in the same
+  // transaction; the scan poll is the single source of
+  // truth for "is the work done yet?".
   const {
     data: scan,
     error: pollError,
     polls,
-  } = usePolling<Scan>(
-    (signal) => api.getScan(sid, signal ? { signal } : undefined),
-    [sid],
-    {
-      intervalMs: 2000,
-      maxPolls: 300,
-      isTerminal: (value) => TERMINAL_SCAN_STATUSES.has(value.status),
-    }
-  );
+  } = useWorkbenchPolling(sid);
   const [stages, setStages] = useState<ScanStage[] | null>(null);
   const [stagesError, setStagesError] = useState<unknown>(null);
   const error = valid ? pollError || stagesError : new Error("Invalid scan id.");
@@ -69,11 +71,11 @@ export function ScanDetailsPage() {
         setStagesError(err);
       });
     return () => controller.abort();
-    // We intentionally depend on ``polls`` (not ``scan``) so
-    // the effect re-runs whenever the polling hook reports a
-    // new poll, but does not re-run for every scan field
-    // change. The lint rule is satisfied by listing the
-    // individual stable dependency.
+    // We intentionally depend on ``scan?.id`` (not
+    // the whole ``scan`` object) so the effect
+    // re-runs only when the scan id changes or the
+    // polling hook reports a new poll, not on every
+    // scan field update.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [valid, scan?.id, polls]);
 
@@ -109,35 +111,10 @@ export function ScanDetailsPage() {
           },
           { label: `Scan #${scan.id}` },
         ]}
-        actions={
-          <div className="flex flex-wrap gap-2">
-            <Link
-              to={`/scans/${scan.id}/findings`}
-              className="btn-secondary"
-            >
-              View findings
-            </Link>
-            <Link
-              to={`/scans/${scan.id}/providers`}
-              className="btn-secondary"
-            >
-              Provider status
-            </Link>
-            <Link
-              to={`/scans/${scan.id}/compare-select`}
-              className="btn-secondary"
-            >
-              Compare with…
-            </Link>
-            <Link
-              to={`/scans/${scan.id}/exports`}
-              className="btn-primary"
-            >
-              Exports
-            </Link>
-          </div>
-        }
       />
+      <div className="mb-4">
+        <ScanStatusExplanation scan={scan} />
+      </div>
       <section className="mb-6 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
         <SummaryCard
           label="Status"
@@ -176,6 +153,9 @@ export function ScanDetailsPage() {
           <p className="mt-1">{scan.failure_summary}</p>
         </div>
       ) : null}
+      <div className="mb-4">
+        <ScanActions scan={scan} refreshKey={polls} />
+      </div>
       <PipelineFailureAlert stages={stages} />
       <h2 className="mb-2 mt-4 text-sm font-semibold text-ink-700">Pipeline</h2>
       <DataCompletenessNotice
@@ -183,6 +163,9 @@ export function ScanDetailsPage() {
         description="Every stage records its status, provider, records processed, and any failure summary. The pipeline below is the truth of what ran; nothing is marked complete without a stage record."
         tone="muted"
       />
+      <div className="mt-2">
+        <StageProgressSummary stages={stages} />
+      </div>
       <div className="mt-4">
         <ScanTimeline stages={stages} />
       </div>

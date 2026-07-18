@@ -188,6 +188,20 @@ export const api = {
     }),
   createScan: (repositoryId: number, payload: ScanCreatePayload = {}) =>
     apiClient.post<Scan>(`/repositories/${repositoryId}/scans`, payload),
+  // v1.6: explicit scan start. The intake endpoints
+  // create a queued scan but do not start execution; the
+  // caller must POST to ``/scans/{id}/run`` to schedule
+  // the work on the local worker. Already-running scans
+  // are rejected with HTTP 409; the UI surfaces the
+  // stable error envelope.
+  runScan: (scanId: number) =>
+    apiClient.post<Scan>(`/scans/${scanId}/run`),
+  // v1.6: cancellation. The endpoint accepts an optional
+  // ``reason`` field; the UI passes a non-empty string
+  // when the user types a custom reason and the empty
+  // default when they click the default Cancel action.
+  cancelScan: (scanId: number, payload: { reason?: string } = {}) =>
+    apiClient.post<Scan>(`/scans/${scanId}/cancel`, payload),
   getScan: (scanId: number, options: { signal?: AbortSignal } = {}) =>
     apiClient.get<Scan>(`/scans/${scanId}`, { signal: options.signal }),
   listStages: (scanId: number) =>
