@@ -4,6 +4,7 @@ import {
   Info,
   LayoutDashboard,
   Menu,
+  PlayCircle,
   ScanSearch,
   ShieldAlert,
   X,
@@ -22,6 +23,7 @@ interface NavItem {
 
 const PRIMARY_NAV: NavItem[] = [
   { to: "/", label: "Dashboard", icon: LayoutDashboard, end: true },
+  { to: "/demo", label: "Demo", icon: PlayCircle },
   { to: "/repositories", label: "Repositories", icon: Box },
   { to: "/scans", label: "Scans", icon: ScanSearch },
   { to: "/providers", label: "Providers", icon: ShieldAlert },

@@ -3,6 +3,7 @@ import { createBrowserRouter, Navigate } from "react-router-dom";
 import { AppShell } from "@/layouts/AppShell";
 import { AboutPage } from "@/pages/AboutPage";
 import { DashboardPage } from "@/pages/DashboardPage";
+import { DemoHomePage } from "@/pages/DemoHomePage";
 import { DependencyExplorerPage } from "@/pages/DependencyExplorerPage";
 import { ExportCenterPage } from "@/pages/ExportCenterPage";
 import { FindingsPage } from "@/pages/FindingsPage";
@@ -26,6 +27,7 @@ export const router = createBrowserRouter([
     element: <AppShell />,
     children: [
       { path: "/", element: <DashboardPage /> },
+      { path: "/demo", element: <DemoHomePage /> },
       { path: "/about", element: <AboutPage /> },
 
       // Repositories
