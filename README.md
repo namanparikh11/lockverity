@@ -136,26 +136,122 @@ availability policy.
   backed by code that ships in this repository, never by a
   fixture or a mocked demo.
 
-## Key v1.0 demo flow
+## Key v1.2 demo flow
 
-1. Load the manual-review dataset
-   (`backend/var/manual-review/review.sqlite`).
-2. Open the dashboard or scan list.
-3. Open the Dependency Explorer for a completed scan.
-4. Use the evidence filter row (search, ecosystem, direct,
+1. Generate the deterministic demo database
+   (`backend/scripts/load_demo.py --reset-demo-db`).
+2. Start the backend with `LOCKVERITY_DATABASE_URL` pointed at
+   the generated file.
+3. Start the frontend (Vite proxies `/api` to the backend).
+4. Open the scan list and pick a completed scan.
+5. Use the evidence filter row (search, ecosystem, direct,
    version, licence evidence, provider evidence, PURL,
    dependency edges, CycloneDX 1.7 version omitted, sort).
-5. Open a component row to view the read-only evidence
+6. Open a component row to view the read-only evidence
    drilldown (identity, manifest, licence, provider, dependency,
    export implications, omissions).
-6. Open the Export Center.
-7. Show the CycloneDX 1.7 evidence preview.
-8. Download the CycloneDX 1.7 SBOM.
-9. Show the evidence-report preview.
-10. Download the Markdown evidence report.
+7. Open the Export Center.
+8. Show the CycloneDX 1.7 evidence preview.
+9. Download the CycloneDX 1.7 SBOM.
+10. Show the evidence-report preview.
+11. Download the Markdown evidence report.
+12. Visit `/scans/3/exports` and `/scans/4/exports` to show
+    the bounded empty state for failed / cancelled scans.
 
-See `docs/demo-walkthrough.md` for a step-by-step guide with
-expected visible states and the local URLs.
+The dataset is **synthetic persisted evidence**. The fixture
+repository is `https://github.com/example-org/lockverity-fixture`
+and the resolved commit SHA is the `deadbeef` fill; Lockverity
+makes no provider calls during the demo. See
+`docs/demo-walkthrough.md` for the step-by-step reviewer guide
+and `docs/screenshots.md` for the screenshot checklist.
+
+## Run the demo
+
+The v1.2 demo is the fastest way to see every Lockverity
+surface end-to-end. Six steps, no provider credentials, no
+hosted services.
+
+1. **Generate the demo database.** From the backend directory,
+   run the demo loader with `--reset-demo-db`. The script
+   refuses to overwrite an existing file unless this flag is
+   passed and refuses to write outside `backend/var/`. The
+   schema is created by the same Alembic migrations the
+   application uses, so the resulting database is
+   byte-equivalent to a fresh `alembic upgrade head`.
+
+   ```powershell
+   cd "C:\Users\Naman Parikh\Documents\Minimax Projects\Lockverity\backend"
+   .\.venv\Scripts\python.exe scripts\load_demo.py --reset-demo-db
+   ```
+
+2. **Start the backend** on `127.0.0.1:8765` with the generated
+   SQLite file as the database URL. Confirm the startup log
+   reports the version you expect.
+
+   ```powershell
+   $env:LOCKVERITY_DATABASE_URL = "sqlite:///var/demo/lockverity-demo.sqlite"
+   .\.venv\Scripts\python.exe -m uvicorn app.main:app --host 127.0.0.1 --port 8765
+   ```
+
+   ```bash
+   curl http://127.0.0.1:8765/api/v1/health
+   # {"status":"ok","database":"ok","version":"1.2.0", ...}
+   ```
+
+3. **Start the frontend** on `127.0.0.1:5173` with the Vite
+   proxy pointed at the backend. The frontend never holds
+   provider credentials; it is read-only against the local
+   backend.
+
+   ```powershell
+   cd "C:\Users\Naman Parikh\Documents\Minimax Projects\Lockverity\frontend"
+   $env:VITE_API_PROXY_TARGET = "http://127.0.0.1:8765"
+   npm install
+   npm run dev
+   ```
+
+4. **Open the demo URLs** in a browser. Vite serves the
+   frontend on `http://127.0.0.1:5173/`. The five pages
+   that cover every v0.5–v1.2 surface are:
+
+   | Page | What it shows |
+   |---|---|
+   | `http://127.0.0.1:5173/` | Scan list (4 scans, all four terminal states) |
+   | `http://127.0.0.1:5173/scans/1/dependencies` | Dependency Explorer, 6 components, evidence filters |
+   | `http://127.0.0.1:5173/scans/1/exports` | Export Center, CycloneDX 1.7 preview, evidence report |
+   | `http://127.0.0.1:5173/scans/3/exports` | Failed scan, bounded `not_applicable` empty state |
+   | `http://127.0.0.1:5173/about` | About page, product boundaries, version |
+
+5. **Capture screenshots** following the checklist in
+   `docs/screenshots.md`. The recommended captures cover
+   the four pages above plus the downloaded CycloneDX 1.7
+   SBOM and the downloaded Markdown evidence report.
+
+6. **Stop the demo** when you are done. The demo servers
+   are local-only and the SQLite file is the only persistent
+   state.
+
+   ```powershell
+   Get-NetTCPConnection -LocalPort 8765 | ForEach-Object { Stop-Process -Id $_.OwningProcess -Force }
+   Get-NetTCPConnection -LocalPort 5173 | ForEach-Object { Stop-Process -Id $_.OwningProcess -Force }
+   ```
+
+### What not to claim
+
+- Do not call the report "a security scan result". It is an
+  evidence report.
+- Do not call the SBOM "a certified bill of materials". It is
+  evidence.
+- Do not say "the dependency graph is complete" unless a
+  positive persisted signal exists. The v0.6 helper returns
+  `partial` for the demo dataset.
+- Do not say "no findings" because a provider was unavailable,
+  rate-limited, or skipped. The demo's three provider
+  observations are explicit `AVAILABLE` or `RATE_LIMITED`
+  rows, never silent omissions.
+
+The full reviewer walkthrough lives in
+[`docs/demo-walkthrough.md`](docs/demo-walkthrough.md).
 
 ## Architecture overview
 
@@ -198,12 +294,14 @@ The default SQLite database is `./lockverity.sqlite`. To use
 PostgreSQL instead, set `LOCKVERITY_DATABASE_URL` to a SQLAlchemy
 URL like `postgresql+psycopg://user:pass@host:5432/lockverity`.
 
-For the v1.1 demo dataset, the safest path is to use the bundled
-loader so the demo never depends on a hidden SQLite file:
+For the v1.2 demo dataset, the safest path is to use the bundled
+loader so the demo never depends on a hidden SQLite file. The
+loader creates the full schema via the same Alembic migrations
+the application uses and never calls `Base.metadata.create_all`:
 
 ```bash
 cd backend
-.venv\Scripts\python.exe scripts\load_demo.py --reset-demo-db
+.venv\Scripts\python.exe scripts/load_demo.py --reset-demo-db
 # or on POSIX: .venv/bin/python scripts/load_demo.py --reset-demo-db
 
 export LOCKVERITY_DATABASE_URL="sqlite:///var/demo/lockverity-demo.sqlite"
@@ -219,8 +317,10 @@ commit SHA is the `deadbeef` fill, every package name is
 `alpha` / `beta` / `gamma` / `left-pad` / `right-pad` / `stay`,
 and no real secret, token, or personal data is ever written).
 The script creates the four documented scan states
-(completed / partial / failed / cancelled) so every v0.5–v1.0
-surface can be reviewed end-to-end.
+(completed / partial / failed / cancelled) so every v0.5–v1.2
+surface can be reviewed end-to-end. See
+[`docs/demo-walkthrough.md`](docs/demo-walkthrough.md) for the
+reviewer walkthrough.
 
 The backend will log the resolved database path on startup.
 
@@ -287,17 +387,30 @@ npm test -- --run src/__tests__/evidence_report_v1_0.test.tsx  # v1.0 evidence r
 
 ## Current milestone
 
-**v1.0 — Human-Readable Evidence Report.** The v1.0 release
-adds a deterministic Markdown evidence report and a lazy JSON
-preview endpoint, with no new providers, no new export
-standards, and no change to the v0.6/v0.7/v0.8/v0.9 evidence
-contracts.
+**v1.2 — Screenshot Gallery + Demo UX Polish.** The v1.2
+release tightens the local demo experience: a deterministic
+demo loader with reviewer-friendly console output, a clean
+"Run the demo" section in the README, a screenshot checklist
+in `docs/screenshots.md`, a small in-product demo-dataset
+notice, and a `Current milestone` section that calls out the
+v1.0 / v1.0.1 / v1.1 / v1.2 narrative. No new providers, no
+new export standards, no change to the v0.6 / v0.7 / v0.8 /
+v0.9 / v1.0 / v1.1 evidence contracts.
 
-`v1.0.1` is a public-readiness pass: documentation polish, demo
-walkthrough, security-boundary note, and copy clarity. No new
-features, no new providers, no new export standards.
+`v1.1` introduced the deterministic demo loader
+(`backend/scripts/load_demo.py`) that creates the four
+documented scan states without any provider calls and without
+a hidden manual-review SQLite file.
 
-## What v1.0 does not include
+`v1.0.1` was a public-readiness pass: documentation polish,
+demo walkthrough, security-boundary note, and copy clarity.
+No new features, no new providers, no new export standards.
+
+`v1.0` introduced the deterministic Markdown evidence report
+and a lazy JSON preview endpoint. No new providers, no new
+export standards.
+
+## What v1.2 does not include
 
 Planned for later milestones, not implemented today:
 
@@ -305,9 +418,10 @@ Planned for later milestones, not implemented today:
   signup.
 - Continuous / scheduled scans. v0.5+ scans are explicit
   operator actions.
-- Private GitHub repository analysis (v1.0 is public-only; the
-  `LOCKVERITY_GITHUB_TOKEN` environment variable is honoured for
-  public rate limits but private endpoints are out of scope).
+- Private GitHub repository analysis (v1.2 is public-only;
+  the `LOCKVERITY_GITHUB_TOKEN` environment variable is
+  honoured for public rate limits but private endpoints are
+  out of scope).
 - LLM-driven analysis, exploit generation, or any other
   offensive feature.
 - PDF, DOCX, HTML, signed attestations, or certification

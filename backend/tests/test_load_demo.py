@@ -395,3 +395,53 @@ def test_loader_failed_scan_reports_failure_reason():
     finally:
         if db_path.exists():
             os.unlink(db_path)
+
+
+def test_loader_prints_screenshot_ready_console_output(tmp_path):
+    """The loader's success-path console output must surface
+    the v1.2 reviewer-friendly contract:
+
+    - the dataset is synthetic persisted evidence;
+    - no provider calls were made;
+    - the four scan ids and their states;
+    - both PowerShell and POSIX start commands for the
+      backend and the frontend;
+    - the five key demo URLs (root, dependencies, exports,
+      failed exports, about).
+    """
+    db_path = _test_db_path("console-output")
+    try:
+        result = _run(["--output", str(db_path), "--reset-demo-db"])
+        assert result.returncode == 0, result.stderr
+        stdout = result.stdout
+        # Synthetic-data disclosure.
+        assert "synthetic persisted evidence" in stdout
+        assert "no provider calls were made" in stdout
+        # Repository / scan summary.
+        assert "https://github.com/example-org/lockverity-fixture" in stdout
+        assert "1 (completed, 6 components)" in stdout
+        assert "2 (partial, 4 components)" in stdout
+        assert "3 (failed)" in stdout
+        assert "4 (cancelled)" in stdout
+        # Cross-platform startup commands.
+        assert "start the backend (PowerShell):" in stdout
+        assert "start the backend (POSIX shell):" in stdout
+        assert "start the frontend (PowerShell):" in stdout
+        assert "start the frontend (POSIX shell):" in stdout
+        assert "$env:LOCKVERITY_DATABASE_URL" in stdout
+        assert "export LOCKVERITY_DATABASE_URL" in stdout
+        # Five documented demo URLs.
+        for url in (
+            "http://127.0.0.1:5173/",
+            "http://127.0.0.1:5173/scans/1/dependencies",
+            "http://127.0.0.1:5173/scans/1/exports",
+            "http://127.0.0.1:5173/scans/3/exports",
+            "http://127.0.0.1:5173/about",
+        ):
+            assert url in stdout, f"missing demo URL: {url}"
+        # Reviewer checklist pointer.
+        assert "docs/demo-walkthrough.md" in stdout
+        assert "docs/screenshots.md" in stdout
+    finally:
+        if db_path.exists():
+            os.unlink(db_path)
