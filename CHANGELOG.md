@@ -5,7 +5,53 @@ follow [Semantic Versioning](https://semver.org/). Lockverity is
 pre-1.0 in the sense that the public API may evolve; the
 underlying data model and Alembic migrations are stable.
 
-## v1.4 — In-app demo home + reviewer flow (current)
+## v1.5 — Guided intake / scan launch (current)
+
+- **New `/analyze` route.** `frontend/src/pages/AnalyzePage.tsx`
+  wraps the existing intake APIs in a guided flow with two
+  clearly separated methods: a public GitHub URL form and a
+  source archive (`zip`) upload. The page does not duplicate
+  business logic; it calls
+  `POST /api/v1/repositories/github` and
+  `POST /api/v1/repositories/upload` and reads the returned
+  `IntakeResultRead.scan.id` to navigate to the new scan.
+- **AppShell nav entry.** New `Analyze` entry in the primary
+  navigation, between `Dashboard` and `Demo`. The link
+  points at `/analyze` and uses the `Sparkles` icon.
+- **Bounded non-execution and archive-hostility copy.** The
+  page repeats the "Lockverity never executes repository
+  code" and "archives are treated as hostile input"
+  guarantees inline on the form, plus the bounded
+  "evidence exports, not a security verdict, certification,
+  or compliance pass-or-fail" wording.
+- **First-run empty state.** The scan list empty state now
+  offers two clear actions: `Analyze repository` (linking
+  to `/analyze`) and `Open demo guide` (linking to `/demo`).
+  The synthetic-dataset notice on the scan list is
+  unchanged.
+- **Upload field-name bug fix.** The frontend `requestUpload`
+  helper used to send the ZIP under the multipart `archive`
+  field; the backend route declared `file: UploadFile = File(...)`
+  so every upload silently bound `None` and the endpoint
+  returned `422`. The v1.5 fix pins the field name to `file`
+  matching the backend contract, so the existing
+  `/repositories/upload` route (used by the new `/analyze`
+  page) and the older `/repositories/upload` legacy page
+  both work end-to-end. The pre-existing test in
+  `frontend/src/__tests__/exports.test.tsx` only checks the
+  URL path; the form-field change is verified by a new
+  test in `frontend/src/__tests__/analyze_v1_5.test.tsx`.
+- **Status / progress UX.** After intake succeeds, the
+  page renders a status panel that polls the new scan
+  using the existing `usePolling` hook. The reviewer can
+  open the scan detail page at any time. Polling stops
+  on terminal status (`completed` / `partial` / `failed`
+  / `cancelled`).
+- **No new backend endpoints.** v1.5 reuses the existing
+  intake and scan routes. No new providers, no new export
+  standards, no new evidence contracts, no migration.
+
+## v1.4 — In-app demo home + reviewer flow
 
 - **In-app reviewer flow.** New `/demo` route and
   `DemoHomePage` page. The page surfaces five sections

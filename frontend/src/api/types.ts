@@ -135,6 +135,50 @@ export interface RepositoryCreatePayload {
   requested_ref?: string;
 }
 
+// ---- Intake (v1.5) ----
+//
+// The /repositories/github and /repositories/upload intake
+// endpoints return an ``IntakeResultRead`` shape that bundles
+// the freshly-created repository, scan, workspace, and a
+// free-form summary. The frontend types mirror the
+// backend ``app.schemas.intake.IntakeResultRead``
+// declaration; the response is read-only and never mutated
+// on the client.
+
+export type WorkspaceKind = "github" | "uploaded_archive";
+export type WorkspaceState =
+  | "quarantined"
+  | "validating"
+  | "ready"
+  | "failed"
+  | "cleaned_up";
+
+export interface Workspace {
+  id: number;
+  scan_run_id: number;
+  workspace_key: string;
+  kind: WorkspaceKind;
+  state: WorkspaceState;
+  archive_filename: string | null;
+  archive_sha256: string | null;
+  archive_size: number;
+  file_count: number;
+  uncompressed_size: number;
+  failure_code: string | null;
+  failure_summary: string | null;
+  ready_at: string | null;
+  cleaned_up_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface IntakeResult {
+  repository: Repository;
+  scan: Scan;
+  workspace: Workspace;
+  intake_summary: Record<string, unknown>;
+}
+
 // ---- Scans ----
 
 export interface Scan {

@@ -17,6 +17,7 @@ import type {
   FindingSeverity,
   FindingStatus,
   HealthResponse,
+  IntakeResult,
   LicenceAssertion,
   ListComponentEvidenceSummaryFilters,
   OpenSSFCheck,
@@ -140,8 +141,28 @@ export const api = {
       typeof payload === "string" ? { canonical_url: payload } : payload;
     return apiClient.post<Repository>("/repositories", body);
   },
+  // v1.5 guided-intake endpoint. ``POST /repositories/github``
+  // accepts a public GitHub URL plus an optional ref and
+  // returns the full ``IntakeResultRead`` shape (repository,
+  // scan, workspace, summary). The frontend reads
+  // ``result.scan.id`` to navigate to the new scan detail
+  // page. The endpoint is the same one already used by the
+  // backend tests; the v1.5 page is a thin wrapper.
+  createRepositoryGithub: (payload: { canonical_url: string; requested_ref?: string }) =>
+    apiClient.post<IntakeResult>("/repositories/github", {
+      canonical_url: payload.canonical_url,
+      ...(payload.requested_ref ? { requested_ref: payload.requested_ref } : {}),
+    }),
+  // v1.5 guided-intake endpoint. ``POST /repositories/upload``
+  // accepts a ZIP file (multipart ``file`` field) and
+  // returns the full ``IntakeResultRead`` shape. The
+  // frontend reads ``result.scan.id`` to navigate to the
+  // new scan detail page. The method is the same backend
+  // route the older ``/repositories/upload`` page used;
+  // v1.5 reuses it as the upload half of the guided
+  // intake page.
   createRepositoryUpload: (file: File | Blob) =>
-    apiClient.upload<Repository>("/repositories/upload", file),
+    apiClient.upload<IntakeResult>("/repositories/upload", file),
 
   // ---- Scans ----
   listScansForRepository: (

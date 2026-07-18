@@ -33,10 +33,16 @@ The product is built around three guarantees:
 
 The repository is a **private portfolio-ready baseline**, not
 a production SaaS, not a hosted service, and not a CI vendor.
-The current milestone (`v1.4`) is a product-demo polish pass
-on top of `v1.3`; the application source tree is unchanged
-from `v1.3`. The v1.4 release adds an in-app reviewer flow at
-`/demo` (with a new `Demo` nav entry) and surfaces the demo
+The current milestone (`v1.5`) is a product-usability pass
+on top of `v1.4`. The v1.5 release adds a guided intake
+flow at `/analyze` (with a new `Analyze` nav entry) that
+wraps the existing intake APIs in two clearly separated
+methods: a public GitHub URL form and a `zip` source
+archive upload. The first-run scan-list empty state now
+offers two clear actions: `Analyze repository` (linking
+to `/analyze`) and `Open demo guide` (linking to `/demo`).
+The v1.4 release added an in-app reviewer flow at `/demo`
+(with a new `Demo` nav entry) that surfaces the demo
 dataset's nature, the five reviewer pages, the "what to look
 for" and "what not to claim" framings, and a short command
 reminder on a single read-only page. The v1.3 release added

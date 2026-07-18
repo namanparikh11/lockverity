@@ -13,13 +13,20 @@ screenshot checklist and manual capture instructions see
 
 ## Current version
 
-`v1.3` — Screenshot assets + private portfolio demo pack.
+`v1.5` — Guided intake / scan launch.
 
-The current milestone is a documentation and review-pack
-milestone. There is no product change from v1.2.1: no new
-providers, no new export standards, no new evidence
-contracts, no new API endpoints. The application source is
-the same v1.2.1 tree; v1.3 adds the demo-pack documentation.
+The current milestone is a product-usability milestone.
+The release adds an in-app `/analyze` page that wraps the
+existing intake APIs (`POST /api/v1/repositories/github`
+for a public GitHub URL and
+`POST /api/v1/repositories/upload` for a `zip` source
+archive). The page navigates to the new scan, polls
+status using the existing `usePolling` hook, and
+surfaces the bounded non-execution / archive-hostility
+wording. No new backend endpoints, no new providers, no
+new export standards, no new evidence contracts, no
+migration. The v1.4 release added the in-app `/demo`
+page and the `Demo` AppShell primary nav entry.
 
 ## How to run the demo
 
@@ -41,6 +48,18 @@ walkthrough: it lists the demo dataset's nature, the five
 links a reviewer should click, the "what to look for" and
 "what not to claim" framings, and a short command reminder.
 The same five URLs are listed below for direct navigation.
+
+The v1.5 release adds **`http://127.0.0.1:5173/analyze`**
+as a guided intake page that wraps the existing intake
+APIs. Reviewers who want to register a public GitHub
+repository or upload a `zip` source archive on top of the
+seeded demo can use it. The page is read-only before any
+submission; submission calls
+`POST /api/v1/repositories/github` or
+`POST /api/v1/repositories/upload` and navigates to the
+newly-created scan. The synthetic-dataset notice on the
+scan list still applies to demo data; the analyze flow
+produces real evidence exports.
 
 The loader's success-path output already prints all five
 demo URLs and the cross-platform startup commands. The

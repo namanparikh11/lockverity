@@ -7,6 +7,7 @@ import {
   PlayCircle,
   ScanSearch,
   ShieldAlert,
+  Sparkles,
   X,
 } from "lucide-react";
 import { useEffect, useState } from "react";
@@ -23,6 +24,7 @@ interface NavItem {
 
 const PRIMARY_NAV: NavItem[] = [
   { to: "/", label: "Dashboard", icon: LayoutDashboard, end: true },
+  { to: "/analyze", label: "Analyze", icon: Sparkles },
   { to: "/demo", label: "Demo", icon: PlayCircle },
   { to: "/repositories", label: "Repositories", icon: Box },
   { to: "/scans", label: "Scans", icon: ScanSearch },

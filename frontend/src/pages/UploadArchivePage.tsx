@@ -52,9 +52,14 @@ export function UploadArchivePage() {
     setSubmitting(true);
     setError(null);
     try {
-      const repo = await api.createRepositoryUpload(file);
-      setSuccessId(repo.id);
-      window.setTimeout(() => navigate(`/repositories/${repo.id}`), 600);
+      // v1.5: the upload route now returns the full
+      // ``IntakeResultRead`` shape (repository + scan +
+      // workspace + summary). We navigate to the new
+      // scan detail page so the reviewer lands on the
+      // running scan, not a registry row.
+      const result = await api.createRepositoryUpload(file);
+      setSuccessId(result.scan.id);
+      window.setTimeout(() => navigate(`/scans/${result.scan.id}`), 600);
     } catch (err) {
       setError(err);
     } finally {
