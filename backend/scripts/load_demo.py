@@ -799,15 +799,34 @@ def main() -> int:
     relative = output.relative_to(_BACKEND_DIR) if output.is_relative_to(_BACKEND_DIR) else output
     relative_posix = relative.as_posix() if hasattr(relative, "as_posix") else str(relative)
     print(
-        f"demo database ready: {output}\n"
-        f"start the backend with:\n"
-        f'  $env:LOCKVERITY_DATABASE_URL="sqlite:///{relative_posix}"\n'
+        f"Lockverity demo database ready.\n"
+        f"  dataset: synthetic persisted evidence (no provider calls were made)\n"
+        f"  repository: https://github.com/example-org/lockverity-fixture\n"
+        f"  scan ids: 1 (completed, 6 components), "
+        f"2 (partial, 4 components), 3 (failed), 4 (cancelled)\n"
+        f"  path: {output}\n"
+        f"\n"
+        f"start the backend (PowerShell):\n"
+        f'  $env:LOCKVERITY_DATABASE_URL = "sqlite:///{relative_posix}"\n'
         f"  .venv\\Scripts\\python.exe -m uvicorn app.main:app --host 127.0.0.1 --port 8765\n"
-        f"then start the frontend with:\n"
-        f'  $env:VITE_API_PROXY_TARGET="http://127.0.0.1:8765"\n'
+        f"start the backend (POSIX shell):\n"
+        f'  export LOCKVERITY_DATABASE_URL="sqlite:///{relative_posix}"\n'
+        f"  .venv/bin/python -m uvicorn app.main:app --host 127.0.0.1 --port 8765\n"
+        f"start the frontend (PowerShell):\n"
+        f'  $env:VITE_API_PROXY_TARGET = "http://127.0.0.1:8765"\n'
         f"  npm run dev\n"
-        f"expected scan ids: 1 (completed, 6 components), "
-        f"2 (partial, 4 components), 3 (failed), 4 (cancelled)"
+        f"start the frontend (POSIX shell):\n"
+        f'  export VITE_API_PROXY_TARGET="http://127.0.0.1:8765"\n'
+        f"  npm run dev\n"
+        f"\n"
+        f"open the demo (frontend on 127.0.0.1:5173 unless overridden):\n"
+        f"  http://127.0.0.1:5173/                          scan list (4 scans)\n"
+        f"  http://127.0.0.1:5173/scans/1/dependencies      Dependency Explorer (6 components, evidence filters)\n"
+        f"  http://127.0.0.1:5173/scans/1/exports          Export Center (CycloneDX 1.7 + evidence report)\n"
+        f"  http://127.0.0.1:5173/scans/3/exports          bounded empty state (failed scan)\n"
+        f"  http://127.0.0.1:5173/about                    About page + product boundaries\n"
+        f"\n"
+        f"see docs/demo-walkthrough.md and docs/screenshots.md for the reviewer checklist."
     )
     return 0
 
