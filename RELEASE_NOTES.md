@@ -33,33 +33,29 @@ The product is built around three guarantees:
 
 The repository is a **private portfolio-ready baseline**, not
 a production SaaS, not a hosted service, and not a CI vendor.
-The current milestone (`v1.8`) is a **repository-history,
-rescan, and evidence-comparison** upgrade on top of `v1.7`.
-The v1.8 release upgrades the existing
-`/repositories/:repositoryId` page into a coherent scan-
-history workbench with URL-persisted status / trigger /
-page filters, bounded partial / failed / cancelled notices,
-and per-row cross-links to workbench / findings /
-dependencies / exports. The "Run another scan" action uses
-the v1.6.1 `POST /api/v1/repositories/{id}/rescan`
-endpoint and never the low-level scan-record creator; a
-`rescan_source_unavailable` error renders bounded guidance
-rather than a generic failure. A new
-`/repositories/:repositoryId/compare` page hosts the
-baseline / comparison selector with URL state
-(`?baseline=&comparison=`); only completed and partial
-scans are eligible, same-scan selection is blocked, and
-cross-repository ids are rejected as bounded errors. The
-selector defers to the existing v0.5 `ScanComparisonPage`
-with a "Repository → Compare" breadcrumb; the comparator
-itself is unchanged. v1.8 does not introduce a new
-comparison algorithm. The v0.5 removed-finding disclaimer
-and honesty rules carry over verbatim; the page never
-claims security improved, security worsened, risk
-increased, risk decreased, fixed, or remediated. v1.8
-intentionally reuses the v1.6.1 rescan endpoint, the
-v1.6 scan workbench, the v1.5 guided intake, and the
-v1.0 evidence report. There is:
+The current milestone (`v1.9`) is a **provider-health and
+operational-diagnostics** upgrade on top of `v1.8`. The
+v1.9 release adds a read-only `/diagnostics` page and a
+new additive `/api/v1/diagnostics/summary` endpoint. The
+page surfaces runtime reachability, executor state, per-
+provider persisted observations, recent partial / failed /
+cancelled scan issues, and aggregated persisted stage-state
+counts as five independent bounded cards. Cache state,
+evidence presence, and provider availability are kept as
+separate fields and are never collapsed into a single
+verdict. The in-process executor does not persist
+heartbeats, so the page renders the explicit "Heartbeat
+not exposed by the current executor" notice rather than
+inventing a heartbeat from a wall-clock guess. The
+boundary notice is "Operational state is not security
+state; provider availability is not vulnerability
+absence." The endpoint never triggers an external
+provider request and never exposes secrets, tokens,
+environment values, connection strings, or local
+filesystem paths. v1.9 intentionally reuses the v1.7
+findings workbench, the v1.8 comparison workflow, the
+v1.6.1 rescan repair, the v1.6 scan workbench, the v1.5
+guided intake, and the v1.0 evidence report. There is:
 
 - **No multi-tenancy** and no authentication. A reviewer runs
   the application on their own laptop.

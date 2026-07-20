@@ -1,6 +1,6 @@
 # Lockverity — Private Portfolio Demo Pack
 
-This is the v1.8 portfolio demo pack. It is a one-page
+This is the v1.9 portfolio demo pack. It is a one-page
 reviewer reference: the current version, the demo command
 flow, the screenshot list, the 60-second demo script, the
 "what to say" + "what not to claim" framing, and the current
@@ -13,36 +13,30 @@ screenshot checklist and manual capture instructions see
 
 ## Current version
 
-`v1.8` — Repository history, rescan, and evidence
-comparison.
+`v1.9` — Provider health and operational diagnostics.
 
-The current milestone is a coherent repository lifecycle
-upgrade. The `/repositories/:repositoryId` page becomes a
-scan-history workbench with URL-persisted status / trigger /
-page filters, bounded partial / failed / cancelled notices,
-and per-row cross-links to workbench / findings /
-dependencies / exports. The "Run another scan" action uses
-the v1.6.1 workspace-preserving rescan endpoint
-(`POST /repositories/{id}/rescan`) and never the low-level
-scan-record creator; a `rescan_source_unavailable` error
-renders bounded guidance rather than a generic failure. A
-new `/repositories/:repositoryId/compare` page hosts the
-baseline / comparison selector with URL state
-(`?baseline=&comparison=`); only completed and partial scans
-are eligible, same-scan selection is blocked, and
-cross-repository ids are rejected as bounded errors. The
-selector defers to the existing v0.5 `ScanComparisonPage`
-with a "Repository → Compare" breadcrumb; the comparator
-itself is unchanged. v1.8 does not introduce a new
-comparison algorithm. The v0.5 removed-finding disclaimer
-and honesty rules carry over verbatim; the page never
-claims security improved, security worsened, risk
-increased, risk decreased, fixed, or remediated. The v1.7
-findings workbench, the v1.6 scan workbench, the v1.6.1
-workspace-preserving rescan repair, the v1.5 guided
-intake, and the v1.0 evidence report remain in place. No
-new providers, no new export standards, no new evidence
-contracts, no migration.
+The current milestone adds a read-only `/diagnostics` page
+and a new additive `/api/v1/diagnostics/summary` endpoint.
+The page surfaces runtime reachability, executor state,
+per-provider persisted observations, recent partial /
+failed / cancelled scan issues, and aggregated persisted
+stage-state counts as five independent bounded cards.
+Cache state, evidence presence, and provider availability
+are kept as separate fields and are never collapsed into
+a single verdict. The in-process executor does not persist
+heartbeats, so the page renders the explicit "Heartbeat
+not exposed by the current executor" notice rather than
+inventing a heartbeat from a wall-clock guess. The
+endpoint never triggers an external provider request and
+never exposes secrets, tokens, environment values,
+connection strings, or local filesystem paths. The page
+boundary notice is "Operational state is not security
+state; provider availability is not vulnerability absence."
+The v1.8 repository history + comparison, the v1.7 findings
+workbench, the v1.6.1 rescan repair, the v1.6 scan
+workbench, the v1.5 guided intake, and the v1.0 evidence
+report remain in place. No new providers, no new export
+standards, no new evidence contracts, no migration.
 
 ## How to run the demo
 
@@ -178,13 +172,20 @@ section.
    "no longer observed", never as "fixed" or
    "remediated". Click `Download`. The browser saves
    `lockverity-scan-1.cdx.json`.
-6. **0:50 – 1:00.** Click `Show report summary` on the
-   Evidence report card. *Say*: "The v1.0 evidence report
-   has seven sections plus a bounded disclaimer: not a
-   security verdict, not a certification, not a compliance
-   pass-or-fail." End on the About page. The failed scan
-   (`http://127.0.0.1:5173/scans/3/exports`) is referenced
-   if the reviewer asks about failed-state honesty.
+6. **0:50 – 1:00.** Open
+   `http://127.0.0.1:5173/diagnostics`. *Say*: "The v1.9
+   operational diagnostics page. The application and
+   executor cards show what the backend can actually
+   answer; the in-process executor does not persist
+   heartbeats, so the heartbeat field shows the
+   explicit 'Heartbeat not exposed' notice. The provider
+   table keeps cache state, evidence presence, and
+   provider availability as separate fields — never
+   collapsed into a single verdict. The recent-issue
+   list is bounded to 25 partial / failed / cancelled
+   scans. Operational state is not security state;
+   provider availability is not vulnerability absence."
+   End on the About page.
 
 The script is intentionally short and bounded. If a
 reviewer asks for a deep dive, switch to the full
@@ -216,6 +217,14 @@ reviewer asks for a deep dive, switch to the full
   added findings do not automatically mean risk
   increased; removed findings do not automatically mean
   remediation occurred."
+- "The v1.9 operational diagnostics page is read-only.
+  Operational state is not security state; provider
+  availability is not vulnerability absence. The
+  endpoint never triggers an external provider request
+  and never exposes secrets, tokens, environment
+  values, connection strings, or local filesystem paths.
+  Lockverity does not claim uptime, SLA, reliability,
+  compliance, or production readiness."
 
 ## What not to claim
 
