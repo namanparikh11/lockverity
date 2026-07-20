@@ -6,6 +6,14 @@ captures the v2.0 contract: a coherent, tested workflow that
 covers every v0.5–v1.9 surface, with a single deterministic
 verification entry point.
 
+The v2.0.1 acceptance-repair pass preserves the v2.0 contract
+verbatim; v2.0.1 ships a single defect fix (the v1.8
+per-repository scan-history filter is now actually wired up
+through the route, the service, and the repository) and the
+regression tests that pin it. The v2.0.1 contract is identical
+to the v2.0 contract documented here; the v2.0.1 changelog
+entry is the single source of truth for the patch itself.
+
 The checklist is intentionally short. Anything that depends
 on a secret, a remote service, a destructive cleanup, or a
 production deployment belongs in a separate deployment runbook

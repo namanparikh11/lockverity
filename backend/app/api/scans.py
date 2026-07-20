@@ -213,12 +213,31 @@ def list_scans_for_repository(
     repository_id: int,
     session: DBSession,
     page_params: PageParamsDep,
+    status_filter: ScanStatus | None = Query(
+        default=None,
+        alias="status",
+        description="Filter by scan status. Invalid values return 422.",
+    ),
+    trigger_filter: ScanTriggerType | None = Query(
+        default=None,
+        alias="trigger_type",
+        description="Filter by scan trigger type. Invalid values return 422.",
+    ),
 ) -> PaginatedScans:
+    """List scans for one repository with bounded filters.
+
+    The v1.8 page sent ``status`` and ``trigger_type`` as URL
+    parameters; v2.0.1 actually applies them at the route layer.
+    Invalid values are rejected by FastAPI's ``Query`` validator
+    before the request body reaches the service.
+    """
     items, total = scan_service.list_scans_for_repository(
         session,
         repository_id,
         page=page_params.page,
         page_size=page_params.page_size,
+        status=status_filter,
+        trigger_type=trigger_filter,
     )
     return PaginatedScans(
         items=[scan_to_read(item) for item in items],

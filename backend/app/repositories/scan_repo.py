@@ -40,21 +40,28 @@ def list_scans_for_repository(
     *,
     page: int,
     page_size: int,
+    status: ScanStatus | None = None,
+    trigger_type: ScanTriggerType | None = None,
 ) -> tuple[Sequence[ScanRun], int]:
+    """List scans for a single repository, paginated.
+
+    The v1.8 page added URL-persisted ``status`` and ``trigger_type``
+    filters; v2.0.1 actually wires them up at the data layer. The
+    filters are optional and are validated by the route's ``Query``
+    layer so unknown values never reach this function. ``None`` means
+    "no filter" and preserves the v1.7 ordering contract.
+    """
     if page < 1:
         raise ValueError("page must be >= 1")
     if page_size < 1:
         raise ValueError("page_size must be >= 1")
-    total = session.execute(
-        select(func.count()).select_from(ScanRun).where(ScanRun.repository_id == repository_id)
-    ).scalar_one()
-    stmt = (
-        select(ScanRun)
-        .where(ScanRun.repository_id == repository_id)
-        .order_by(ScanRun.id.desc())
-        .limit(page_size)
-        .offset((page - 1) * page_size)
-    )
+    base = select(ScanRun).where(ScanRun.repository_id == repository_id)
+    if status is not None:
+        base = base.where(ScanRun.status == status)
+    if trigger_type is not None:
+        base = base.where(ScanRun.trigger_type == trigger_type)
+    total = session.execute(select(func.count()).select_from(base.subquery())).scalar_one()
+    stmt = base.order_by(ScanRun.id.desc()).limit(page_size).offset((page - 1) * page_size)
     items = session.execute(stmt).scalars().all()
     return items, int(total or 0)
 

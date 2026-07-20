@@ -182,13 +182,24 @@ def list_scans_for_repository(
     *,
     page: int,
     page_size: int,
+    status: ScanStatus | None = None,
+    trigger_type: ScanTriggerType | None = None,
 ) -> tuple[Sequence[ScanRun], int]:
+    """List scans for one repository with optional bounded filters.
+
+    The v1.8 page accepts ``status`` and ``trigger_type`` URL
+    parameters; v2.0.1 actually applies them. Unknown values are
+    rejected by the route's ``Query`` layer, so this function only
+    sees valid enums or ``None``.
+    """
     repository_service.get_repository_or_404(session, repository_id)
     return scan_repo.list_scans_for_repository(
         session,
         repository_id,
         page=page,
         page_size=page_size,
+        status=status,
+        trigger_type=trigger_type,
     )
 
 

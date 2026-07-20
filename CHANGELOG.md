@@ -5,7 +5,51 @@ follow [Semantic Versioning](https://semver.org/). Lockverity is
 pre-1.0 in the sense that the public API may evolve; the
 underlying data model and Alembic migrations are stable.
 
-## v2.0.0 — Local-first release candidate (current)
+## v2.0.1 — Acceptance repair (current)
+
+A focused defect-repair release that ships one real defect fix
+discovered during the v2.0 acceptance gate. No new product
+feature, no new provider, no new export standard, no new
+evidence contract, no migration.
+
+- **Per-repository scan-history filter is now wired up.**
+  v2.0 shipped with the v1.8 URL-persisted status / trigger
+  filters on `GET /repositories/{id}/scans` documented but
+  silently ignored: the route signature only accepted
+  `page` / `page_size`, the `DataCompletenessNotice` and the
+  "No scans match the filters" empty state implied the filter
+  was working, and the table rendered every scan regardless of
+  the active filter. v2.0.1 accepts `status` and
+  `trigger_type` as `Query` parameters on the route (rejected
+  with a bounded 422 envelope for unknown values), forwards
+  them to `scan_service.list_scans_for_repository`, and the
+  service forwards them to `scan_repo.list_scans_for_repository`.
+  The repo layer adds the matching `WHERE` clauses before the
+  `ORDER BY id DESC LIMIT/OFFSET` and the `COUNT` is computed
+  against the filtered subquery. The result is the rendered
+  table now actually matches the URL state.
+- **7 new backend tests** in
+  `backend/tests/test_api_repository_scan_filter_v2_0_1.py`
+  cover the route accept/reject boundary, the combined-filter
+  AND semantics, the no-filter control, the unknown-value 422
+  envelope, and the service-to-repo kwargs forwarding.
+- **5 new frontend tests** in
+  `frontend/src/__tests__/repository_v2_0_1.test.tsx` use a
+  filter-sensitive mock to assert the rendered table contains
+  only the rows the API returned, including the
+  "No scans match the filters" empty state when the filter
+  has no matches. The v1.8 test only checked the request URL,
+  not the rendered table.
+- **Version.** Bumped `__version__` to `2.0.1`. The frontend
+  `version_about` test mock now expects `2.0.1`.
+- **Boundary preservation.** No new feature, no new endpoint,
+  no new persisted field, no new export, no new
+  organisation, no new provider, no migration, no global
+  Git config change, no remote URL change, no destructive
+  action, no production deployment. The release is a
+  small, obvious correctness repair on the v2.0 surface.
+
+## v2.0.0 — Local-first release candidate
 
 A non-feature release candidate. The v2.0 contract bundles
 the v0.5–v1.9 surface area under a single bounded

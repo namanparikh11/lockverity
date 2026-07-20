@@ -463,46 +463,44 @@ npm test -- --run src/__tests__/evidence_report_v1_0.test.tsx  # v1.0 evidence r
 
 ## Current milestone
 
-**v2.0 — Local-first release candidate.** A
-non-feature release that bundles the v0.5–v1.9
-surface area under a single bounded
-release-validation script and ships two defect
-fixes uncovered during the v1.9 audit: (1) the
-v1.8 rescan error-envelope mapping
+**v2.0.1 — Acceptance repair.** A focused
+defect-repair release that ships one real
+defect discovered during the v2.0 acceptance
+gate. v2.0.1 does not introduce a new feature;
+it repairs the v1.8 URL-persisted status /
+trigger filter on
+`GET /repositories/{id}/scans`, which v2.0
+shipped documented but silently ignored. The
+v1.8 frontend page rendered a `DataCompletenessNotice`
+and an empty state that implied the filter
+worked, but the table rendered every scan
+regardless of the URL state. v2.0.1 accepts
+`status` and `trigger_type` as `Query`
+parameters on the route, rejects unknown values
+with the bounded 422 envelope, and forwards
+them through the service and the repository so
+the rendered table now matches the active
+filter. The v1.0–v1.9 surfaces are unchanged.
+The v2.0 release-validation script remains the
+canonical verification entry point. Version
+bumped to `2.0.1`.
+
+`v2.0` was the non-feature local-first release
+candidate. v2.0 bundles the v0.5–v1.9 surface
+area under a single bounded release-validation
+script and ships two defect fixes uncovered
+during the v1.9 audit: (1) the v1.8 rescan
+error-envelope mapping
 (`backend/app/api/scans.py`) is widened so any
 `github_*` code from the rescan service maps to
 `PROVIDER_UNAVAILABLE` (HTTP 502) instead of
 `RESCAN_SOURCE_UNAVAILABLE` (HTTP 422); (2) the
 dead `executor_metadata_snapshot` function in
 `backend/app/services/diagnostics_service.py`
-is removed (the service composes its summary
-from the live section builders only). v2.0 also
-adds `backend/scripts/verify_release.py` — a
-single argv-only entry point that runs the
-documented 10-step plan in order: backend
-pytest, Ruff check, Ruff format check, pip
-check, frontend tests, frontend typecheck,
-frontend lint, frontend build,
-`npm audit --omit=dev`, and full `npm audit`.
-The plan exits non-zero immediately on the
-first failed step and prints a concise
-per-step summary; the step plan is the single
-source of truth for the release verification
-command. v2.0 ships
-[`docs/release-checklist.md`](docs/release-checklist.md)
-with the operator-facing checklist, the
-prerequisites, the full verification command,
-the core security boundaries, the
-release-validation step plan, the known
-limitations, and what v2.0 does not claim.
-The supported review workflow is unchanged from
-v1.9. v2.0 is explicitly not a production SaaS,
-not a hosted service, not a CI vendor, and not
-a universal security / risk / health / quality
-score. No new providers, no new export
-standards, no new evidence contracts, no new
-API endpoints, no migration. Version bumped to
-`2.0.0`.
+is removed. v2.0 also adds
+`backend/scripts/verify_release.py` — a single
+argv-only entry point that runs the documented
+10-step plan in order.
 
 `v1.9` was the provider-health and operational-
 diagnostics upgrade. A read-only upgrade that
@@ -644,7 +642,7 @@ No new features, no new providers, no new export standards.
 and a lazy JSON preview endpoint. No new providers, no new
 export standards.
 
-## What v2.0 does not include
+## What v2.0.1 does not include
 
 Planned for later milestones, not implemented today:
 
@@ -657,7 +655,7 @@ Planned for later milestones, not implemented today:
   `Finding.status` enum (open / resolved / accepted /
   suppressed) is read-only in v1.7; the UI exposes the
   value but does not let an operator mutate it. v1.8
-  preserves this read-only contract. v2.0 does not
+  preserves this read-only contract. v2.0.1 does not
   change this contract.
 - Continuous / scheduled scans. v1.5 scans are explicit
   operator actions through the `/analyze` page or the
@@ -666,9 +664,9 @@ Planned for later milestones, not implemented today:
   Retry-as-new-scan (now backed by
   `POST /repositories/{id}/rescan`). v1.8's "Run
   another scan" action uses the same v1.6.1
-  workspace-preserving rescan endpoint. v2.0 does not
+  workspace-preserving rescan endpoint. v2.0.1 does not
   add scheduling, cron, or background polling.
-- Private GitHub repository analysis (v2.0 is public-only;
+- Private GitHub repository analysis (v2.0.1 is public-only;
   the `LOCKVERITY_GITHUB_TOKEN` environment variable is
   honoured for public rate limits but private endpoints
   are out of scope).
@@ -691,16 +689,16 @@ Planned for later milestones, not implemented today:
   the API. The live demo is the canonical evidence.
 - A universal security, risk, health, quality, confidence,
   uptime, reliability, SLA, compliance, or
-  production-readiness score. v2.0 is explicitly not a
+  production-readiness score. v2.0.1 is explicitly not a
   universal scoring system. The diagnostics page presents
   five independent bounded cards and the boundary notice
   "Operational state is not security state; provider
   availability is not vulnerability absence."
 - New providers, new export standards, new evidence
   contracts, new API endpoints, or a database migration.
-  v2.0 is a non-feature release candidate; it does not
-  add product surface, only defect fixes and a bounded
-  release-validation script.
+  v2.0.1 is a non-feature acceptance repair; it does not
+  add product surface, only the per-repo scan-history
+  filter fix and the regression tests that pin it.
 
 ## Provider-honesty policy
 
