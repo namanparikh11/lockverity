@@ -1,6 +1,6 @@
-# Lockverity — Private Portfolio Demo Pack
+# Lockverity — Local-First Release Candidate Demo Pack
 
-This is the v1.9 portfolio demo pack. It is a one-page
+This is the v2.0 portfolio demo pack. It is a one-page
 reviewer reference: the current version, the demo command
 flow, the screenshot list, the 60-second demo script, the
 "what to say" + "what not to claim" framing, and the current
@@ -9,34 +9,35 @@ public / private recommendation.
 For the full reviewer walkthrough see
 [`docs/demo-walkthrough.md`](demo-walkthrough.md). For the
 screenshot checklist and manual capture instructions see
-[`docs/screenshots.md`](screenshots.md).
+[`docs/screenshots.md`](screenshots.md). For the
+release-validation checklist see
+[`docs/release-checklist.md`](release-checklist.md).
 
 ## Current version
 
-`v1.9` — Provider health and operational diagnostics.
+`v2.0` — Local-first release candidate.
 
-The current milestone adds a read-only `/diagnostics` page
-and a new additive `/api/v1/diagnostics/summary` endpoint.
-The page surfaces runtime reachability, executor state,
-per-provider persisted observations, recent partial /
-failed / cancelled scan issues, and aggregated persisted
-stage-state counts as five independent bounded cards.
-Cache state, evidence presence, and provider availability
-are kept as separate fields and are never collapsed into
-a single verdict. The in-process executor does not persist
-heartbeats, so the page renders the explicit "Heartbeat
-not exposed by the current executor" notice rather than
-inventing a heartbeat from a wall-clock guess. The
-endpoint never triggers an external provider request and
-never exposes secrets, tokens, environment values,
-connection strings, or local filesystem paths. The page
-boundary notice is "Operational state is not security
-state; provider availability is not vulnerability absence."
-The v1.8 repository history + comparison, the v1.7 findings
-workbench, the v1.6.1 rescan repair, the v1.6 scan
-workbench, the v1.5 guided intake, and the v1.0 evidence
-report remain in place. No new providers, no new export
-standards, no new evidence contracts, no migration.
+The current milestone is a non-feature release candidate
+that bundles the v0.5–v1.9 surface area under a single
+bounded release-validation script. v2.0 ships two defect
+fixes uncovered during the v1.9 audit (the rescan
+error-envelope mapping in
+`backend/app/api/scans.py` and the dead
+`executor_metadata_snapshot` function in
+`backend/app/services/diagnostics_service.py`) plus a new
+`backend/scripts/verify_release.py` that runs the
+documented 10-step plan in order. The version bump
+signals that the prior milestones have been audited,
+regression-tested, and verified end-to-end on a single
+command. The supported review workflow is unchanged from
+v1.9. The v1.9 provider-health and operational-diagnostics
+page, the v1.8 repository history and comparison
+workflow, the v1.7 findings workbench, the v1.6.1
+workspace-preserving rescan repair, the v1.6 scan
+workbench, the v1.5 guided intake, and the v1.0
+Markdown evidence report remain in place. No new
+providers, no new export standards, no new evidence
+contracts, no new API endpoints, no migration.
 
 ## How to run the demo
 
@@ -277,7 +278,7 @@ The demo deliberately does not show:
   reach an external provider.
 - A **multi-tenant deployment.** The application has no
   authentication, no per-tenant data, and no hosted
-  control plane. See "What v1.2.1 does not include" in
+  control plane. See "What v2.0 does not include" in
   the About page or `RELEASE_NOTES.md`.
 - A **vulnerability verdict.** The CycloneDX 1.7 export
   and the Markdown report are evidence exports, not

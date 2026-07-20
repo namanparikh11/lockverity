@@ -29,7 +29,6 @@ from a wall-clock guess.
 from __future__ import annotations
 
 from collections.abc import Sequence
-from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -343,27 +342,7 @@ def _build_stage_summary(session: Session) -> list[DiagnosticsStageSummary]:
     return out
 
 
-def executor_metadata_snapshot() -> dict[str, Any]:
-    """Return a small, in-memory snapshot of the executor.
-
-    The endpoint uses this to surface
-    ``heartbeat_supported`` and ``details_available``
-    without a second route. The values are derived from
-    the executor's own ``name``; the in-process executor
-    does not persist heartbeats, so the field is
-    ``False`` and the page renders the explicit
-    "Heartbeat not exposed" notice.
-    """
-    settings = get_settings()
-    return {
-        "scan_worker_concurrency": settings.scan_worker_concurrency,
-        "scan_heartbeat_seconds": settings.scan_heartbeat_seconds,
-        "scan_heartbeat_timeout_seconds": settings.scan_heartbeat_timeout_seconds,
-    }
-
-
 __all__ = [
     "MAX_RECENT_SCAN_ISSUES",
     "build_summary",
-    "executor_metadata_snapshot",
 ]

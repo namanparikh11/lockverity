@@ -144,16 +144,29 @@ def rescan_repository(
     except _RescanError as exc:
         # v1.8: surface bounded materialisation errors to
         # the caller. The internal _RescanError carries a
-        # code (e.g. ``github_error``) and a redacted
-        # message. The route maps it to a stable envelope
-        # so the frontend renders honest guidance rather
-        # than a generic 500. The new scan row was
-        # persisted in a ``failed`` state by the service,
-        # so the audit trail is preserved.
+        # code (e.g. ``github_error``,
+        # ``github_not_found``, ``github_rate_limited``,
+        # ``github_unauthorized``) and a redacted message.
+        # The route maps it to a stable envelope so the
+        # frontend renders honest guidance rather than a
+        # generic 500. The new scan row was persisted in a
+        # ``failed`` state by the service, so the audit
+        # trail is preserved.
+        #
+        # v2.0: any ``github_*`` code is an upstream
+        # materialisation failure (PROVIDER_UNAVAILABLE);
+        # only codes that explicitly mean "the original
+        # source is gone" should map to
+        # RESCAN_SOURCE_UNAVAILABLE. Previously the route
+        # only matched the literal ``github_error`` string,
+        # which left ``github_not_found`` and friends
+        # mis-classified as a source-unavailable error.
+        if _is_provider_unavailable_code(exc.code):
+            envelope_code = ApiErrorCode.PROVIDER_UNAVAILABLE
+        else:
+            envelope_code = ApiErrorCode.RESCAN_SOURCE_UNAVAILABLE
         raise ApiError(
-            ApiErrorCode.PROVIDER_UNAVAILABLE
-            if exc.code == "github_error"
-            else ApiErrorCode.RESCAN_SOURCE_UNAVAILABLE,
+            envelope_code,
             exc.message,
             details={
                 "rescan_code": exc.code,
@@ -161,6 +174,34 @@ def rescan_repository(
             },
         ) from exc
     return scan_to_read(result.scan)
+
+
+def _is_provider_unavailable_code(code: str | None) -> bool:
+    """Return True if a rescan error code means an upstream provider failed.
+
+    The rescan service emits bounded codes for the two failure
+    modes it knows about:
+
+    - ``github_*`` (e.g. ``github_not_found``,
+      ``github_rate_limited``, ``github_unauthorized``,
+      ``github_invalid_response``, ``github_no_default_branch``)
+      mean an upstream provider call failed; the
+      materialisation could not run. These map to
+      :class:`PROVIDER_UNAVAILABLE`.
+    - Any other code (e.g. an explicit ``rescan_source_unavailable``
+      from the service, or a future non-GitHub rescan
+      implementation) means the original source is
+      irrecoverable for this repository. These map to
+      :class:`RESCAN_SOURCE_UNAVAILABLE`.
+
+    The function is conservative: an unknown code is treated as
+    a source problem so the frontend renders the bounded
+    "Rescan source is no longer available" copy rather than
+    an upstream outage.
+    """
+    if not code:
+        return False
+    return code.startswith("github_")
 
 
 @repository_scans.get(
