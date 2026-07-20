@@ -633,6 +633,76 @@ export interface ProviderHealthEntry {
   scans_with_observations: number;
 }
 
+// ---- v1.9 Operational diagnostics ----
+
+export type DiagnosticsDatabaseState = "available" | "unavailable" | "unknown";
+
+export type DiagnosticsExecutorState = "available" | "unavailable" | "unknown";
+
+export interface DiagnosticsApplication {
+  status: string;
+  version: string;
+  environment: string;
+  database: DiagnosticsDatabaseState;
+  generated_at: string;
+}
+
+export interface DiagnosticsExecutor {
+  state: DiagnosticsExecutorState;
+  implementation: string;
+  queued_scans: number;
+  running_scans: number;
+  last_heartbeat_at: string | null;
+  heartbeat_supported: boolean;
+  details_available: boolean;
+  notes: string[];
+}
+
+export interface DiagnosticsProvider {
+  provider: string;
+  last_observed_state: string;
+  configured_state: string;
+  last_attempt_at: string | null;
+  last_success_at: string | null;
+  cache_status: string | null;
+  evidence_present: boolean | null;
+  last_error_code: string | null;
+  last_error_summary: string | null;
+  source_scan_id: number | null;
+  source_observation_id: number | null;
+}
+
+export interface DiagnosticsRecentScanIssue {
+  scan_id: number;
+  repository_id: number;
+  status: "partial" | "failed" | "cancelled";
+  trigger_type: string | null;
+  failure_code: string | null;
+  failure_summary: string | null;
+  updated_at: string;
+  completed_at: string | null;
+  started_at: string | null;
+}
+
+export interface DiagnosticsStageSummary {
+  stage: string;
+  completed: number;
+  partial: number;
+  failed: number;
+  skipped: number;
+  running: number;
+  pending: number;
+}
+
+export interface DiagnosticsSummary {
+  application: DiagnosticsApplication;
+  executor: DiagnosticsExecutor;
+  providers: DiagnosticsProvider[];
+  recent_scan_issues: DiagnosticsRecentScanIssue[];
+  stage_summary: DiagnosticsStageSummary[];
+  generated_at: string;
+}
+
 // ---- Exports ----
 
 export type ExportFormat =

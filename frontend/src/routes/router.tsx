@@ -5,6 +5,7 @@ import { AboutPage } from "@/pages/AboutPage";
 import { AnalyzePage } from "@/pages/AnalyzePage";
 import { DashboardPage } from "@/pages/DashboardPage";
 import { DemoHomePage } from "@/pages/DemoHomePage";
+import { DiagnosticsPage } from "@/pages/DiagnosticsPage";
 import { DependencyExplorerPage } from "@/pages/DependencyExplorerPage";
 import { ExportCenterPage } from "@/pages/ExportCenterPage";
 import { FindingsPage } from "@/pages/FindingsPage";
@@ -92,6 +93,9 @@ export const router = createBrowserRouter([
 
       // Providers
       { path: "/providers", element: <ProviderHealthPage /> },
+
+      // v1.9 operational diagnostics
+      { path: "/diagnostics", element: <DiagnosticsPage /> },
 
       // Findings shortcut
       { path: "/findings", element: <Navigate to="/scans" replace /> },

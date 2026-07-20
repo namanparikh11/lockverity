@@ -1,4 +1,5 @@
 import {
+  Activity,
   Box,
   ClipboardList,
   Info,
@@ -29,6 +30,7 @@ const PRIMARY_NAV: NavItem[] = [
   { to: "/repositories", label: "Repositories", icon: Box },
   { to: "/scans", label: "Scans", icon: ScanSearch },
   { to: "/providers", label: "Providers", icon: ShieldAlert },
+  { to: "/diagnostics", label: "Diagnostics", icon: Activity },
   { to: "/about", label: "About", icon: Info },
 ];
 

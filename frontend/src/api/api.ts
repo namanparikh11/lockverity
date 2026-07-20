@@ -275,6 +275,20 @@ export const api = {
       "/provider-health"
     ),
 
+  // ---- v1.9 operational diagnostics ----
+  // Read-only summary of the application's runtime
+  // state, executor health, per-provider persisted
+  // observations, recent partial / failed /
+  // cancelled scans, and aggregated stage states.
+  // The endpoint never triggers an external provider
+  // request and never exposes secrets, tokens,
+  // environment values, connection strings, or
+  // local filesystem paths.
+  diagnosticsSummary: () =>
+    apiClient.get<import("@/api/types").DiagnosticsSummary>(
+      "/diagnostics/summary"
+    ),
+
   // ---- Components / dependencies ----
   listComponents: (scanId: number, filters: ListComponentsFilters = {}) =>
     apiClient.get<Paginated<Component>>(`/scans/${scanId}/components`, {

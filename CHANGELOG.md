@@ -5,7 +5,64 @@ follow [Semantic Versioning](https://semver.org/). Lockverity is
 pre-1.0 in the sense that the public API may evolve; the
 underlying data model and Alembic migrations are stable.
 
-## v1.8.0 — Repository history, rescan, and evidence comparison (current)
+## v1.9.0 — Provider health and operational diagnostics (current)
+
+- **Operational diagnostics page.** A new read-only
+  `/diagnostics` route surfaces runtime reachability,
+  executor state, per-provider persisted observations,
+  recent partial / failed / cancelled scan issues, and
+  aggregated persisted stage-state counts.
+- **`/api/v1/diagnostics/summary` endpoint.** A new
+  additive, read-only endpoint that composes the
+  bounded summary from persisted state plus the
+  existing `SELECT 1` database probe. The endpoint
+  never triggers an external provider request and
+  never exposes secrets, tokens, environment values,
+  connection strings, or local filesystem paths.
+- **Bounded provider diagnostics.** Per-provider rows
+  surface the most-recent observation with cache state,
+  evidence presence, last attempt, last success, and
+  bounded error code / summary as independent fields.
+  The page keeps cache state, evidence presence, and
+  provider availability separate and never collapses
+  them into a single verdict.
+- **Bounded recent-issue list.** At most 25 partial /
+  failed / cancelled scans are surfaced, ordered
+  newest-first. Completed scans are intentionally
+  excluded.
+- **Bounded stage aggregation.** One row per
+  `StageType` (the enum is fixed and small) with
+  completed / partial / failed / skipped / running /
+  pending counts. No percentage is invented; a zero
+  count is rendered as "No matching persisted stage
+  failures were found in the selected window" — never
+  as "All stages are healthy."
+- **Honest executor state.** The in-process executor
+  does not persist heartbeats, so the page renders
+  the explicit "Heartbeat not exposed by the current
+  executor" notice rather than inventing a heartbeat
+  from a wall-clock guess. Queued and running counts
+  come from the persisted `scan_jobs` table.
+- **Manual refresh only.** The page polls no faster
+  than user-driven refresh. The refresh button blocks
+  duplicate clicks through a synchronous `pendingRef`
+  guard and preserves the last known payload on
+  transient failure.
+- **Boundary notice.** The page renders an explicit
+  "Operational state is not security state" notice:
+  a reachable backend does not imply providers are
+  available; a provider unavailable does not imply a
+  vulnerability is absent; cached evidence is not
+  the same as live evidence; a successful provider
+  request does not prove a repository is safe; a
+  completed scan may still contain partial or
+  degraded provider evidence.
+- **No new providers, no new evidence contracts, no
+  new external integrations, no migration.** The
+  summary is composed from existing persisted
+  observations and the existing scan-jobs table.
+
+## v1.8.0 — Repository history, rescan, and evidence comparison
 
 - **Repository history workbench.** The
   `/repositories/:repositoryId` page is upgraded into a
