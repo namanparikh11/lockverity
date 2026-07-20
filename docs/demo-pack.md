@@ -1,6 +1,6 @@
 # Lockverity — Local-First Release Candidate Demo Pack
 
-This is the v2.0 portfolio demo pack. It is a one-page
+This is the v2.0.1 portfolio demo pack. It is a one-page
 reviewer reference: the current version, the demo command
 flow, the screenshot list, the 60-second demo script, the
 "what to say" + "what not to claim" framing, and the current
@@ -15,29 +15,27 @@ release-validation checklist see
 
 ## Current version
 
-`v2.0` — Local-first release candidate.
+`v2.0.1` — Acceptance repair.
 
-The current milestone is a non-feature release candidate
-that bundles the v0.5–v1.9 surface area under a single
-bounded release-validation script. v2.0 ships two defect
-fixes uncovered during the v1.9 audit (the rescan
-error-envelope mapping in
-`backend/app/api/scans.py` and the dead
-`executor_metadata_snapshot` function in
-`backend/app/services/diagnostics_service.py`) plus a new
-`backend/scripts/verify_release.py` that runs the
-documented 10-step plan in order. The version bump
-signals that the prior milestones have been audited,
-regression-tested, and verified end-to-end on a single
-command. The supported review workflow is unchanged from
-v1.9. The v1.9 provider-health and operational-diagnostics
-page, the v1.8 repository history and comparison
-workflow, the v1.7 findings workbench, the v1.6.1
-workspace-preserving rescan repair, the v1.6 scan
-workbench, the v1.5 guided intake, and the v1.0
-Markdown evidence report remain in place. No new
-providers, no new export standards, no new evidence
-contracts, no new API endpoints, no migration.
+The current milestone is a focused defect-repair release
+that ships one real defect fix discovered during the v2.0
+acceptance gate: the v1.8 URL-persisted status / trigger
+filter on `GET /repositories/{id}/scans` was documented
+but silently ignored in v2.0. v2.0.1 accepts the query
+params, rejects unknown values with a bounded 422 envelope,
+and forwards them through the service and the repository
+so the rendered scan-history table now actually matches
+the URL state. The supported review workflow is unchanged
+from v2.0. The v2.0 release-validation script and the
+v2.0.1 acceptance flow are documented in
+[`docs/release-checklist.md`](release-checklist.md). The
+v1.9 provider-health and operational-diagnostics page, the
+v1.8 repository history and comparison workflow, the
+v1.7 findings workbench, the v1.6.1 workspace-preserving
+rescan repair, the v1.6 scan workbench, the v1.5 guided
+intake, and the v1.0 Markdown evidence report remain in
+place. No new providers, no new export standards, no new
+evidence contracts, no new API endpoints, no migration.
 
 ## How to run the demo
 
@@ -278,7 +276,7 @@ The demo deliberately does not show:
   reach an external provider.
 - A **multi-tenant deployment.** The application has no
   authentication, no per-tenant data, and no hosted
-  control plane. See "What v2.0 does not include" in
+  control plane. See "What v2.0.1 does not include" in
   the About page or `RELEASE_NOTES.md`.
 - A **vulnerability verdict.** The CycloneDX 1.7 export
   and the Markdown report are evidence exports, not

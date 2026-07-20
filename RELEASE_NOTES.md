@@ -33,18 +33,17 @@ The product is built around three guarantees:
 
 The repository is a **local-first release candidate**,
 not a production SaaS, not a hosted service, and not a
-CI vendor. The current milestone (`v2.0`) is a
-**non-feature release candidate** that bundles the
-v0.5–v1.9 surface area under a single bounded
-release-validation script. v2.0 does not add a new
-product feature or a new provider; it ships two
-defect fixes uncovered during the v1.9 audit and a
-new `backend/scripts/verify_release.py` that runs the
-documented 10-step plan in order. The version bump
-signals that the prior milestones have been audited,
-regression-tested, and verified end-to-end on a
-single command. The v2.0 release-validation contract
-is documented in [`docs/release-checklist.md`](docs/release-checklist.md).
+CI vendor. The current milestone (`v2.0.1`) is a focused
+acceptance-repair pass on top of `v2.0`. v2.0.1 does not
+add a new product feature or a new provider; it ships
+one real defect fix discovered during the v2.0
+acceptance gate (the per-repository scan-history filter
+on `GET /repositories/{id}/scans` was silently
+ignored) and the regression tests that pin the fix.
+The v2.0.1 contract preserves the v2.0 boundary
+preservation in full. The v2.0 release-validation
+script and the v2.0.1 acceptance flow are documented
+in [`docs/release-checklist.md`](docs/release-checklist.md).
 The v2.0 surface area includes the v1.9
 provider-health and operational-diagnostics page,
 the v1.8 repository history and comparison workflow,
