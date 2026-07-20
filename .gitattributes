@@ -1,0 +1,17 @@
+# Lockverity line-ending policy.
+#
+# v2.0.3: enforce LF line endings for all Python source. The
+# release-validation script (``cd backend; .venv/Scripts/python.exe
+# scripts/verify_release.py``) runs ``python -m ruff format --check
+# app tests scripts``; ruff's format check is sensitive to CRLF
+# line endings. Without this attribute file, a Windows clone with
+# the default ``core.autocrlf=true`` checks Python files out with
+# CRLF endings, and the format check fails with "196 files would
+# be reformatted". Pinning ``*.py text eol=lf`` keeps the
+# one-command verification reproducible across platforms.
+#
+# This file also pins the newline handling for the rest of the
+# tracked tree: shell scripts and TOML configs stay LF; Markdown
+# and TypeScript stay LF (Windows notepad-friendly CR would also
+# work, but the canonical Lockverity form is LF).
+* text=auto eol=lf

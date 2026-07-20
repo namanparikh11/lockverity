@@ -5,7 +5,54 @@ follow [Semantic Versioning](https://semver.org/). Lockverity is
 pre-1.0 in the sense that the public API may evolve; the
 underlying data model and Alembic migrations are stable.
 
-## v2.0.2 — Ecosystem compatibility repair (current)
+## v2.0.3 — First-run reproducibility repair (current)
+
+A focused defect-repair release that ships one real
+release-blocking defect discovered during the v2.0.2
+clean-state acceptance gate. The one-command
+release-verification script documented in
+[`docs/release-checklist.md`](docs/release-checklist.md) and
+[`README.md`](README.md) failed on a fresh clean checkout.
+No new product feature, no new provider, no new
+export standard, no new evidence contract, no migration.
+
+- **Release-validation script now works on a clean
+  checkout.** v2.0.2 shipped with
+  ``"ruff>=0.4.0"`` in the ``[project.optional-dependencies.dev]``
+  extras of `backend/pyproject.toml`. A clean
+  ``pip install -e ".[dev]"`` resolved the latest ruff
+  release, which produces a different format than the one
+  the committed files were last formatted against. The
+  ``scripts/verify_release.py`` script runs
+  ``python -m ruff format --check app tests scripts`` and
+  failed with
+  ``196 files would be reformatted``. The defect was
+  reproducible on a clean clone from
+  ``ed07e2f100248f9ca8689e7d7f103b78b71d3e69`` (the
+  v2.0.2 release commit). v2.0.3 pins
+  ``"ruff==0.15.21"`` in the dev extras — the exact
+  patch that produced the committed format. The one-command
+  verification now passes on a clean checkout.
+- **3 new backend tests** in
+  ``backend/tests/test_pyproject_ruff_pin_v2_0_3.py`` cover:
+  the ruff spec in the dev extras is an exact
+  ``==``-pinned semver (not a range that would silently
+  regress); the dev extras still contain ``pytest``,
+  ``ruff``, and ``mypy``; and
+  ``scripts/verify_release.py`` invokes
+  ``ruff format --check``.
+- **Version.** Bumped ``__version__`` to ``2.0.3``. The
+  frontend ``version_about`` test mock now expects
+  ``2.0.3``.
+- **Boundary preservation.** No new feature, no new
+  endpoint, no new persisted field, no new export, no
+  new organisation, no new provider, no migration, no
+  global Git config change, no remote URL change, no
+  destructive action, no production deployment. The
+  release is a small, obvious correctness repair on the
+  v2.0.2 surface.
+
+## v2.0.2 — Ecosystem compatibility repair
 
 A focused defect-repair release that ships one real defect
 discovered during the v2.0.1 ecosystem-and-scale acceptance

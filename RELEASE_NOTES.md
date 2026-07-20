@@ -33,19 +33,21 @@ The product is built around three guarantees:
 
 The repository is a **local-first release candidate**,
 not a production SaaS, not a hosted service, and not a
-CI vendor. The current milestone (`v2.0.2`) is a focused
-ecosystem-compatibility repair on top of `v2.0.1`. v2.0.2
-does not add a new product feature or a new provider; it
-ships one real defect fix discovered during the v2.0.1
-ecosystem-and-scale acceptance gate (the orchestrator's
-nested-manifest discovery in
-`backend/app/services/orchestrator_service.py:_discover_manifest_files`
-was a full-path equality check against a basename-keyed
-dict, so every nested manifest in a monorepository was
-silently dropped) and the regression tests that pin the
-fix. The v2.0.2 contract preserves the v2.0.1 boundary
-preservation in full. The v2.0 release-validation script
-and the v2.0.1 acceptance flow are documented in
+CI vendor. The current milestone (`v2.0.3`) is a focused
+first-run reproducibility repair on top of `v2.0.2`.
+v2.0.3 does not add a new product feature or a new
+provider; it ships one real release-blocking defect
+discovered during the v2.0.2 clean-state acceptance
+gate (the documented one-command release-verification
+script failed on a fresh clean checkout because
+`backend/pyproject.toml` declared ``ruff>=0.4.0`` and
+a clean ``pip install -e ".[dev]"`` resolved the latest
+ruff, which produced a different format than the one
+the committed files were last formatted against) and the
+regression tests that pin the fix. The v2.0.3 contract
+preserves the v2.0.2 boundary preservation in full. The
+v2.0 release-validation script and the v2.0.1/v2.0.2
+acceptance flows are documented in
 [`docs/release-checklist.md`](docs/release-checklist.md).
 The v2.0 surface area includes the v1.9
 provider-health and operational-diagnostics page,

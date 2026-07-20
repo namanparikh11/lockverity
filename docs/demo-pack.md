@@ -1,6 +1,6 @@
 # Lockverity — Local-First Release Candidate Demo Pack
 
-This is the v2.0.2 portfolio demo pack. It is a one-page
+This is the v2.0.3 portfolio demo pack. It is a one-page
 reviewer reference: the current version, the demo command
 flow, the screenshot list, the 60-second demo script, the
 "what to say" + "what not to claim" framing, and the current
@@ -15,23 +15,24 @@ release-validation checklist see
 
 ## Current version
 
-`v2.0.2` — Ecosystem compatibility repair.
+`v2.0.3` — First-run reproducibility repair.
 
 The current milestone is a focused defect-repair release
-that ships one real defect fix discovered during the v2.0.1
-ecosystem-and-scale acceptance gate: the orchestrator's
-nested-manifest discovery in
-`backend/app/services/orchestrator_service.py:_discover_manifest_files`
-was a full-path equality check against a basename-keyed
-dict, so every nested manifest in a monorepository was
-silently dropped, and the analysis returned zero
-components for any nested-only ZIP. v2.0.2 changes the
-membership check to the same basename lookup the
-scanner uses, so the v0.3 pipeline now records one
-`Manifest` row per nested path and the parser stage
-parses them. The supported review workflow is unchanged
-from v2.0.1. The v2.0 release-validation script and the
-v2.0.1 acceptance flow are documented in
+that ships one real release-blocking defect discovered
+during the v2.0.2 clean-state acceptance gate: the
+documented one-command release-verification script
+(`cd backend; .venv/Scripts/python.exe
+scripts/verify_release.py`) failed on a fresh clean
+checkout because `backend/pyproject.toml` declared
+`"ruff>=0.4.0"` and a clean `pip install -e ".[dev]"`
+resolved the latest ruff, which produced a different
+format than the committed files. v2.0.3 pins
+`"ruff==0.15.21"` in the dev extras (the exact patch
+that produced the committed format), so the
+one-command verification now passes on a fresh
+checkout. The supported review workflow is unchanged
+from v2.0.2. The v2.0 release-validation script and the
+v2.0.1 / v2.0.2 acceptance flows are documented in
 [`docs/release-checklist.md`](release-checklist.md). The
 v1.9 provider-health and operational-diagnostics page, the
 v1.8 repository history and comparison workflow, the
@@ -280,7 +281,7 @@ The demo deliberately does not show:
   reach an external provider.
 - A **multi-tenant deployment.** The application has no
   authentication, no per-tenant data, and no hosted
-  control plane. See "What v2.0.2 does not include" in
+  control plane. See "What v2.0.3 does not include" in
   the About page or `RELEASE_NOTES.md`.
 - A **vulnerability verdict.** The CycloneDX 1.7 export
   and the Markdown report are evidence exports, not
