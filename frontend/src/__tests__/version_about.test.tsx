@@ -30,7 +30,7 @@ describe("version consistency", () => {
       new Response(
         JSON.stringify({
           name: "Lockverity",
-          version: "2.0.1",
+          version: "2.0.2",
           tagline: "Evidence-first software supply-chain assurance",
           environment: "test",
           api_prefix: "/api/v1",
@@ -52,7 +52,7 @@ describe("version consistency", () => {
       </MemoryRouter>
     );
     await waitFor(() => {
-      expect(screen.getByText("v2.0.1")).toBeInTheDocument();
+      expect(screen.getByText("v2.0.2")).toBeInTheDocument();
     });
   });
 

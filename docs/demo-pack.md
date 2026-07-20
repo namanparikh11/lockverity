@@ -1,6 +1,6 @@
 # Lockverity — Local-First Release Candidate Demo Pack
 
-This is the v2.0.1 portfolio demo pack. It is a one-page
+This is the v2.0.2 portfolio demo pack. It is a one-page
 reviewer reference: the current version, the demo command
 flow, the screenshot list, the 60-second demo script, the
 "what to say" + "what not to claim" framing, and the current
@@ -15,18 +15,22 @@ release-validation checklist see
 
 ## Current version
 
-`v2.0.1` — Acceptance repair.
+`v2.0.2` — Ecosystem compatibility repair.
 
 The current milestone is a focused defect-repair release
-that ships one real defect fix discovered during the v2.0
-acceptance gate: the v1.8 URL-persisted status / trigger
-filter on `GET /repositories/{id}/scans` was documented
-but silently ignored in v2.0. v2.0.1 accepts the query
-params, rejects unknown values with a bounded 422 envelope,
-and forwards them through the service and the repository
-so the rendered scan-history table now actually matches
-the URL state. The supported review workflow is unchanged
-from v2.0. The v2.0 release-validation script and the
+that ships one real defect fix discovered during the v2.0.1
+ecosystem-and-scale acceptance gate: the orchestrator's
+nested-manifest discovery in
+`backend/app/services/orchestrator_service.py:_discover_manifest_files`
+was a full-path equality check against a basename-keyed
+dict, so every nested manifest in a monorepository was
+silently dropped, and the analysis returned zero
+components for any nested-only ZIP. v2.0.2 changes the
+membership check to the same basename lookup the
+scanner uses, so the v0.3 pipeline now records one
+`Manifest` row per nested path and the parser stage
+parses them. The supported review workflow is unchanged
+from v2.0.1. The v2.0 release-validation script and the
 v2.0.1 acceptance flow are documented in
 [`docs/release-checklist.md`](release-checklist.md). The
 v1.9 provider-health and operational-diagnostics page, the
@@ -276,7 +280,7 @@ The demo deliberately does not show:
   reach an external provider.
 - A **multi-tenant deployment.** The application has no
   authentication, no per-tenant data, and no hosted
-  control plane. See "What v2.0.1 does not include" in
+  control plane. See "What v2.0.2 does not include" in
   the About page or `RELEASE_NOTES.md`.
 - A **vulnerability verdict.** The CycloneDX 1.7 export
   and the Markdown report are evidence exports, not
