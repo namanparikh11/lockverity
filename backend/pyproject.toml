@@ -61,7 +61,16 @@ dev = [
     "pytest>=8.0.0",
     "pytest-asyncio>=0.23.0",
     "pytest-cov>=4.1.0",
-    "ruff>=0.4.0",
+    # v2.0.3: pin ruff to the exact patch that produced the
+    # committed format. ``scripts/verify_release.py`` runs
+    # ``python -m ruff format --check`` over ``app tests scripts``.
+    # A fresh ``pip install -e ".[dev]"`` on a clean checkout
+    # without this pin resolves the latest release, which has
+    # produced a destructive change in the formatter
+    # (ruff 0.15.22 deletes module-level docstrings the older
+    # format preserved). Pinning keeps the one-command
+    # verification reproducible across clean checkouts.
+    "ruff==0.15.21",
     "mypy>=1.8.0",
     "types-requests",
     # The current FastAPI/Starlette test client uses ``httpx2`` for its

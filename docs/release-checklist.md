@@ -21,6 +21,14 @@ monorepository is recorded as a ``Manifest`` row) and the
 regression tests that pin it. The v2.0.2 contract is identical
 to the v2.0.1 contract documented here.
 
+The v2.0.3 first-run reproducibility repair preserves the
+v2.0.2 contract verbatim; v2.0.3 ships a single defect fix
+(``backend/pyproject.toml`` pins ``ruff==0.15.21`` in the
+dev extras so the documented one-command release-verification
+script passes on a fresh clean checkout) and the regression
+tests that pin it. The v2.0.3 contract is identical to the
+v2.0.2 contract documented here.
+
 The checklist is intentionally short. Anything that depends
 on a secret, a remote service, a destructive cleanup, or a
 production deployment belongs in a separate deployment runbook

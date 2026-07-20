@@ -463,30 +463,26 @@ npm test -- --run src/__tests__/evidence_report_v1_0.test.tsx  # v1.0 evidence r
 
 ## Current milestone
 
-**v2.0.2 — Ecosystem compatibility repair.** A
+**v2.0.3 — First-run reproducibility repair.** A
 focused defect-repair release that ships one
-real defect discovered during the v2.0.1
-ecosystem-and-scale acceptance gate. v2.0.2
-does not introduce a new feature; it repairs
-the orchestrator's nested-manifest discovery
-in
-`backend/app/services/orchestrator_service.py:_discover_manifest_files`.
-v2.0.1 shipped with the membership check
-`if rel in _MANIFEST_NAMES` where `rel` is the
-full relative path (e.g. `frontend/package.json`)
-but the dict keys are basenames (e.g.
-`package.json`). The full-path check only
-matched root-level manifests, so every nested
-manifest in a monorepository was silently
-dropped, and the analysis returned zero
-components for any nested-only ZIP. v2.0.2
-changes the check to
-`if manifest_type_for(rel) != "generic"`,
-which is the same basename lookup the
-scanner uses. The v1.0–v1.9 surfaces are
-unchanged. The v2.0 release-validation script
-remains the canonical verification entry
-point. Version bumped to `2.0.2`.
+real release-blocking defect discovered during
+the v2.0.2 clean-state acceptance gate. v2.0.3
+does not introduce a new feature; it pins
+`ruff==0.15.21` in the dev extras of
+`backend/pyproject.toml` so the documented
+one-command release-verification script
+(`cd backend; .venv/Scripts/python.exe
+scripts/verify_release.py`) passes on a fresh
+clean checkout. v2.0.2 shipped with
+`"ruff>=0.4.0"` and a clean `pip install -e
+".[dev]"` resolved the latest ruff, which
+produced a different format than the committed
+files; the `ruff format --check` step of the
+release script failed with "196 files would be
+reformatted". The v2.0.2 nested-manifest
+discovery fix and the v2.0.1 per-repo scan
+filter fix remain in place. Version bumped to
+`2.0.3`.
 
 `v2.0.1` was the previous acceptance-repair
 pass that wired up the v1.8 URL-persisted
@@ -653,7 +649,7 @@ No new features, no new providers, no new export standards.
 and a lazy JSON preview endpoint. No new providers, no new
 export standards.
 
-## What v2.0.2 does not include
+## What v2.0.3 does not include
 
 Planned for later milestones, not implemented today:
 
@@ -666,7 +662,7 @@ Planned for later milestones, not implemented today:
   `Finding.status` enum (open / resolved / accepted /
   suppressed) is read-only in v1.7; the UI exposes the
   value but does not let an operator mutate it. v1.8
-  preserves this read-only contract. v2.0.2 does not
+  preserves this read-only contract. v2.0.3 does not
   change this contract.
 - Continuous / scheduled scans. v1.5 scans are explicit
   operator actions through the `/analyze` page or the
@@ -675,9 +671,9 @@ Planned for later milestones, not implemented today:
   Retry-as-new-scan (now backed by
   `POST /repositories/{id}/rescan`). v1.8's "Run
   another scan" action uses the same v1.6.1
-  workspace-preserving rescan endpoint. v2.0.2 does not
+  workspace-preserving rescan endpoint. v2.0.3 does not
   add scheduling, cron, or background polling.
-- Private GitHub repository analysis (v2.0.2 is public-only;
+- Private GitHub repository analysis (v2.0.3 is public-only;
   the `LOCKVERITY_GITHUB_TOKEN` environment variable is
   honoured for public rate limits but private endpoints
   are out of scope).
@@ -707,9 +703,9 @@ Planned for later milestones, not implemented today:
   availability is not vulnerability absence."
 - New providers, new export standards, new evidence
   contracts, new API endpoints, or a database migration.
-  v2.0.2 is a non-feature ecosystem-compatibility repair;
-  it does not add product surface, only the
-  nested-manifest discovery fix and the regression
+  v2.0.3 is a non-feature first-run reproducibility
+  repair; it does not add product surface, only the
+  ruff pin in the dev extras and the regression
   tests that pin it.
 
 ## Provider-honesty policy
