@@ -5,7 +5,95 @@ follow [Semantic Versioning](https://semver.org/). Lockverity is
 pre-1.0 in the sense that the public API may evolve; the
 underlying data model and Alembic migrations are stable.
 
-## v1.9.0 — Provider health and operational diagnostics (current)
+## v2.0.0 — Local-first release candidate (current)
+
+A non-feature release candidate. The v2.0 contract bundles
+the v0.5–v1.9 surface area under a single bounded
+release-validation script, with two real defect fixes that
+were uncovered during the v1.9 audit. The version bump
+signals that the prior milestones have been audited,
+regression-tested, and verified end-to-end on a single
+command; it does **not** introduce a new product feature
+or a new provider.
+
+- **Local-first release candidate.** v2.0 is the first
+  release line that explicitly markets itself as a
+  local-first release candidate. The supported review
+  workflow is unchanged from v1.9; the new
+  `docs/release-checklist.md` documents the bounded
+  operator-facing checklist, the prerequisites, the
+  full verification command, the core security
+  boundaries, the release-validation step plan, the
+  known limitations, and what v2.0 does not claim.
+- **Single release-validation entry point.** New
+  `backend/scripts/verify_release.py` runs the
+  documented 10-step plan in order: backend pytest,
+  Ruff check, Ruff format check, pip check, frontend
+  tests, frontend typecheck, frontend lint, frontend
+  build, `npm audit --omit=dev`, and full `npm audit`.
+  The script uses argv-only subprocess construction
+  (no shell metacharacter concatenation), exits
+  non-zero immediately on the first failed step, and
+  prints a concise per-step summary. The step plan is
+  the single source of truth for the release
+  verification command; there is no second
+  copy-pasteable command list. The script does not
+  install dependencies, does not delete files, and
+  does not mutate Git.
+- **Defect fix — rescan error-envelope mapping.** The
+  v1.8 rescan route used exact-match
+  `exc.code == "github_error"` to decide between
+  `PROVIDER_UNAVAILABLE` and `RESCAN_SOURCE_UNAVAILABLE`,
+  but the rescan service wraps real `GitHubIntakeError`
+  values with codes such as `github_not_found`,
+  `github_rate_limited`, `github_unauthorized`,
+  `github_invalid_response`, and
+  `github_no_default_branch`. The result was that
+  genuine GitHub errors were being mapped to
+  `RESCAN_SOURCE_UNAVAILABLE` (HTTP 422) instead of
+  `PROVIDER_UNAVAILABLE` (HTTP 502). v2.0 widens the
+  mapping to match any `github_*` code against
+  `PROVIDER_UNAVAILABLE` while keeping
+  `RESCAN_SOURCE_UNAVAILABLE` for genuine source-side
+  problems. Two new regression tests
+  (`test_rescan_github_codes_map_to_provider_unavailable`
+  and
+  `test_rescan_non_github_codes_map_to_source_unavailable`)
+  pin the new behavior.
+- **Defect fix — dead code in diagnostics service.** The
+  v1.9 `diagnostics_service` shipped a dead
+  `executor_metadata_snapshot` function and an unused
+  `typing.Any` import. Both are removed; the live
+  service composes its summary from
+  `build_summary(session, database_status)` plus the
+  three section builders and never references the
+  removed helper.
+- **Focused tests for the release-validation script.**
+  `backend/tests/test_verify_release.py` covers
+  helper logic only (step plan shape, argv-only
+  construction, working directories, non-zero timeouts,
+  python executable resolved relative to the backend,
+  tail truncation, `run_step` capturing stdout / stderr,
+  `run_step` handling non-zero exit,
+  `run_step_plan` stopping on the first failure, and
+  `render_summary` marking the failed step). It does
+  not execute the full release suite from pytest; that
+  is the operator's job.
+- **Boundary preservation.** The audit confirmed that
+  every existing boundary from v0.5–v1.9 is preserved:
+  no execution of analyzed code, no new providers, no
+  new export standards, no new evidence contracts, no
+  scheduled scans, no authentication, no organisation
+  model, no universal score, no `secure/clean/passed/
+  certified` claim, no cached-equals-live claim, no
+  provider-success-equals-security claim, no tracked
+  secrets, no tracked runtime artifacts, no global Git
+  config change, and no production deployment.
+- **Version.** Bumped `__version__` to `2.0.0`. The
+  frontend `version_about` test mock now expects
+  `2.0.0`.
+
+## v1.9.0 — Provider health and operational diagnostics
 
 - **Operational diagnostics page.** A new read-only
   `/diagnostics` route surfaces runtime reachability,

@@ -375,3 +375,142 @@ def test_rescan_unknown_source_type_returns_bounded_error() -> None:
     with pytest.raises(ApiError) as exc_info:
         RescanService(_StubSession()).rescan_repository(12345)
     assert exc_info.value.code == ApiErrorCode.RESCAN_SOURCE_UNAVAILABLE
+
+
+def test_rescan_github_codes_map_to_provider_unavailable(client, monkeypatch) -> None:
+    """v2.0 defect fix.
+
+    Previously the rescan route only mapped the literal
+    string ``"github_error"`` to PROVIDER_UNAVAILABLE;
+    every other ``github_*`` code (notably
+    ``github_not_found``) wrongly landed on
+    RESCAN_SOURCE_UNAVAILABLE. The fix is a prefix
+    match on the ``github_`` family so every upstream
+    materialisation failure surfaces as
+    provider_unavailable.
+    """
+    from app.services import rescan_service
+    from app.services.rescan_service import _RescanError
+
+    class _StubRepo:
+        def __init__(self) -> None:
+            self.id = 1
+            self.source_type = "github"
+            self.canonical_url = "https://github.com/x/y"
+
+    class _StubRescanService:
+        def __init__(self, _session) -> None:
+            pass
+
+        def rescan_repository(self, repository_id, **_kwargs):
+            raise _RescanError(
+                code="github_not_found",
+                message="Upstream returned 404 Not Found.",
+            )
+
+    monkeypatch.setattr(rescan_service, "RescanService", _StubRescanService)
+    # The route imports RescanService at module load
+    # time, so we also have to patch the symbol the
+    # route already bound to.
+    import app.api.scans as _scans_api
+
+    monkeypatch.setattr(_scans_api, "RescanService", _StubRescanService)
+    with _db_session.SessionLocal() as s:
+        from app.models.repository import (
+            Repository,
+            RepositoryProvider,
+            RepositorySourceType,
+            RepositoryVisibility,
+        )
+
+        s.add(
+            Repository(
+                id=1,
+                source_type=RepositorySourceType.GITHUB,
+                provider=RepositoryProvider.GITHUB,
+                owner="x",
+                name="y",
+                canonical_url="https://github.com/x/y",
+                default_branch="main",
+                visibility=RepositoryVisibility.PUBLIC,
+            )
+        )
+        s.commit()
+    try:
+        r = client.post("/api/v1/repositories/1/rescan")
+        # PROVIDER_UNAVAILABLE maps to HTTP 502 per the
+        # project's error-envelope table; the source
+        # error is still the GitHub 404, not a generic
+        # 500.
+        assert r.status_code == 502
+        body = r.json()
+        assert body["error"]["code"] == "provider_unavailable"
+        assert body["error"]["details"]["rescan_code"] == "github_not_found"
+    finally:
+        with _db_session.SessionLocal() as s:
+            from app.models.repository import Repository
+
+            s.query(Repository).filter_by(id=1).delete()
+            s.commit()
+
+
+def test_rescan_non_github_codes_map_to_source_unavailable(client, monkeypatch) -> None:
+    """v2.0 defect fix.
+
+    Non-GitHub codes (e.g. ``rescan_source_unavailable`` or
+    any future provider-specific code that does not start
+    with ``github_``) must continue to land on
+    RESCAN_SOURCE_UNAVAILABLE. The widening of the
+    upstream-failure branch must not eat the genuine
+    source-unavailable branch.
+    """
+    from app.services import rescan_service
+    from app.services.rescan_service import _RescanError
+
+    class _StubRescanService:
+        def __init__(self, _session) -> None:
+            pass
+
+        def rescan_repository(self, repository_id, **_kwargs):
+            raise _RescanError(
+                code="rescan_source_unavailable",
+                message="The original uploaded source is no longer available.",
+            )
+
+    monkeypatch.setattr(rescan_service, "RescanService", _StubRescanService)
+    import app.api.scans as _scans_api
+
+    monkeypatch.setattr(_scans_api, "RescanService", _StubRescanService)
+    with _db_session.SessionLocal() as s:
+        from app.models.repository import (
+            Repository,
+            RepositoryProvider,
+            RepositorySourceType,
+            RepositoryVisibility,
+        )
+
+        s.add(
+            Repository(
+                id=1,
+                source_type=RepositorySourceType.GITHUB,
+                provider=RepositoryProvider.GITHUB,
+                owner="x",
+                name="y",
+                canonical_url="https://github.com/x/y",
+                default_branch="main",
+                visibility=RepositoryVisibility.PUBLIC,
+            )
+        )
+        s.commit()
+    try:
+        r = client.post("/api/v1/repositories/1/rescan")
+        assert r.status_code == 422
+        body = r.json()
+        assert body["error"]["code"] == "rescan_source_unavailable"
+        assert body["error"]["details"]["rescan_code"] == "rescan_source_unavailable"
+    finally:
+        with _db_session.SessionLocal() as s:
+            from app.models.repository import Repository
+
+            s.query(Repository).filter_by(id=1).delete()
+            s.commit()

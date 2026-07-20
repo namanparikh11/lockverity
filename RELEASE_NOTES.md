@@ -29,33 +29,32 @@ The product is built around three guarantees:
   dependency graph is reported as `partial`, never
   `complete`.
 
-## Status — private portfolio-ready baseline
+## Status — local-first release candidate
 
-The repository is a **private portfolio-ready baseline**, not
-a production SaaS, not a hosted service, and not a CI vendor.
-The current milestone (`v1.9`) is a **provider-health and
-operational-diagnostics** upgrade on top of `v1.8`. The
-v1.9 release adds a read-only `/diagnostics` page and a
-new additive `/api/v1/diagnostics/summary` endpoint. The
-page surfaces runtime reachability, executor state, per-
-provider persisted observations, recent partial / failed /
-cancelled scan issues, and aggregated persisted stage-state
-counts as five independent bounded cards. Cache state,
-evidence presence, and provider availability are kept as
-separate fields and are never collapsed into a single
-verdict. The in-process executor does not persist
-heartbeats, so the page renders the explicit "Heartbeat
-not exposed by the current executor" notice rather than
-inventing a heartbeat from a wall-clock guess. The
-boundary notice is "Operational state is not security
-state; provider availability is not vulnerability
-absence." The endpoint never triggers an external
-provider request and never exposes secrets, tokens,
-environment values, connection strings, or local
-filesystem paths. v1.9 intentionally reuses the v1.7
-findings workbench, the v1.8 comparison workflow, the
-v1.6.1 rescan repair, the v1.6 scan workbench, the v1.5
-guided intake, and the v1.0 evidence report. There is:
+The repository is a **local-first release candidate**,
+not a production SaaS, not a hosted service, and not a
+CI vendor. The current milestone (`v2.0`) is a
+**non-feature release candidate** that bundles the
+v0.5–v1.9 surface area under a single bounded
+release-validation script. v2.0 does not add a new
+product feature or a new provider; it ships two
+defect fixes uncovered during the v1.9 audit and a
+new `backend/scripts/verify_release.py` that runs the
+documented 10-step plan in order. The version bump
+signals that the prior milestones have been audited,
+regression-tested, and verified end-to-end on a
+single command. The v2.0 release-validation contract
+is documented in [`docs/release-checklist.md`](docs/release-checklist.md).
+The v2.0 surface area includes the v1.9
+provider-health and operational-diagnostics page,
+the v1.8 repository history and comparison workflow,
+the v1.7 findings workbench, the v1.6.1 workspace-
+preserving rescan repair, the v1.6 scan workbench, the
+v1.5 guided intake, the v1.0 Markdown evidence
+report, the v0.9 evidence search, the v0.8 component
+drilldown, the v0.7 CycloneDX preview, the v0.6
+CycloneDX 1.7 export, and the v0.5 evidence-aware
+comparison. There is:
 
 - **No multi-tenancy** and no authentication. A reviewer runs
   the application on their own laptop.

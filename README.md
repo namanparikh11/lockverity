@@ -21,6 +21,7 @@ an explicit omission marker.
 - Provider-honesty policy: [`docs/provider-honesty.md`](docs/provider-honesty.md)
 - Changelog: [`CHANGELOG.md`](CHANGELOG.md)
 - Release notes: [`RELEASE_NOTES.md`](RELEASE_NOTES.md)
+- Release checklist: [`docs/release-checklist.md`](docs/release-checklist.md)
 - Guided intake: open `/analyze` after starting the local
   backend to register a public GitHub repository or upload a
   `zip` source archive.
@@ -41,7 +42,11 @@ an explicit omission marker.
    Open `/demo` after starting the local demo for the
    guided reviewer flow. Open `/analyze` to register a
    public GitHub repository or upload a `zip` source
-   archive on top of the seeded demo.
+   archive on top of the seeded demo. The full v2.0
+   release-validation flow is in
+   [`docs/release-checklist.md`](docs/release-checklist.md);
+   the canonical one-command verification is
+   `cd backend; .venv/Scripts/python.exe scripts/verify_release.py`.
 3. **How do I run it locally?** See [`## Run the demo`](#run-the-demo)
    below — six numbered steps. POSIX and PowerShell
    commands are both provided.
@@ -458,22 +463,64 @@ npm test -- --run src/__tests__/evidence_report_v1_0.test.tsx  # v1.0 evidence r
 
 ## Current milestone
 
-**v1.9 — Provider health and operational diagnostics.**
-A read-only upgrade that adds a `/diagnostics` page
-and a new additive
+**v2.0 — Local-first release candidate.** A
+non-feature release that bundles the v0.5–v1.9
+surface area under a single bounded
+release-validation script and ships two defect
+fixes uncovered during the v1.9 audit: (1) the
+v1.8 rescan error-envelope mapping
+(`backend/app/api/scans.py`) is widened so any
+`github_*` code from the rescan service maps to
+`PROVIDER_UNAVAILABLE` (HTTP 502) instead of
+`RESCAN_SOURCE_UNAVAILABLE` (HTTP 422); (2) the
+dead `executor_metadata_snapshot` function in
+`backend/app/services/diagnostics_service.py`
+is removed (the service composes its summary
+from the live section builders only). v2.0 also
+adds `backend/scripts/verify_release.py` — a
+single argv-only entry point that runs the
+documented 10-step plan in order: backend
+pytest, Ruff check, Ruff format check, pip
+check, frontend tests, frontend typecheck,
+frontend lint, frontend build,
+`npm audit --omit=dev`, and full `npm audit`.
+The plan exits non-zero immediately on the
+first failed step and prints a concise
+per-step summary; the step plan is the single
+source of truth for the release verification
+command. v2.0 ships
+[`docs/release-checklist.md`](docs/release-checklist.md)
+with the operator-facing checklist, the
+prerequisites, the full verification command,
+the core security boundaries, the
+release-validation step plan, the known
+limitations, and what v2.0 does not claim.
+The supported review workflow is unchanged from
+v1.9. v2.0 is explicitly not a production SaaS,
+not a hosted service, not a CI vendor, and not
+a universal security / risk / health / quality
+score. No new providers, no new export
+standards, no new evidence contracts, no new
+API endpoints, no migration. Version bumped to
+`2.0.0`.
+
+`v1.9` was the provider-health and operational-
+diagnostics upgrade. A read-only upgrade that
+adds a `/diagnostics` page and a new additive
 `/api/v1/diagnostics/summary` endpoint. The page
-surfaces runtime reachability, executor state, per-
-provider persisted observations, recent partial /
-failed / cancelled scan issues, and aggregated
-persisted stage-state counts as five independent
-bounded cards. Cache state, evidence presence, and
-provider availability are kept as separate fields
-and are never collapsed into a single verdict. The
-in-process executor does not persist heartbeats, so
-the page renders the explicit "Heartbeat not exposed
-by the current executor" notice rather than
-inventing a heartbeat from a wall-clock guess. The
-boundary notice is "Operational state is not security
+surfaces runtime reachability, executor state,
+per-provider persisted observations, recent
+partial / failed / cancelled scan issues, and
+aggregated persisted stage-state counts as five
+independent bounded cards. Cache state, evidence
+presence, and provider availability are kept as
+separate fields and are never collapsed into a
+single verdict. The in-process executor does
+not persist heartbeats, so the page renders the
+explicit "Heartbeat not exposed by the current
+executor" notice rather than inventing a
+heartbeat from a wall-clock guess. The boundary
+notice is "Operational state is not security
 state; provider availability is not vulnerability
 absence." No new providers, no new evidence
 contracts, no new external integrations, no
@@ -597,7 +644,7 @@ No new features, no new providers, no new export standards.
 and a lazy JSON preview endpoint. No new providers, no new
 export standards.
 
-## What v1.9 does not include
+## What v2.0 does not include
 
 Planned for later milestones, not implemented today:
 
@@ -610,7 +657,8 @@ Planned for later milestones, not implemented today:
   `Finding.status` enum (open / resolved / accepted /
   suppressed) is read-only in v1.7; the UI exposes the
   value but does not let an operator mutate it. v1.8
-  preserves this read-only contract.
+  preserves this read-only contract. v2.0 does not
+  change this contract.
 - Continuous / scheduled scans. v1.5 scans are explicit
   operator actions through the `/analyze` page or the
   legacy `/repositories/new` and `/repositories/upload`
@@ -618,8 +666,9 @@ Planned for later milestones, not implemented today:
   Retry-as-new-scan (now backed by
   `POST /repositories/{id}/rescan`). v1.8's "Run
   another scan" action uses the same v1.6.1
-  workspace-preserving rescan endpoint.
-- Private GitHub repository analysis (v1.9 is public-only;
+  workspace-preserving rescan endpoint. v2.0 does not
+  add scheduling, cron, or background polling.
+- Private GitHub repository analysis (v2.0 is public-only;
   the `LOCKVERITY_GITHUB_TOKEN` environment variable is
   honoured for public rate limits but private endpoints
   are out of scope).
@@ -640,6 +689,18 @@ Planned for later milestones, not implemented today:
   self-contained; it renders the demo dataset's nature, the
   reviewer flow, and the bounded wording without touching
   the API. The live demo is the canonical evidence.
+- A universal security, risk, health, quality, confidence,
+  uptime, reliability, SLA, compliance, or
+  production-readiness score. v2.0 is explicitly not a
+  universal scoring system. The diagnostics page presents
+  five independent bounded cards and the boundary notice
+  "Operational state is not security state; provider
+  availability is not vulnerability absence."
+- New providers, new export standards, new evidence
+  contracts, new API endpoints, or a database migration.
+  v2.0 is a non-feature release candidate; it does not
+  add product surface, only defect fixes and a bounded
+  release-validation script.
 
 ## Provider-honesty policy
 
