@@ -33,17 +33,20 @@ The product is built around three guarantees:
 
 The repository is a **local-first release candidate**,
 not a production SaaS, not a hosted service, and not a
-CI vendor. The current milestone (`v2.0.1`) is a focused
-acceptance-repair pass on top of `v2.0`. v2.0.1 does not
-add a new product feature or a new provider; it ships
-one real defect fix discovered during the v2.0
-acceptance gate (the per-repository scan-history filter
-on `GET /repositories/{id}/scans` was silently
-ignored) and the regression tests that pin the fix.
-The v2.0.1 contract preserves the v2.0 boundary
-preservation in full. The v2.0 release-validation
-script and the v2.0.1 acceptance flow are documented
-in [`docs/release-checklist.md`](docs/release-checklist.md).
+CI vendor. The current milestone (`v2.0.2`) is a focused
+ecosystem-compatibility repair on top of `v2.0.1`. v2.0.2
+does not add a new product feature or a new provider; it
+ships one real defect fix discovered during the v2.0.1
+ecosystem-and-scale acceptance gate (the orchestrator's
+nested-manifest discovery in
+`backend/app/services/orchestrator_service.py:_discover_manifest_files`
+was a full-path equality check against a basename-keyed
+dict, so every nested manifest in a monorepository was
+silently dropped) and the regression tests that pin the
+fix. The v2.0.2 contract preserves the v2.0.1 boundary
+preservation in full. The v2.0 release-validation script
+and the v2.0.1 acceptance flow are documented in
+[`docs/release-checklist.md`](docs/release-checklist.md).
 The v2.0 surface area includes the v1.9
 provider-health and operational-diagnostics page,
 the v1.8 repository history and comparison workflow,

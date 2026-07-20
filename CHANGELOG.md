@@ -5,7 +5,58 @@ follow [Semantic Versioning](https://semver.org/). Lockverity is
 pre-1.0 in the sense that the public API may evolve; the
 underlying data model and Alembic migrations are stable.
 
-## v2.0.1 — Acceptance repair (current)
+## v2.0.2 — Ecosystem compatibility repair (current)
+
+A focused defect-repair release that ships one real defect
+discovered during the v2.0.1 ecosystem-and-scale acceptance
+gate. No new product feature, no new provider, no new
+export standard, no new evidence contract, no migration.
+
+- **Nested-manifest discovery in monorepos now works.** The
+  v2.0.1 orchestrator stage
+  ``backend/app/services/orchestrator_service.py:_discover_manifest_files``
+  checked ``if rel in _MANIFEST_NAMES`` where ``rel`` is the
+  full relative path (e.g. ``frontend/package.json``) but
+  ``_MANIFEST_NAMES`` keys are basenames (e.g.
+  ``package.json``). The full-path check only matched
+  root-level manifests; every nested manifest in a
+  monorepository was silently dropped, so the pipeline
+  recorded zero ``Manifest`` rows and the analysis
+  returned zero components. v2.0.2 changes the membership
+  check to ``if manifest_type_for(rel) != "generic"``,
+  which is the same basename lookup the
+  ``app.utils.manifest_scanner`` path uses.
+- **6 new backend tests** in
+  ``backend/tests/test_orchestrator_manifest_discovery_v2_0_2.py``
+  cover: the basename lookup for known and unknown
+  filenames; nested ``frontend/package.json`` discovery in
+  a single-namespace monorepo; a mixed-ecosystem
+  monorepository (``frontend/``, ``backend/``,
+  ``nested/service/``, ``tools/``); unknown-file rejection;
+  the orchestrator's permissive behaviour re: nested
+  ``node_modules`` paths (which the v0.3 dedupe handles);
+  and the manifest row insertion shape.
+- **Re-acceptance after the fix:** the
+  ``11-mixed-monorepo`` fixture returns 7 components, 13
+  findings, ``inventory_coverage: complete`` (was 0/0/
+  empty). The ``12-monorepo-duplicate-versions`` fixture
+  returns 4 components, 6 findings, with distinct
+  ``manifest_id`` per source path (was 0/0/empty).
+- **Version.** Bumped ``__version__`` to ``2.0.2``. The
+  frontend ``version_about`` test mock now expects
+  ``2.0.2``.
+- **Boundary preservation.** No new feature, no new
+  endpoint, no new persisted field, no new export, no
+  new organisation, no new provider, no migration, no
+  global Git config change, no remote URL change, no
+  destructive action, no production deployment. The
+  release is a small, obvious correctness repair on the
+  v2.0.1 surface; the wider v0.3 dedupe
+  (``(package_name, version, source_path)``) already
+  prevents the new discoveries from duplicating existing
+  components.
+
+## v2.0.1 — Acceptance repair
 
 A focused defect-repair release that ships one real defect fix
 discovered during the v2.0 acceptance gate. No new product

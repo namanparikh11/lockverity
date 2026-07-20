@@ -1019,7 +1019,20 @@ def ecosystem_for(path: str) -> str | None:
 
 
 def _discover_manifest_files(contents_dir) -> list[str]:  # type: ignore[no-untyped-def]
-    """Walk ``contents_dir`` and return normalized relative paths of known manifests."""
+    """Walk ``contents_dir`` and return normalized relative paths of known manifests.
+
+    The lookup is by **basename** (the same way :func:`manifest_type_for`
+    and :func:`ecosystem_for` resolve an entry) so that nested
+    manifests in monorepositories (``frontend/package.json``,
+    ``backend/poetry.lock``, ``nested/service/requirements.txt``)
+    are discovered alongside the root-level files.
+
+    v2.0.2 widened the membership check from a full-path equality
+    against ``_MANIFEST_NAMES`` to the basename lookup used by
+    :func:`manifest_type_for`. The pre-fix version required
+    ``rel in _MANIFEST_NAMES`` and missed every nested manifest
+    because the dict keys are basenames, not paths.
+    """
     found: list[str] = []
     if not contents_dir.exists():
         return found
@@ -1027,7 +1040,7 @@ def _discover_manifest_files(contents_dir) -> list[str]:  # type: ignore[no-unty
         if not child.is_file():
             continue
         rel = child.relative_to(contents_dir).as_posix()
-        if rel in _MANIFEST_NAMES:
+        if manifest_type_for(rel) != "generic":
             found.append(rel)
     found.sort()
     return found
