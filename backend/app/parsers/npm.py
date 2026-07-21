@@ -118,7 +118,12 @@ class PackageJsonParser:
     def parse(self, *, content: bytes, path: str) -> ParserResult[list[dict[str, Any]]]:
         collector = _Collector()
         try:
-            data = json.loads(content.decode("utf-8"))
+            # ``utf-8-sig`` accepts a leading UTF-8 BOM (``EF BB BF``)
+            # transparently. A BOM is legal in JSON dependency manifests
+            # produced by Notepad on Windows and other editors; rejecting
+            # it would silently drop every direct dependency declared in
+            # the affected file (the v2.0.4 field-test regression).
+            data = json.loads(content.decode("utf-8-sig"))
         except (json.JSONDecodeError, UnicodeDecodeError) as exc:
             raise ParserError(f"package.json is not valid JSON: {exc}") from exc
         if not isinstance(data, dict):
@@ -257,7 +262,8 @@ class PackageLockJsonParser:
     def parse(self, *, content: bytes, path: str) -> ParserResult[list[dict[str, Any]]]:
         collector = _Collector()
         try:
-            data = json.loads(content.decode("utf-8"))
+            # See ``PackageJsonParser.parse`` for the BOM rationale.
+            data = json.loads(content.decode("utf-8-sig"))
         except (json.JSONDecodeError, UnicodeDecodeError) as exc:
             raise ParserError(f"package-lock.json is not valid JSON: {exc}") from exc
         if not isinstance(data, dict):

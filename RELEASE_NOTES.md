@@ -33,21 +33,27 @@ The product is built around three guarantees:
 
 The repository is a **local-first release candidate**,
 not a production SaaS, not a hosted service, and not a
-CI vendor. The current milestone (`v2.0.3`) is a focused
-first-run reproducibility repair on top of `v2.0.2`.
-v2.0.3 does not add a new product feature or a new
-provider; it ships one real release-blocking defect
-discovered during the v2.0.2 clean-state acceptance
-gate (the documented one-command release-verification
-script failed on a fresh clean checkout because
-`backend/pyproject.toml` declared ``ruff>=0.4.0`` and
-a clean ``pip install -e ".[dev]"`` resolved the latest
-ruff, which produced a different format than the one
-the committed files were last formatted against) and the
-regression tests that pin the fix. The v2.0.3 contract
-preserves the v2.0.2 boundary preservation in full. The
-v2.0 release-validation script and the v2.0.1/v2.0.2
-acceptance flows are documented in
+CI vendor. The current milestone (`v2.0.4`) is a
+narrowly scoped UTF-8 BOM compatibility repair on
+top of `v2.0.3`. v2.0.4 does not add a new product
+feature or a new provider; it ships one real defect
+uncovered by a v2.0.3 field-test run
+(`PackageJsonParser` and `PackageLockJsonParser`
+rejected `package.json` files prefixed with a UTF-8
+BOM — produced by Notepad on Windows and many other
+editors — as invalid JSON, dropping every direct
+dependency declared in the affected file) and the
+regression tests that pin the fix. The v2.0.4 fix
+is a two-line change in
+`backend/app/parsers/npm.py`:
+`content.decode("utf-8")` →
+`content.decode("utf-8-sig")`. The BOM is stripped
+transparently; the rest of the JSON is parsed as
+ordinary UTF-8; no other manifest types are touched;
+the no-BOM control path is unchanged. The v2.0.4
+contract preserves the v2.0.3 boundary preservation
+in full. The v2.0 release-validation script and the
+v2.0.1/v2.0.2 acceptance flows are documented in
 [`docs/release-checklist.md`](docs/release-checklist.md).
 The v2.0 surface area includes the v1.9
 provider-health and operational-diagnostics page,

@@ -463,22 +463,47 @@ npm test -- --run src/__tests__/evidence_report_v1_0.test.tsx  # v1.0 evidence r
 
 ## Current milestone
 
-**v2.0.3 — First-run reproducibility repair.** A
-focused defect-repair release that ships one
-real release-blocking defect discovered during
-the v2.0.2 clean-state acceptance gate. v2.0.3
-does not introduce a new feature; it pins
-`ruff==0.15.21` in the dev extras of
-`backend/pyproject.toml` so the documented
-one-command release-verification script
-(`cd backend; .venv/Scripts/python.exe
-scripts/verify_release.py`) passes on a fresh
-clean checkout. v2.0.2 shipped with
-`"ruff>=0.4.0"` and a clean `pip install -e
-".[dev]"` resolved the latest ruff, which
-produced a different format than the committed
-files; the `ruff format --check` step of the
-release script failed with "196 files would be
+**v2.0.4 — UTF-8 BOM compatibility repair.** A
+narrowly scoped testing-driven patch that ships
+one real defect uncovered by a v2.0.3 field-test
+run. v2.0.4 does not introduce a new feature; it
+changes `content.decode("utf-8")` to
+`content.decode("utf-8-sig")` in the
+`PackageJsonParser` and `PackageLockJsonParser`
+in `backend/app/parsers/npm.py`, so the two
+npm parsers transparently accept a leading UTF-8
+BOM (`EF BB BF`) — produced by Notepad on Windows
+and many other editors. The v2.0.3 npm parsers
+rejected the BOM as invalid JSON and silently
+dropped every direct dependency declared in the
+affected file; the field-test repro saw this twice
+on `test-06-package-json-only.zip`: one manifest
+discovered, one parser failure, zero components.
+v2.0.4 also re-records the same field-test
+fixture in the field-test database, and the
+historical scans that demonstrated the v2.0.3
+defect are preserved untouched. The BOM does not
+become part of any name, version, PURL, or source
+path. The no-BOM control path is unchanged. The
+TOML and YAML parsers are intentionally untouched
+(they are not JSON-based and the field-test repro
+did not surface a BOM regression there). Version
+bumped to `2.0.4`.
+
+`v2.0.3` was the previous first-run
+reproducibility repair that pinned
+`ruff==0.15.21` and added `.gitattributes` so
+the one-command release verification is
+reproducible on a clean clean checkout. The
+v2.0.3 boundary preservation, the v2.0.1
+per-repository scan filter, and the v2.0.2
+nested-manifest discovery fix carry over
+verbatim; v2.0.4 does not change any of them.
+
+`v2.0.2` was the previous ecosystem-compatibility
+repair that fixed the orchestrator's
+`_discover_manifest_files` to use a basename
+lookup.
 reformatted". The v2.0.2 nested-manifest
 discovery fix and the v2.0.1 per-repo scan
 filter fix remain in place. Version bumped to
@@ -649,9 +674,15 @@ No new features, no new providers, no new export standards.
 and a lazy JSON preview endpoint. No new providers, no new
 export standards.
 
-## What v2.0.3 does not include
+## What v2.0.4 does not include
 
-Planned for later milestones, not implemented today:
+Planned for later milestones, not implemented today. v2.0.4
+is a non-feature UTF-8 BOM compatibility repair; it inherits
+the v2.0.3 "does not include" list verbatim and adds nothing
+to it. The two-line change in
+`backend/app/parsers/npm.py`
+(`content.decode("utf-8")` → `content.decode("utf-8-sig")`)
+is the entire v2.0.4 surface area.
 
 - Authentication, multi-tenancy, billing, or self-service
   signup.
