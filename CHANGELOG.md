@@ -5,7 +5,82 @@ follow [Semantic Versioning](https://semver.org/). Lockverity is
 pre-1.0 in the sense that the public API may evolve; the
 underlying data model and Alembic migrations are stable.
 
-## v2.0.3 — First-run reproducibility repair (current)
+## v2.0.4 — UTF-8 BOM compatibility repair (current)
+
+A narrowly scoped testing-driven patch that ships one real
+defect uncovered by a v2.0.3 field-test run. No new
+product feature, no new provider, no new export standard,
+no new evidence contract, no migration, no new dependency.
+
+- **UTF-8 BOM accepted in JSON dependency manifests.**
+  v2.0.3 shipped with the ``PackageJsonParser`` and
+  ``PackageLockJsonParser`` decoding the manifest bytes
+  as plain UTF-8: ``content.decode("utf-8")``. A leading
+  UTF-8 BOM (``EF BB BF``) — produced by Notepad on
+  Windows and many other editors — is preserved as a
+  literal ``\ufeff`` in the decoded string, which
+  ``json.loads`` then rejects as
+  ``Expecting value: line 1 column 1 (char 0)``. The
+  orchestrator records the manifest with
+  ``parse_status="FAILED"`` and zero components are
+  produced. The field-test repro saw this twice on
+  ``test-06-package-json-only.zip``: one manifest
+  discovered, one parser failure, zero components. v2.0.4
+  changes the decode to ``utf-8-sig``, which transparently
+  strips a single leading UTF-8 BOM. The BOM does not
+  become part of any name, version, PURL, or source
+  path. The no-BOM control path is unchanged. The
+  fix is bounded to the two JSON parsers; the TOML and
+  YAML parsers are intentionally untouched (they are
+  not JSON-based and the field-test repro did not
+  surface a BOM regression there).
+- **11 new backend tests** in
+  ``backend/tests/test_parsers_npm_bom_v2_0_4.py`` cover:
+  package.json with UTF-8 BOM parses successfully;
+  the two expected direct dependencies
+  (``axios 1.7.9`` and ``lodash 4.17.21``) survive the
+  BOM exactly; names, versions, and PURLs do not
+  contain a leading BOM codepoint or percent-escape;
+  the relationship is ``direct`` with no
+  development/optional side effects; the source path
+  is preserved unchanged; the no-BOM control path is
+  unchanged; ``package-lock.json`` with a UTF-8 BOM
+  parses successfully; a BOM followed by invalid JSON
+  is still rejected as a bounded parser failure;
+  a BOM-like codepoint inside a string value is
+  preserved (we do not over-strip); an end-to-end
+  orchestrator scan with a BOM-prefixed
+  ``package.json`` persists two components and
+  records the manifest as ``PARSED``; and a nested
+  BOM-prefixed ``package.json`` is discovered by the
+  orchestrator's basename-based manifest discovery
+  (the v2.0.2 fix) and parsed by the v2.0.4 BOM
+  fix.
+- **Field-test reacceptance.** The v2.0.3 field-test
+  database is preserved. The BOM scan now produces
+  the expected two components; the no-BOM control
+  scan is unchanged. The historical scans that
+  demonstrated the v2.0.3 defect are untouched.
+- **Version.** Bumped ``__version__`` to ``2.0.4``. The
+  frontend ``version_about`` test mock now expects
+  ``2.0.4``.
+- **Boundary preservation.** Two-line code change
+  (``content.decode("utf-8")`` →
+  ``content.decode("utf-8-sig")`` in
+  ``PackageJsonParser.parse`` and
+  ``PackageLockJsonParser.parse`` in
+  ``backend/app/parsers/npm.py``). No new feature, no
+  new endpoint, no new persisted field, no new
+  export, no new organisation, no new provider, no
+  new dependency, no migration, no global Git config
+  change, no remote URL change, no destructive
+  action, no production deployment, no source-file
+  mutation, no malformed-JSON weakening, no broad
+  encoding fallback. The repair is the smallest
+  safe BOM-stripping change at the narrowest
+  shared JSON-manifest boundary.
+
+## v2.0.3 — First-run reproducibility repair
 
 A focused defect-repair release that ships one real
 release-blocking defect discovered during the v2.0.2
