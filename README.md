@@ -463,32 +463,87 @@ npm test -- --run src/__tests__/evidence_report_v1_0.test.tsx  # v1.0 evidence r
 
 ## Current milestone
 
-**v2.0.4 — UTF-8 BOM compatibility repair.** A
-narrowly scoped testing-driven patch that ships
-one real defect uncovered by a v2.0.3 field-test
-run. v2.0.4 does not introduce a new feature; it
-changes `content.decode("utf-8")` to
-`content.decode("utf-8-sig")` in the
-`PackageJsonParser` and `PackageLockJsonParser`
-in `backend/app/parsers/npm.py`, so the two
-npm parsers transparently accept a leading UTF-8
-BOM (`EF BB BF`) — produced by Notepad on Windows
-and many other editors. The v2.0.3 npm parsers
-rejected the BOM as invalid JSON and silently
-dropped every direct dependency declared in the
-affected file; the field-test repro saw this twice
-on `test-06-package-json-only.zip`: one manifest
-discovered, one parser failure, zero components.
-v2.0.4 also re-records the same field-test
-fixture in the field-test database, and the
-historical scans that demonstrated the v2.0.3
-defect are preserved untouched. The BOM does not
-become part of any name, version, PURL, or source
-path. The no-BOM control path is unchanged. The
-TOML and YAML parsers are intentionally untouched
-(they are not JSON-based and the field-test repro
-did not surface a BOM regression there). Version
-bumped to `2.0.4`.
+**v2.0.5 — Comparison stability and repository
+identification.** A narrowly scoped
+field-testing-driven patch that ships two real
+defects uncovered by a v2.0.4 field-test run.
+v2.0.5 does not introduce a new feature. The
+first defect is a comparison sort-key crash when
+component identity keys contain nullable values:
+the v0.5 component identity tuple
+``(ecosystem, package_name, version)`` has a
+nullable ``version`` for an unresolved range,
+and Python's default ``sorted`` raises
+``TypeError: '<' not supported between instances
+of 'str' and 'NoneType'`` whenever the same
+package appears with both a resolved and an
+unresolved version across manifests. v2.0.5
+introduces ``_nullable_key_sort_key`` in
+``backend/app/services/comparison_service.py``
+that converts ``None`` to ``(0, "")`` and any
+non-None value to ``(1, str(value))``; the
+original identity tuple is not mutated, and the
+four ``sorted(set(...))`` (and one
+``sorted(set(...) & set(...))``) call sites that
+mix ``None`` with strings now use the helper. The
+vulnerability and licence comparators were also
+repaired because they share the same
+nullable-key risk. The field-test repro was
+scans #13 vs. #15 in
+``var/manual-review/lockverity-field-test.sqlite``;
+``GET /repositories/13/compare?baseline=13&comparison=15``
+returned 500 with that exact traceback. The
+second defect is a repository-list UX defect:
+v2.0.4 surfaced an opaque canonical upload
+identifier (e.g.
+``upload/2ed7b06ed7d3d967``) as the primary row
+label, provided no scan count, no latest-scan
+summary, and no per-row "Open latest scan" /
+"Compare" action, and made the operator navigate
+two clicks to identify each row when several
+uploaded archives were present. v2.0.5 adds a
+nullable ``original_filename`` column on
+``repositories``, populated for new uploads with
+the basename of the client-supplied filename
+(sanitised via ``basename_safely`` so an absolute
+path the client sends never reaches the database).
+The list endpoint now returns a
+``RepositoryWithSummary`` shape with
+``display_name`` (``owner/repository`` for GitHub;
+the original-filename basename for uploaded rows;
+the bounded fallback
+``Uploaded archive · upload/<short-key>`` for
+historical rows where the filename is unavailable),
+``canonical_identity`` (the secondary technical
+identifier), and a per-row ``summary`` that
+includes ``scan_count``,
+``eligible_comparison_scan_count`` (the number of
+scans the comparator accepts), and ``latest_scan``
+(the scan with the largest ``id``; ``None`` for
+repositories with no scans). The summary is
+computed by a single batched query so the list
+endpoint does not produce an N+1 request pattern.
+The list page renders "Open latest scan" (disabled
+when no scan exists), "View history" (always
+present), and "Compare" (disabled when fewer than
+two eligible scans exist). The search box
+additionally resolves pure-integer or ``#N`` tokens
+to the parent repository of scan ``N``; a
+filename search matches the bounded set of
+persisted fields (uploaded original filename,
+GitHub ``owner``/``name``, canonical URL,
+canonical upload identifier). A new Alembic
+revision (``e5f6a7b8c9d0``) adds the
+``repositories.original_filename`` column and a
+covering index; the migration is reversible and
+leaves historical rows at ``NULL``. The
+v2.0.4 BOM compatibility repair, the v2.0.3
+ruff pin / ``.gitattributes`` first-run
+reproducibility, the v2.0.2 nested-manifest
+discovery fix, the v2.0.1 per-repository scan
+filter, and the v2.0 release-validation script
+all carry over verbatim; v2.0.5 does not change
+any of them. Version bumped to ``2.0.5``.
 
 `v2.0.3` was the previous first-run
 reproducibility repair that pinned
@@ -674,15 +729,21 @@ No new features, no new providers, no new export standards.
 and a lazy JSON preview endpoint. No new providers, no new
 export standards.
 
-## What v2.0.4 does not include
+## What v2.0.5 does not include
 
-Planned for later milestones, not implemented today. v2.0.4
-is a non-feature UTF-8 BOM compatibility repair; it inherits
-the v2.0.3 "does not include" list verbatim and adds nothing
-to it. The two-line change in
-`backend/app/parsers/npm.py`
-(`content.decode("utf-8")` → `content.decode("utf-8-sig")`)
-is the entire v2.0.4 surface area.
+Planned for later milestones, not implemented today. v2.0.5
+is a non-feature comparison-stability and
+repository-identification repair; it inherits the v2.0.4
+"does not include" list verbatim and adds nothing to it.
+The v2.0.5 surface area is two localised changes plus a
+reversible migration: the comparison comparator helper
+``_nullable_key_sort_key`` in
+``app/services/comparison_service.py``; the additive
+nullable ``original_filename`` column on
+``repositories`` and the new
+``RepositoryWithSummary`` list-endpoint shape; the
+extended ``search`` parameter; and the
+``e5f6a7b8c9d0`` Alembic revision.
 
 - Authentication, multi-tenancy, billing, or self-service
   signup.

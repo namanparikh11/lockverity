@@ -5,7 +5,147 @@ follow [Semantic Versioning](https://semver.org/). Lockverity is
 pre-1.0 in the sense that the public API may evolve; the
 underlying data model and Alembic migrations are stable.
 
-## v2.0.4 — UTF-8 BOM compatibility repair (current)
+## v2.0.5 — Comparison stability and repository identification (current)
+
+A narrowly scoped, field-testing-driven patch that ships
+two real defects uncovered by a v2.0.4 field-test run.
+No new product feature, no new provider, no new export
+standard, no new evidence contract, no new ecosystem.
+v2.0.5 does not introduce a new feature; it ships two
+defect repairs and the migration that supports one of
+them.
+
+- **Nullable comparison sort-key repair.** v2.0.4
+  shipped with the component comparator sorting its
+  identity-key tuples with Python's default
+  ``sorted``. The identity tuple is
+  ``(ecosystem, package_name, version)`` and ``version``
+  is legitimately ``None`` for an unresolved range. A
+  sort that mixed ``None`` and a populated string
+  raised ``TypeError: '<' not supported between
+  instances of 'str' and 'NoneType'``. The field-test
+  repro hit this twice on scans #13 and #15 in
+  ``var/manual-review/lockverity-field-test.sqlite``:
+  ``GET /api/v1/repositories/13/compare?baseline=13&comparison=15``
+  returned 500 with that exact traceback. v2.0.5
+  introduces a dedicated
+  ``_nullable_key_sort_key`` helper that converts
+  ``None`` to ``(0, "")`` and any non-None value to
+  ``(1, str(value))``; the original identity tuple is
+  not mutated (``None`` and ``""`` remain distinct in
+  the underlying dict), and the four ``sorted(...)``
+  call sites that mix ``None`` with strings now use the
+  helper. The vulnerability and licence comparators
+  were also repaired because they share the same
+  nullable-key risk. Equality continues to use the
+  original tuple; only the display ordering was
+  affected. The v0.5 contract (``newly_observed`` /
+  ``still_observed`` / ``no_longer_observed`` /
+  ``changed_observation`` / ``coverage_changed`` /
+  ``comparison_indeterminate``) is unchanged; the
+  v0.5 forbidden wording (``security improved``,
+  ``fixed``, ``remediated``, ``risk increased``,
+  ``risk decreased``) is still absent from every
+  response.
+- **Repository identification: uploaded filename as
+  the primary label.** v2.0.4 surfaced an opaque
+  canonical upload identifier (e.g.
+  ``upload/2ed7b06ed7d3d967``) as the primary row
+  label on the repository list and provided no scan
+  count, no latest-scan summary, and no per-row
+  "Open latest scan" / "Compare" action. v2.0.5 adds
+  a nullable ``original_filename`` column on
+  ``repositories``, populated for new uploads with
+  the basename of the client-supplied filename
+  (sanitised via ``basename_safely`` so an absolute
+  path the client sends never reaches the database).
+  The list endpoint now returns a
+  ``RepositoryWithSummary`` shape with
+  ``display_name`` (``owner/repository`` for GitHub;
+  the original-filename basename for uploaded rows;
+  the bounded fallback
+  ``Uploaded archive · upload/<short-key>`` for
+  historical rows where the filename is unavailable),
+  ``canonical_identity`` (the secondary technical
+  identifier), and a per-row ``summary`` that
+  includes ``scan_count``,
+  ``eligible_comparison_scan_count`` (the number of
+  scans the comparator accepts), and ``latest_scan``
+  (the scan with the largest ``id``; ``None`` for
+  repositories with no scans). The summary is
+  computed by a single batched query
+  (``get_repository_summaries``) so the list
+  endpoint does not produce an N+1 request pattern.
+  The list page renders "Open latest scan" (disabled
+  when no scan exists), "View history" (always
+  present), and "Compare" (disabled when fewer than
+  two eligible scans exist).
+- **Repository search: filename + scan ID.** The
+  ``search`` parameter on ``GET /api/v1/repositories``
+  now matches a bounded set of persisted fields
+  (uploaded original filename, GitHub ``owner`` /
+  ``name``, canonical URL, canonical upload
+  identifier) and resolves pure-integer or
+  ``#N`` tokens to the parent repository of scan
+  ``N``. The free-text and scan-ID modes are
+  mutually exclusive: a pure digit token does not
+  also run the ``ilike`` predicate, so a search for
+  ``15`` returns only the parent repository of
+  scan 15 rather than every repository whose
+  ``owner`` or ``name`` contains a ``1``. A search
+  that matches multiple scans for the same
+  repository returns one row, not one row per
+  matching scan. The existing provider, source, and
+  archive filters are preserved.
+- **45 new tests.** 15 in
+  ``tests/test_comparison_nullable_sort_v2_0_5.py``
+  (the comparison sort-key repair + the field-test
+  repro pinned against the in-memory test engine) and
+  30 in
+  ``tests/test_repository_identification_v2_0_5.py``
+  (basename sanitisation, display-name resolution,
+  list-summary correctness, deterministic
+  latest-scan selection, search by filename / owner
+  / canonical upload key / scan ID / ``#N``,
+  pagination preservation, provider isolation, and
+  a query-count assertion that pins no per-row N+1
+  scan lookup). The frontend adds 7 in
+  ``src/__tests__/repository_v2_0_5.test.tsx``
+  (uploaded filename as the primary title, GitHub
+  ``owner/repository``, the no-scan explicit state,
+  the "Compare" action visibility, search by
+  filename placeholder, no local path leak, eligible
+  comparison count helper text).
+- **Migration.** A new Alembic revision
+  (``e5f6a7b8c9d0``) adds the nullable
+  ``repositories.original_filename`` column and a
+  covering index. The migration is reversible
+  (``upgrade`` adds the column and index;
+  ``downgrade`` drops both). No historical row is
+  rewritten; v0.x-v2.0.4 rows are left with
+  ``original_filename = NULL`` and the API surfaces
+  the bounded fallback label for them. The
+  ``test_load_demo.py`` expected-alembic-head
+  constant is updated to the new head.
+- **Version.** Bumped ``__version__`` to ``2.0.5``.
+  The frontend ``version_about`` test mock now
+  expects ``2.0.5``.
+- **Boundary preservation.** No new feature, no new
+  endpoint, no new persisted field beyond the
+  additive nullable ``original_filename``, no new
+  export, no new organisation, no new provider, no
+  new dependency, no destructive change to the
+  field-test database (the migration was applied
+  normally; the historical scans #6, #7, #8, #13,
+  #15 are preserved as defect and reacceptance
+  evidence), no global Git config change, no remote
+  URL change, no destructive action, no production
+  deployment, no source-file mutation, no broad
+  encoding fallback, no ``_display_name`` /
+  ``_canonical_identity`` for editable aliases
+  (a future-work item).
+
+## v2.0.4 — UTF-8 BOM compatibility repair
 
 A narrowly scoped testing-driven patch that ships one real
 defect uncovered by a v2.0.3 field-test run. No new

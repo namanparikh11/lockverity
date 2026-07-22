@@ -68,6 +68,54 @@ from app.services import scan_service
 from app.utils.datetime import utcnow
 from app.utils.errors import ApiError, ApiErrorCode
 
+
+# ---------------------------------------------------------------------------
+# Nullable-key handling
+# ---------------------------------------------------------------------------
+#
+# Comparison identity keys (component, vulnerability, licence) are tuples
+# whose values can legitimately be ``None``: a Component may have
+# ``version=None`` for an unresolved range, a vulnerability row may
+# have ``package_version=None`` when the binding failed, a licence
+# observation may have ``version=None``. Equality between the original
+# keys must be preserved (a ``None`` version is **not** the same identity
+# as an empty-string version, and a ``None`` version is distinct from a
+# populated version), but Python's default ``sorted`` cannot compare
+# ``None`` with a string directly and raises
+# ``TypeError: '<' not supported between instances of 'str' and 'NoneType'``.
+#
+# The v2.0.5 field-test repro (scans #13 and #15 in
+# ``var/manual-review/lockverity-field-test.sqlite``) hit this on the
+# component comparator. The fix is a separate deterministic sort key
+# that does not mutate the original identity key: ``None`` becomes
+# ``(0, "")`` (sorts first; preserves ``None``/empty distinction in the
+# underlying dict), and any non-None value becomes ``(1, str(value))``
+# (sorts after; allows mixed types to compare without raising).
+def _nullable_key_sort_key(
+    key: tuple[Any, ...],
+) -> tuple[tuple[int, str], ...]:
+    """Return a deterministic sort key for a tuple that may contain ``None``.
+
+    The original ``key`` is left untouched; this function returns a
+    parallel tuple that ``sorted()`` can compare without raising.
+    ``None`` and ``""`` remain distinct in the underlying identity
+    (the dict that uses ``key`` as a dict-key still differentiates
+    them), but both sort before any populated string.
+
+    Fields with non-string types (booleans, integers) are stringified
+    so the resulting sort key is total-ordered across types. This is
+    a display-only ordering: equality is decided by the original
+    tuple, not by this sort key.
+    """
+    parts: list[tuple[int, str]] = []
+    for value in key:
+        if value is None:
+            parts.append((0, ""))
+        else:
+            parts.append((1, str(value)))
+    return tuple(parts)
+
+
 # Terminal scan statuses that are eligible for comparison.
 # Only ``completed`` and ``partial`` qualify: a ``failed``
 # or ``cancelled`` scan did not finish its work, so its
@@ -271,7 +319,12 @@ def _compare_components(session: Session, base_id: int, head_id: int) -> list[Co
     manifest_paths_by_id = _manifest_paths_by_id(session, base_manifest_ids | head_manifest_ids)
     base_index = _index_components_by_version(base_components)
     head_index = _index_components_by_version(head_components)
-    all_keys = sorted(set(base_index) | set(head_index))
+    # ``_index_components_by_version`` produces a dict keyed by
+    # ``(ecosystem, package_name, version)``; ``version`` can be
+    # ``None`` for an unresolved range. Use a separate nullable-aware
+    # sort key so ``None`` and a populated version never compare
+    # directly. Equality continues to use the original tuple.
+    all_keys = sorted(set(base_index) | set(head_index), key=_nullable_key_sort_key)
     rows: list[ComponentObservation] = []
     for key in all_keys:
         ecosystem, package_name, version = key
@@ -433,7 +486,12 @@ def _compare_dependency_paths(
     """
     base_components = _components_by_package_version(session, base_id)
     head_components = _components_by_package_version(session, head_id)
-    shared = sorted(set(base_components) & set(head_components))
+    # Shared component keys (ecosystem, package_name, version) include
+    # nullable ``version``; the same sort-key helper applies.
+    shared = sorted(
+        set(base_components) & set(head_components),
+        key=_nullable_key_sort_key,
+    )
     rows: list[DependencyPathChange] = []
     for key in shared:
         ecosystem, package_name, version = key
@@ -558,7 +616,12 @@ def _compare_vulnerabilities(
         base_index[_vuln_key(row)].append(row)
     for row in head_rows:
         head_index[_vuln_key(row)].append(row)
-    all_keys = sorted(set(base_index) | set(head_index))
+    # Vulnerability key includes ``package_version`` and
+    # ``ecosystem``; both can be ``None`` for partial evidence.
+    # Use the nullable-aware sort key to avoid
+    # ``TypeError: '<' not supported between instances of
+    # 'str' and 'NoneType'`` on mixed evidence.
+    all_keys = sorted(set(base_index) | set(head_index), key=_nullable_key_sort_key)
     rows: list[VulnerabilityObservation] = []
     indeterminate_reasons: list[str] = []
     for key in all_keys:
@@ -819,7 +882,9 @@ def _compare_licences(session: Session, base_id: int, head_id: int) -> list[Lice
     """
     base_index = _licence_index(session, base_id)
     head_index = _licence_index(session, head_id)
-    all_keys = sorted(set(base_index) | set(head_index))
+    # Licence key is ``(package_name, version, licence, provider)``;
+    # ``version`` can be ``None`` for an unresolved range.
+    all_keys = sorted(set(base_index) | set(head_index), key=_nullable_key_sort_key)
     rows: list[LicenceObservation] = []
     for key in all_keys:
         b = base_index.get(key)

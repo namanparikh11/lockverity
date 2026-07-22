@@ -128,6 +128,46 @@ export interface Repository {
   last_provider_sync_at: string | null;
   created_at: string;
   updated_at: string;
+  // v2.0.5: basename of the original uploaded filename, or
+  // null for GitHub rows. The repository list uses this as
+  // the primary human-readable label for uploaded rows; the
+  // operator never has to read the opaque ``upload/<key>``
+  // canonical URL to know which row is which.
+  original_filename: string | null;
+}
+
+// v2.0.5: per-row summary. The list endpoint returns a
+// ``RepositoryWithSummary`` shape (see below); a single
+// ``GET /repositories/{id}`` continues to return the bare
+// ``Repository`` shape so other surfaces that look up one
+// repository by id are unchanged.
+export interface RepositoryLatestScan {
+  id: number;
+  status: ScanStatus;
+  trigger_type: ScanTriggerType;
+  created_at: string;
+  completed_at: string | null;
+}
+
+export interface RepositorySummary {
+  scan_count: number;
+  // Number of scans that the comparator will accept
+  // (completed or partial; the same set the comparison
+  // page uses).
+  eligible_comparison_scan_count: number;
+  latest_scan: RepositoryLatestScan | null;
+}
+
+export interface RepositoryWithSummary extends Repository {
+  // The server-computed primary human-readable label.
+  // GitHub: ``owner/repository``. Uploaded: the basename
+  // of the original filename (or the bounded fallback for
+  // historical rows where the filename is unavailable).
+  display_name: string;
+  // The server-computed secondary technical identifier.
+  // GitHub: the canonical URL. Uploaded: ``upload/<short-key>``.
+  canonical_identity: string;
+  summary: RepositorySummary;
 }
 
 export interface RepositoryCreatePayload {

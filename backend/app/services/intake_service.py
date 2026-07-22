@@ -210,7 +210,13 @@ class IntakeService:
         repository and scan are created on the fly; the upload
         content is not retained outside the workspace.
         """
-        repository = self._create_upload_repository()
+        # v2.0.5: the original filename (basename-only) is
+        # persisted on the repository row for the
+        # human-readable label. ``basename_safely`` strips
+        # absolute paths and other unsafe forms; an empty or
+        # unsafe value resolves to ``None`` (the API will
+        # surface a bounded fallback label).
+        repository = self._create_upload_repository(original_filename=archive_filename)
         scan = self._queue_scan(
             repository,
             ScanTriggerType.UPLOAD,
@@ -350,7 +356,7 @@ class IntakeService:
             raise
         return repo
 
-    def _create_upload_repository(self) -> Repository:
+    def _create_upload_repository(self, original_filename: str | None = None) -> Repository:
         # Uploaded archives are uniquely identified by their
         # archive SHA-256 once it has been computed. We cannot
         # know the SHA before the upload completes, so we use a
@@ -374,6 +380,18 @@ class IntakeService:
         )
         repo.source_type = RepositorySourceType.UPLOADED_ARCHIVE
         repo.provider = RepositoryProvider.LOCAL_UPLOAD
+        # v2.0.5: persist the basename of the client-supplied
+        # filename. ``original_filename`` is stored as
+        # basename-only; an absolute path the client sends
+        # never reaches the database. The column is nullable
+        # for v0.x-v2.0.4 historical rows; the intake path
+        # populates it for new uploads. The field is used as
+        # the primary human-readable label by the repository
+        # list and search endpoints.
+        if original_filename is not None:
+            from app.utils.paths import basename_safely
+
+            repo.original_filename = basename_safely(original_filename)
         try:
             self._session.commit()
         except Exception:
