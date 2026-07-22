@@ -5,7 +5,120 @@ follow [Semantic Versioning](https://semver.org/). Lockverity is
 pre-1.0 in the sense that the public API may evolve; the
 underlying data model and Alembic migrations are stable.
 
-## v2.0.5 — Comparison stability and repository identification (current)
+## v2.0.6 — Historical upload identification and clearer stage-outcome presentation (current)
+
+A narrowly scoped, field-testing-driven patch that ships
+two real usability defects uncovered by a v2.0.5 field-test
+run. No new product feature, no new provider, no new
+export standard, no new evidence contract, no migration.
+
+- **Historical upload names are derived from
+  trustworthy persisted workspace metadata.** v2.0.5
+  surfaced a human-readable label for new uploads
+  (the basename of the original filename) but
+  historical v0.x-v2.0.4 uploaded rows had
+  ``Repository.original_filename = NULL`` and rendered
+  the bounded opaque fallback
+  ``Uploaded archive · upload/<short-key>``. The
+  ``Workspace.archive_filename`` rows for each scan
+  still carry the original archive filename (basename-
+  only, sanitised at intake). v2.0.6 introduces
+  ``get_repository_historical_filenames`` in
+  ``backend/app/repositories/repository_repo.py``: a
+  single batched query that resolves a per-repository
+  historical archive filename from the workspace
+  metadata. The helper surfaces a single filename when
+  every workspace for the repository agrees, flags a
+  conflict (and retains the bounded opaque fallback)
+  when multiple distinct filenames are present, and
+  returns ``None`` when no filename is available. The
+  list endpoint now reads the historical helper and
+  uses the historical filename as the primary
+  ``display_name`` for uploaded rows whose
+  ``Repository.original_filename`` is null. The helper
+  is read-only: no historical row is mutated, no
+  ``Repository.original_filename`` is backfilled, no
+  filesystem path is read. Repository #13 in the
+  field-test database now renders as
+  ``test-09-mixed-monorepo.zip`` instead of the
+  bounded fallback.
+- **Repository search now matches historical
+  filenames.** The ``search`` parameter on
+  ``GET /api/v1/repositories`` is extended to also
+  match a repository whose ``Workspace.archive_filename``
+  rows contain the term. A search for
+  ``test-09-mixed-monorepo`` (or any substring) returns
+  the historical repository 13 even though
+  ``Repository.original_filename`` is null. The
+  extension is purely additive: the existing
+  filename, owner, name, canonical URL, and scan-ID
+  modes are preserved; the existing mutually-exclusive
+  scan-ID token mode is preserved.
+- **Stage message severity is a derived, structured
+  field, not a frontend string match.** v0.5-v2.0.5
+  rendered every ``failure_summary`` string with the
+  red ``"Failure: "`` prefix. Several normal no-data
+  outcomes (``No OSV advisories were returned for
+  this scan.``, ``No workflow files were discovered.``,
+  ``not_github_or_no_url``, ``1 parser warnings``) are
+  not stage-execution failures; they describe a
+  completed stage that did not produce records
+  because the input was honest. v2.0.6 adds an
+  additive ``message_severity`` field to
+  ``ScanStageRead`` (``"error"`` / ``"warning"`` /
+  ``"info"`` / ``"none"``) computed at the API
+  boundary from the existing structured fields
+  (``status``, ``records_processed``, ``failure_code``,
+  ``failure_summary``). The decision uses a closed
+  allow-list of known legacy reason codes (never a
+  broad substring rule): an unknown residual
+  summary falls through to ``"none"`` rather than
+  to ``"info"``. The visible text never begins with
+  ``"Failure: "`` for an ``info`` or ``"warning"``
+  severity row. The field is never persisted; it is
+  a derived read-time concern only.
+- **42 new tests.** 22 in
+  ``backend/tests/test_repository_historical_filenames_v2_0_6.py``
+  (historical-label precedence, conflict handling,
+  batched query, search by historical filename, the
+  field-test repro for repository 13, a query-count
+  regression that pins the bounded list-endpoint
+  query count) and 20 in
+  ``backend/tests/test_stage_message_severity_v2_0_6.py``
+  (closed-list decision coverage, ``stage_to_read``
+  mapping, the ``/scans/{id}/stages`` endpoint
+  contract, defensive fallback for unknown residual
+  summaries). The frontend adds 5 in
+  ``src/__tests__/repository_v2_0_6.test.tsx``
+  (historical archive filename as the primary title,
+  bounded opaque fallback, new-upload
+  ``original_filename`` regression, no local path
+  leak, scan count + latest scan + actions) and 10
+  in ``src/__tests__/stage_outcome_v2_0_6.test.tsx``
+  (info / warning / error / none rendering, no
+  ``"Failure: "`` prefix on info or warning, parser
+  warnings and provider degradation remain visible,
+  accessibility role is ``status`` for non-error and
+  ``alert`` for error).
+- **Version.** Bumped ``__version__`` to ``2.0.6``.
+  The frontend ``version_about`` test mock now
+  expects ``2.0.6``.
+- **Boundary preservation.** No new feature, no new
+  endpoint, no new persisted field, no migration
+  (Alembic head remains ``e5f6a7b8c9d0``), no new
+  export, no new organisation, no new provider, no
+  new dependency, no destructive change to the
+  field-test database (the historical scans #6, #7,
+  #8, #13, #15 are preserved as defect and reacceptance
+  evidence), no global Git config change, no remote
+  URL change, no destructive action, no production
+  deployment, no source-file mutation, no
+  ``original_filename`` backfill, no filesystem
+  read, no broad substring severity rule, no security
+  verdict, no claim that an empty scan is "clean" or
+  "vulnerability-free".
+
+## v2.0.5 — Comparison stability and repository identification
 
 A narrowly scoped, field-testing-driven patch that ships
 two real defects uncovered by a v2.0.4 field-test run.

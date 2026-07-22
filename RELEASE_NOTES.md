@@ -33,27 +33,36 @@ The product is built around three guarantees:
 
 The repository is a **local-first release candidate**,
 not a production SaaS, not a hosted service, and not a
-CI vendor. The current milestone (`v2.0.5`) is a
-narrowly scoped comparison-stability and
-repository-identification repair on top of `v2.0.4`.
-v2.0.5 does not add a new product feature or a new
-provider; it ships two real defects uncovered by a
-v2.0.4 field-test run. The first is a comparison
-sort-key crash when component identity keys contain
-nullable values (the v2.0.3 comparator raised
-``TypeError: '<' not supported between instances of
-'str' and 'NoneType'`` on the v0.5 component identity
-tuple ``(ecosystem, package_name, version)`` whenever
-the same package appeared with both a resolved and an
-unresolved version across manifests). The second is a
-repository-list UX defect: v2.0.4 surfaced an opaque
-canonical upload identifier (e.g.
-``upload/2ed7b06ed7d3d967``) as the primary row
-label, provided no scan count, no latest-scan summary,
-and no per-row "Open latest scan" / "Compare"
-action, and made the operator navigate two clicks to
-identify each row when several uploaded archives were
-present.
+CI vendor. The current milestone (`v2.0.6`) is a
+narrowly scoped historical-label and stage-outcome
+clarity repair on top of `v2.0.5`. v2.0.6 does not add
+a new product feature or a new provider; it ships two
+real usability defects uncovered by a v2.0.5 field-test
+run. The first is a historical-label defect: v0.x-v2.0.4
+uploaded repositories have
+`Repository.original_filename = NULL` and the v2.0.5
+list endpoint rendered the bounded opaque fallback
+`Uploaded archive · upload/<short-key>` as the primary
+label. v2.0.6 derives a per-repository historical
+archive filename from the persisted
+`Workspace.archive_filename` rows in a single batched
+query, surfaces that filename as the primary label for
+historical rows, and extends the search parameter to
+match historical filenames too. The second is a
+stage-outcome presentation defect: v0.5-v2.0.5 rendered
+every stage `failure_summary` string with the red
+`"Failure: "` prefix, but several normal no-data
+outcomes (no OSV advisories returned, no workflow
+files discovered, no components available to enrich,
+parser warnings) are completed-stage honest reports,
+not stage-execution failures. v2.0.6 adds an additive
+`message_severity` field (`"error"` / `"warning"` /
+`"info"` / `"none"`) computed at the API boundary
+from the existing structured fields; the visible text
+never begins with `"Failure: "` for `"info"` or
+`"warning"` severity rows. The field is derived, not
+persisted, and uses a closed allow-list of known legacy
+reason codes (never a broad substring rule).
 
 The v2.0.5 fix is two localised changes plus a
 reversible migration. The comparison fix introduces

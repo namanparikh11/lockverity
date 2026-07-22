@@ -94,13 +94,10 @@ export function ScanTimeline({ stages }: { stages: ScanStage[] }) {
               </div>
             </div>
             {stage.failure_summary ? (
-              <p
-                className="rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-800"
-                role="status"
-              >
-                <span className="font-semibold">Failure: </span>
-                {stage.failure_summary}
-              </p>
+              <StageMessage
+                severity={stage.message_severity}
+                summary={stage.failure_summary}
+              />
             ) : null}
             {stage.failure_code ? (
               <p className="text-xs text-rose-700">
@@ -189,5 +186,59 @@ export function PipelineFailureAlert({ stages }: { stages: ScanStage[] }) {
         </ul>
       </div>
     </div>
+  );
+}
+
+/**
+ * v2.0.6: render a stage's residual ``failure_summary`` with
+ * the appropriate severity styling. The decision is sourced
+ * from the backend's ``message_severity`` field; the
+ * frontend never invents a severity from the message text.
+ *
+ * - ``"error"`` - red ``Failure:`` prefix, ``role="alert"``.
+ * - ``"warning"`` - amber ``Partial:`` prefix, ``role="status"``.
+ * - ``"info"`` - neutral, no failure prefix, ``role="status"``.
+ * - ``"none"`` - no message block.
+ */
+export function StageMessage({
+  severity,
+  summary,
+}: {
+  severity: ScanStage["message_severity"];
+  summary: string;
+}) {
+  if (severity === "none") {
+    return null;
+  }
+  if (severity === "error") {
+    return (
+      <p
+        className="rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-800"
+        role="alert"
+      >
+        <span className="font-semibold">Failure: </span>
+        {summary}
+      </p>
+    );
+  }
+  if (severity === "warning") {
+    return (
+      <p
+        className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800"
+        role="status"
+      >
+        <span className="font-semibold">Partial output: </span>
+        {summary}
+      </p>
+    );
+  }
+  // info: neutral styling, no failure prefix
+  return (
+    <p
+      className="rounded-md border border-ink-200 bg-white px-3 py-2 text-xs text-ink-700"
+      role="status"
+    >
+      {summary}
+    </p>
   );
 }

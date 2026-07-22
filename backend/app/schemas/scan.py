@@ -43,6 +43,23 @@ class ScanStageRead(TimestampMixin):
     records_processed: int
     failure_code: str | None = None
     failure_summary: str | None = None
+    # v2.0.6: derived message severity. Computed at the
+    # API boundary from ``status``, ``records_processed``,
+    # ``failure_code``, and ``failure_summary``. Never
+    # persisted; never used to fabricate a security
+    # conclusion. Values: ``"error"`` (failed stage with
+    # a real failure code or summary), ``"warning"``
+    # (partial stage or completed stage with non-zero
+    # records and a residual summary, e.g. parser
+    # warnings), ``"info"`` (completed stage with zero
+    # records and a normal no-data summary, e.g. "No OSV
+    # advisories were returned"), or ``"none"`` (no
+    # message requiring emphasis). The frontend uses
+    # this to choose between error / warning / info
+    # styling; the visible text never begins with
+    # ``"Failure: "`` for an ``info`` or ``"warning"``
+    # severity row.
+    message_severity: str | None = None
 
 
 class FindingRead(TimestampMixin):

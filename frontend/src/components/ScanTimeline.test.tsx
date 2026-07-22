@@ -17,6 +17,7 @@ function stage(overrides: Partial<ScanStage> = {}): ScanStage {
     records_processed: 0,
     failure_code: null,
     failure_summary: null,
+    message_severity: "none",
     created_at: "2024-01-01T00:00:00Z",
     updated_at: "2024-01-01T00:00:10Z",
     ...overrides,
@@ -46,7 +47,7 @@ describe("ScanTimeline", () => {
     render(
       <ScanTimeline
         stages={[
-          stage({ id: 1, status: "failed", failure_code: "EBOOM", failure_summary: "Rate limited" }),
+          stage({ id: 1, status: "failed", failure_code: "EBOOM", failure_summary: "Rate limited", message_severity: "error" }),
         ]}
       />
     );

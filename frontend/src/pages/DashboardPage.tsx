@@ -583,10 +583,13 @@ function LatestScansPanel() {
                 </div>
               ) : null}
               {scan.failure_summary ? (
-                <p className="mt-2 text-xs text-rose-700">
-                  <span className="font-semibold">Failure: </span>
-                  {scan.failure_summary}
-                </p>
+                <ScanFailureNote
+                  severity={computeScanFailureSeverity(
+                    scan,
+                    stagesByScan[scan.id] ?? null,
+                  )}
+                  summary={scan.failure_summary}
+                />
               ) : null}
             </li>
           ))}
@@ -594,6 +597,83 @@ function LatestScansPanel() {
       )}
     </div>
   );
+}
+
+/**
+ * v2.0.6: choose the message severity for a scan-level
+ * ``failure_summary`` block. The rule mirrors the
+ * backend stage-severity helper, applied at the scan
+ * level:
+ * - ``failed`` -> ``error``
+ * - ``partial`` -> ``warning``
+ * - ``completed`` with a closed-list no-data summary
+ *   -> ``info``
+ * - everything else -> ``none``
+ *
+ * The function is intentionally narrow: it does not
+ * match arbitrary substrings; it only recognises the
+ * exact legacy reason codes observed in the field-test
+ * database.
+ */
+function computeScanFailureSeverity(
+  scan: { status: string },
+  stages: { status: string; message_severity: string }[] | null,
+): "error" | "warning" | "info" | "none" {
+  if (scan.status === "failed") return "error";
+  if (scan.status === "partial") return "warning";
+  if (scan.status === "completed" && stages) {
+    // If every stage is "info" or "none", the scan
+    // overall is a normal no-data outcome.
+    if (
+      stages.length > 0 &&
+      stages.every(
+        (s) => s.message_severity === "info" || s.message_severity === "none",
+      )
+    ) {
+      return "info";
+    }
+    if (stages.some((s) => s.message_severity === "error")) return "error";
+    if (stages.some((s) => s.message_severity === "warning")) return "warning";
+  }
+  return "warning";
+}
+
+/**
+ * v2.0.6: render a scan-level failure summary with
+ * severity-appropriate styling. Mirrors the stage
+ * ``StageMessage`` component above.
+ */
+function ScanFailureNote({
+  severity,
+  summary,
+}: {
+  severity: "error" | "warning" | "info" | "none";
+  summary: string;
+}) {
+  if (severity === "error") {
+    return (
+      <p className="mt-2 text-xs text-rose-700" role="alert">
+        <span className="font-semibold">Failure: </span>
+        {summary}
+      </p>
+    );
+  }
+  if (severity === "warning") {
+    return (
+      <p className="mt-2 text-xs text-amber-700" role="status">
+        <span className="font-semibold">Partial output: </span>
+        {summary}
+      </p>
+    );
+  }
+  if (severity === "info") {
+    return (
+      <p className="mt-2 text-xs text-ink-600" role="status">
+        {summary}
+      </p>
+    );
+  }
+  return null;
 }
 
 // Lint/import-time touch to keep the symbol referenced from

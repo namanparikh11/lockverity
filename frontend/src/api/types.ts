@@ -254,6 +254,16 @@ export interface ScanStage {
   records_processed: number;
   failure_code: string | null;
   failure_summary: string | null;
+  // v2.0.6: derived message severity. Computed at the
+  // API boundary from the existing structured fields
+  // (status, records_processed, failure_code,
+  // failure_summary); never persisted. The frontend
+  // uses this to choose between error / warning /
+  // info / none styling. The visible text never
+  // begins with "Failure: " when the severity is
+  // "info" or "warning" - the failure label only
+  // accompanies an actual "error" severity.
+  message_severity: "error" | "warning" | "info" | "none";
   created_at: string;
   updated_at: string;
 }

@@ -39,12 +39,37 @@ def create_repository(
     return RepositoryRead.model_validate(repo)
 
 
-def _display_name(repo) -> str:
+def _upload_fallback_label(repo) -> str:
+    """Return the bounded opaque fallback label for an uploaded row."""
+    short = (repo.canonical_url or "").removeprefix("upload://").strip()
+    if not short:
+        return "Uploaded archive"
+    return f"Uploaded archive · upload/{short}"
+
+
+def _display_name(
+    repo,
+    *,
+    historical_archive_filename: str | None = None,
+) -> str:
     """Return the primary human-readable label for a repository row.
 
-    GitHub rows: ``owner/name``.
-    Uploaded rows: ``original_filename`` if known, else
-    ``Uploaded archive · upload/<short-key>``.
+    Precedence (v2.0.6):
+
+    1. GitHub rows: ``owner/name``.
+    2. Uploaded rows with ``Repository.original_filename``:
+       the persisted filename (basename-only, sanitised at
+       intake).
+    3. Uploaded rows with a non-null
+       ``Workspace.archive_filename`` from a single agreed
+       historical basename: that historical filename.
+       The helper is called with a value already resolved by
+       ``repository_repo.get_repository_historical_filenames``
+       so a conflict returns ``None`` here (the bounded
+       fallback is used instead).
+    4. Uploaded rows with no filename metadata at all: the
+       bounded opaque fallback
+       ``Uploaded archive · upload/<short-key>``.
 
     The function never exposes a local absolute path. The
     short key is the part of ``canonical_url`` after
@@ -55,10 +80,9 @@ def _display_name(repo) -> str:
         return f"{repo.owner}/{repo.name}"
     if repo.original_filename:
         return repo.original_filename
-    short = (repo.canonical_url or "").removeprefix("upload://").strip()
-    if not short:
-        return "Uploaded archive"
-    return f"Uploaded archive · upload/{short}"
+    if historical_archive_filename:
+        return historical_archive_filename
+    return _upload_fallback_label(repo)
 
 
 def _canonical_identity(repo) -> str:
@@ -113,6 +137,12 @@ def list_repositories(
     )
     # Single batched summary read; never one query per row.
     summaries = repository_repo.get_repository_summaries(session, [r.id for r in items])
+    # v2.0.6: single batched historical-filename read; never
+    # one query per row. The two batched reads are issued
+    # back-to-back so the list endpoint still produces a
+    # bounded query count (one paginated list query, one
+    # summary aggregate, one historical-filename read).
+    historical = repository_repo.get_repository_historical_filenames(session, [r.id for r in items])
     enriched: list[RepositoryWithSummary] = []
     for repo in items:
         base = RepositoryRead.model_validate(repo)
@@ -131,11 +161,21 @@ def list_repositories(
                 latest_scan_trigger_type=None,
                 eligible_comparison_scan_count=0,
             )
+        # v2.0.6: pass the historical archive filename
+        # into the display-name helper so an uploaded row
+        # whose ``original_filename`` is null (a v2.0.4 or
+        # earlier row) still surfaces a human-readable
+        # label derived from a trustworthy persisted
+        # ``Workspace.archive_filename``. A conflict
+        # surfaces as ``None`` and the helper falls back
+        # to the bounded opaque label.
+        hist = historical.get(repo.id)
+        historical_filename = hist.historical_archive_filename if hist is not None else None
         enriched.append(
             RepositoryWithSummary(
                 **base.model_dump(),
                 summary=_summary_to_dict(summary),
-                display_name=_display_name(repo),
+                display_name=_display_name(repo, historical_archive_filename=historical_filename),
                 canonical_identity=_canonical_identity(repo),
             )
         )

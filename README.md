@@ -463,87 +463,77 @@ npm test -- --run src/__tests__/evidence_report_v1_0.test.tsx  # v1.0 evidence r
 
 ## Current milestone
 
-**v2.0.5 — Comparison stability and repository
-identification.** A narrowly scoped
-field-testing-driven patch that ships two real
-defects uncovered by a v2.0.4 field-test run.
-v2.0.5 does not introduce a new feature. The
-first defect is a comparison sort-key crash when
-component identity keys contain nullable values:
-the v0.5 component identity tuple
-``(ecosystem, package_name, version)`` has a
-nullable ``version`` for an unresolved range,
-and Python's default ``sorted`` raises
-``TypeError: '<' not supported between instances
-of 'str' and 'NoneType'`` whenever the same
-package appears with both a resolved and an
-unresolved version across manifests. v2.0.5
-introduces ``_nullable_key_sort_key`` in
-``backend/app/services/comparison_service.py``
-that converts ``None`` to ``(0, "")`` and any
-non-None value to ``(1, str(value))``; the
-original identity tuple is not mutated, and the
-four ``sorted(set(...))`` (and one
-``sorted(set(...) & set(...))``) call sites that
-mix ``None`` with strings now use the helper. The
-vulnerability and licence comparators were also
-repaired because they share the same
-nullable-key risk. The field-test repro was
-scans #13 vs. #15 in
-``var/manual-review/lockverity-field-test.sqlite``;
-``GET /repositories/13/compare?baseline=13&comparison=15``
-returned 500 with that exact traceback. The
-second defect is a repository-list UX defect:
-v2.0.4 surfaced an opaque canonical upload
-identifier (e.g.
-``upload/2ed7b06ed7d3d967``) as the primary row
-label, provided no scan count, no latest-scan
-summary, and no per-row "Open latest scan" /
-"Compare" action, and made the operator navigate
-two clicks to identify each row when several
-uploaded archives were present. v2.0.5 adds a
-nullable ``original_filename`` column on
-``repositories``, populated for new uploads with
-the basename of the client-supplied filename
-(sanitised via ``basename_safely`` so an absolute
-path the client sends never reaches the database).
-The list endpoint now returns a
-``RepositoryWithSummary`` shape with
-``display_name`` (``owner/repository`` for GitHub;
-the original-filename basename for uploaded rows;
-the bounded fallback
-``Uploaded archive · upload/<short-key>`` for
-historical rows where the filename is unavailable),
-``canonical_identity`` (the secondary technical
-identifier), and a per-row ``summary`` that
-includes ``scan_count``,
-``eligible_comparison_scan_count`` (the number of
-scans the comparator accepts), and ``latest_scan``
-(the scan with the largest ``id``; ``None`` for
-repositories with no scans). The summary is
-computed by a single batched query so the list
-endpoint does not produce an N+1 request pattern.
-The list page renders "Open latest scan" (disabled
-when no scan exists), "View history" (always
-present), and "Compare" (disabled when fewer than
-two eligible scans exist). The search box
-additionally resolves pure-integer or ``#N`` tokens
-to the parent repository of scan ``N``; a
-filename search matches the bounded set of
-persisted fields (uploaded original filename,
-GitHub ``owner``/``name``, canonical URL,
-canonical upload identifier). A new Alembic
-revision (``e5f6a7b8c9d0``) adds the
-``repositories.original_filename`` column and a
-covering index; the migration is reversible and
-leaves historical rows at ``NULL``. The
-v2.0.4 BOM compatibility repair, the v2.0.3
-ruff pin / ``.gitattributes`` first-run
-reproducibility, the v2.0.2 nested-manifest
-discovery fix, the v2.0.1 per-repository scan
-filter, and the v2.0 release-validation script
-all carry over verbatim; v2.0.5 does not change
-any of them. Version bumped to ``2.0.5``.
+**v2.0.6 — Historical upload identification and
+clearer stage-outcome presentation.** A narrowly
+scoped, field-testing-driven patch that ships two
+real usability defects uncovered by a v2.0.5
+field-test run. v2.0.6 does not introduce a new
+feature. The first defect is a historical-label
+defect: v0.x-v2.0.4 uploaded repositories have
+``Repository.original_filename = NULL`` and the
+v2.0.5 list endpoint rendered the bounded opaque
+fallback ``Uploaded archive · upload/<short-key>``
+as the primary label. v2.0.6 introduces
+``get_repository_historical_filenames`` in
+``backend/app/repositories/repository_repo.py``:
+a single batched query that resolves a per-
+repository historical archive filename from the
+persisted ``Workspace.archive_filename`` rows. The
+helper surfaces a single filename when every
+workspace for the repository agrees, flags a
+conflict (and retains the bounded opaque
+fallback) when multiple distinct filenames are
+present, and returns ``None`` when no filename is
+available. The list endpoint now reads the
+historical helper and uses the historical
+filename as the primary ``display_name`` for
+uploaded rows whose
+``Repository.original_filename`` is null.
+Repository #13 in the field-test database now
+renders as ``test-09-mixed-monorepo.zip`` instead
+of the bounded fallback. The helper is read-only:
+no historical row is mutated, no
+``Repository.original_filename`` is backfilled, no
+filesystem path is read. The repository search
+parameter is extended to also match a
+repository whose ``Workspace.archive_filename``
+rows contain the term; a search for
+``test-09-mixed-monorepo`` (or any substring)
+returns the historical repository 13 even though
+``Repository.original_filename`` is null. The
+second defect is a stage-outcome presentation
+defect: v0.5-v2.0.5 rendered every stage
+``failure_summary`` string with the red
+``"Failure: "`` prefix. Several normal no-data
+outcomes (``No OSV advisories were returned for
+this scan.``, ``No workflow files were
+discovered.``, ``not_github_or_no_url``, ``1
+parser warnings``) are not stage-execution
+failures; they describe a completed stage that
+did not produce records because the input was
+honest. v2.0.6 adds an additive
+``message_severity`` field to ``ScanStageRead``
+(``"error"`` / ``"warning"`` / ``"info"`` /
+``"none"``) computed at the API boundary from
+the existing structured fields (``status``,
+``records_processed``, ``failure_code``,
+``failure_summary``). The decision uses a closed
+allow-list of known legacy reason codes (never a
+broad substring rule): an unknown residual
+summary falls through to ``"none"`` rather than
+to ``"info"``. The visible text never begins
+with ``"Failure: "`` for an ``"info"`` or
+``"warning"`` severity row. The field is never
+persisted; it is a derived read-time concern
+only. v2.0.5 (the comparison stability and
+repository identification release), the v2.0.4
+BOM compatibility repair, the v2.0.3 ruff pin /
+``.gitattributes`` first-run reproducibility,
+the v2.0.2 nested-manifest discovery fix, the
+v2.0.1 per-repository scan filter, and the v2.0
+release-validation script all carry over
+verbatim; v2.0.6 does not change any of them.
+Version bumped to ``2.0.6``.
 
 `v2.0.3` was the previous first-run
 reproducibility repair that pinned

@@ -13,6 +13,19 @@ canonical upload identifier, and exact repository / scan IDs). The
 ``get_repository_summaries`` companion function returns per-row
 ``scan_count`` / ``latest_scan`` / ``eligible_comparison_count``
 data in a single batched query.
+
+v2.0.6: ``get_repository_historical_filenames`` returns a per-row
+historical archive filename derived from the repository's
+``Workspace.archive_filename`` rows (one batched query, no
+N+1). The historical filename is used as the secondary
+display-name source for uploaded repositories whose
+``Repository.original_filename`` is null (the v0.x-v2.0.4
+historical rows). The function also flags
+``historical_filename_conflict`` when more than one distinct
+non-null filename is present. Search now also matches the
+historical ``Workspace.archive_filename`` set, so a filename
+search returns historical rows that pre-date the v2.0.5
+``original_filename`` column.
 """
 
 from __future__ import annotations
@@ -30,6 +43,7 @@ from app.models.repository import (
     RepositorySourceType,
 )
 from app.models.scan_run import ScanRun, ScanStatus
+from app.models.workspace import Workspace
 
 # ---------------------------------------------------------------------------
 # Read helpers
@@ -130,6 +144,15 @@ def _search_predicate(
     predicate, because a pure digit token should not also
     match every owner / name fragment that contains a
     matching digit.
+
+    v2.0.6: the free-text predicate also matches a
+    repository whose ``Workspace.archive_filename`` rows
+    contain the term. The match is performed via a
+    correlated ``EXISTS`` subquery scoped to the
+    repository; it does not read filesystem paths and it
+    does not scan ignored workspace contents. The added
+    clause is purely additive and is bounded by the
+    ``IX_workspaces_scan_run_id`` index.
     """
     if has_scan_id and scan_id is not None:
         scan_subq = select(ScanRun.repository_id).where(ScanRun.id == scan_id).scalar_subquery()
@@ -141,6 +164,24 @@ def _search_predicate(
         Repository.canonical_url.ilike(pattern),
         Repository.original_filename.ilike(pattern),
     ]
+    # v2.0.6: also match a repository if any of its
+    # workspaces carry the term in ``archive_filename``.
+    # The EXISTS subquery is correlated on
+    # ``scan_runs.repository_id``; it does not require
+    # reading workspace files from disk. The parameter
+    # is bound; raw SQL string interpolation is never
+    # used.
+    archive_match_subq = (
+        select(Workspace.id)
+        .join(ScanRun, ScanRun.id == Workspace.scan_run_id)
+        .where(ScanRun.repository_id == Repository.id)
+        .where(Workspace.archive_filename.is_not(None))
+        .where(Workspace.archive_filename.ilike(pattern))
+        .limit(1)
+    )
+    free_text_clauses.append(
+        Repository.id.in_(select(Repository.id).where(archive_match_subq.exists()))
+    )
     return or_(*free_text_clauses)
 
 
@@ -340,4 +381,115 @@ def get_repository_summaries(
                 latest_scan_trigger_type=None,
                 eligible_comparison_scan_count=0,
             )
+    return out
+
+
+# ---------------------------------------------------------------------------
+# v2.0.6: per-row historical filename (derived from Workspace rows)
+# ---------------------------------------------------------------------------
+#
+# The v2.0.5 ``repositories.original_filename`` column was
+# added by the v2.0.5 migration; pre-existing v0.x-v2.0.4
+# historical uploaded repositories have ``original_filename
+# = NULL``. The persisted ``Workspace.archive_filename`` row
+# for each scan still carries the original archive filename
+# (basename-only, sanitised at intake by
+# ``basename_safely``). This helper derives a single
+# representative historical filename from a repository's
+# workspaces, scoped by the repository id, in a single
+# batched query.
+#
+# Behaviour:
+# - If every non-null ``archive_filename`` agrees on a
+#   single basename, the helper returns that filename
+#   (``historical_archive_filename``); the
+#   ``historical_filename_conflict`` flag is ``False``.
+# - If no non-null ``archive_filename`` rows exist (or
+#   every row is null), the helper returns
+#   ``historical_archive_filename=None`` and
+#   ``historical_filename_conflict=False``.
+# - If more than one distinct non-null ``archive_filename``
+#   exists, the helper returns
+#   ``historical_archive_filename=None`` and
+#   ``historical_filename_conflict=True``. The route
+#   layer retains the bounded opaque fallback label in
+#   this case so a fabricated primary label is never
+#   surfaced.
+#
+# The result is consumed read-only at the API boundary;
+# the helper never mutates ``Workspace.archive_filename``
+# and never mutates ``Repository.original_filename``. The
+# batched query issues one ``GROUP BY`` (not N+1).
+@dataclass(slots=True, frozen=True)
+class RepositoryHistoricalFilename:
+    repository_id: int
+    historical_archive_filename: str | None
+    historical_filename_conflict: bool
+    historical_archive_filename_count: int
+
+
+def get_repository_historical_filenames(
+    session: Session,
+    repository_ids: Sequence[int],
+) -> dict[int, RepositoryHistoricalFilename]:
+    """Return per-row historical filename data for the given repository ids.
+
+    The query is a single batched read: it issues one
+    ``SELECT ... GROUP BY repository_id, archive_filename``
+    statement scoped to the supplied repository ids, and
+    then aggregates the per-filename rows in Python. A
+    repository that has no workspaces appears in the
+    result with ``historical_archive_filename=None``,
+    ``historical_filename_conflict=False``, and
+    ``historical_archive_filename_count=0``.
+    """
+    if not repository_ids:
+        return {}
+    rid_list = list(repository_ids)
+    # Pull every (repository_id, archive_filename) pair
+    # once. We deliberately read all non-null pairs (not
+    # the MIN/MAX) so the conflict detection sees every
+    # distinct value.
+    rows = session.execute(
+        select(ScanRun.repository_id, Workspace.archive_filename)
+        .join(Workspace, Workspace.scan_run_id == ScanRun.id)
+        .where(ScanRun.repository_id.in_(rid_list))
+        .where(Workspace.archive_filename.is_not(None))
+    ).all()
+    by_repo: dict[int, set[str]] = {}
+    for repo_id, archive_filename in rows:
+        if archive_filename is None:
+            continue
+        by_repo.setdefault(int(repo_id), set()).add(str(archive_filename))
+    out: dict[int, RepositoryHistoricalFilename] = {}
+    for rid in rid_list:
+        names = by_repo.get(rid, set())
+        if not names:
+            out[rid] = RepositoryHistoricalFilename(
+                repository_id=rid,
+                historical_archive_filename=None,
+                historical_filename_conflict=False,
+                historical_archive_filename_count=0,
+            )
+            continue
+        if len(names) == 1:
+            only = next(iter(names))
+            out[rid] = RepositoryHistoricalFilename(
+                repository_id=rid,
+                historical_archive_filename=only,
+                historical_filename_conflict=False,
+                historical_archive_filename_count=1,
+            )
+            continue
+        # Conflict: more than one distinct non-null
+        # archive filename. We intentionally do not
+        # pick a winner; the API falls back to the
+        # bounded opaque label and exposes
+        # ``historical_filename_conflict=true``.
+        out[rid] = RepositoryHistoricalFilename(
+            repository_id=rid,
+            historical_archive_filename=None,
+            historical_filename_conflict=True,
+            historical_archive_filename_count=len(names),
+        )
     return out
