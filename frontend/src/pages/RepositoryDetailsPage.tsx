@@ -11,6 +11,7 @@ import type {
   ScanStatus,
   ScanTriggerType,
 } from "@/api/types";
+import { repositoryDisplayName } from "@/utils/repositoryLabels";
 import { CopyableIdentifier } from "@/components/CopyableIdentifier";
 import { DataCompletenessNotice } from "@/components/DataCompletenessNotice";
 import { EmptyState } from "@/components/EmptyState";
@@ -250,11 +251,11 @@ export function RepositoryDetailsPage() {
   return (
     <>
       <PageHeader
-        title={`${repo.owner}/${repo.name}`}
+        title={repositoryDisplayName(repo)}
         description={repo.description ?? "No description."}
         breadcrumbs={[
           { label: "Repositories", to: "/repositories" },
-          { label: `${repo.owner}/${repo.name}` },
+          { label: repositoryDisplayName(repo) },
         ]}
         actions={
           <button
@@ -278,9 +279,13 @@ export function RepositoryDetailsPage() {
       <section className="mb-6 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
         <SummaryCard label="Identity" tone="muted">
           <p className="text-base font-semibold">
-            <span className="font-mono text-ink-500">{repo.owner}/</span>
-            {repo.name}
+            {repositoryDisplayName(repo)}
           </p>
+          {repo.original_filename ? (
+            <p className="mt-1 text-xs text-ink-500">
+              Original filename: <span className="font-mono">{repo.original_filename}</span>
+            </p>
+          ) : null}
           <p className="mt-1 break-all text-sm text-ink-700">
             {repo.canonical_url ?? "—"}
           </p>

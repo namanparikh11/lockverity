@@ -32,7 +32,7 @@ SCRIPT = BACKEND_DIR / "scripts" / "load_demo.py"
 # The expected Alembic head revision. The loader must run
 # the same migration chain the application uses, so the
 # resulting ``alembic_version`` row must match this value.
-EXPECTED_ALEMBIC_HEAD = "d4e5f6a7b8c9"
+EXPECTED_ALEMBIC_HEAD = "e5f6a7b8c9d0"
 # The loader's output safety check requires the resolved
 # path to be under ``backend/var/``; the test temp paths
 # live under ``backend/var/loader-tests/`` so each test

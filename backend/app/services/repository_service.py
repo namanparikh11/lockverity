@@ -93,6 +93,29 @@ def get_repository_or_404(session: Session, repository_id: int) -> Repository:
 
 
 def list_repositories(
-    session: Session, *, page: int, page_size: int
+    session: Session,
+    *,
+    page: int,
+    page_size: int,
+    search: str | None = None,
+    provider: str | None = None,
+    source_type: str | None = None,
+    archived: str | None = None,
 ) -> tuple[Sequence[Repository], int]:
-    return repository_repo.list_repositories(session, page=page, page_size=page_size)
+    """Return a page of repositories plus the total count.
+
+    v2.0.5: accepts bounded search and filter kwargs that
+    mirror the ``GET /repositories`` query parameters. The
+    underlying ``repository_repo.list_repositories`` keeps
+    the SQLAlchemy predicate logic; this service layer is a
+    thin pass-through.
+    """
+    return repository_repo.list_repositories(
+        session,
+        page=page,
+        page_size=page_size,
+        search=search,
+        provider=provider,
+        source_type=source_type,
+        archived=archived,
+    )

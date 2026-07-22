@@ -15,4 +15,4 @@ backend's version through ``/system/info`` so the product stays
 consistent by construction.
 """
 
-__version__ = "2.0.4"
+__version__ = "2.0.5"

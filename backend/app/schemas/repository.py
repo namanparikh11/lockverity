@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Literal
 
 from app.models.repository import (
     RepositoryProvider,
     RepositorySourceType,
     RepositoryVisibility,
 )
+from app.models.scan_run import ScanStatus, ScanTriggerType
 from app.schemas.common import NonEmptyStr, SchemaModel, TimestampMixin
 
 
@@ -35,3 +37,72 @@ class RepositoryRead(TimestampMixin):
     visibility: RepositoryVisibility
     archived: bool
     last_provider_sync_at: datetime | None = None
+    # v2.0.5: human-readable primary label. Basename of the
+    # uploaded filename for uploaded archives, ``None`` for
+    # GitHub repositories (the operator uses ``owner/name``
+    # instead). Backwards-compatible additive field.
+    original_filename: str | None = None
+
+
+# v2.0.5: per-row summary data returned alongside each
+# repository in the list response. The summary is computed by
+# a single batched query (``get_repository_summaries``) so
+# the list endpoint does not produce an N+1 request pattern
+# to look up per-row scan counts.
+class RepositoryLatestScan(SchemaModel):
+    """The most recent scan for a repository, or ``None`` if no scans exist."""
+
+    id: int
+    status: ScanStatus
+    trigger_type: ScanTriggerType
+    created_at: datetime
+    completed_at: datetime | None = None
+
+
+class RepositorySummary(SchemaModel):
+    """Bounded summary of a repository's scan history.
+
+    ``scan_count`` is the total number of scan rows for the
+    repository. ``eligible_comparison_scan_count`` is the
+    number of scans that the comparator will accept
+    (``completed`` or ``partial``; the same set the
+    ``/repositories/{id}/compare`` page uses). ``latest_scan``
+    is the scan with the largest ``id`` (monotonic on
+    SQLite); it is ``None`` when no scan has ever run.
+    """
+
+    scan_count: int
+    eligible_comparison_scan_count: int
+    latest_scan: RepositoryLatestScan | None = None
+
+
+class RepositoryWithSummary(RepositoryRead):
+    """``RepositoryRead`` augmented with the per-row summary.
+
+    Used by ``GET /api/v1/repositories`` to keep the
+    existing ``RepositoryRead`` shape backwards-compatible
+    for callers that ignore the new fields.
+    """
+
+    summary: RepositorySummary
+    # Bounded human-readable label: ``owner/repository`` for
+    # GitHub rows, ``original_filename`` for uploaded rows
+    # (or the bounded fallback when ``original_filename``
+    # is null). Callers use this as the primary row title;
+    # the opaque ``canonical_url`` is the secondary technical
+    # identifier. The field is computed server-side; the
+    # frontend never assembles a label from the raw
+    # ``owner``/``name`` pair.
+    display_name: str
+    # Secondary technical identifier: ``owner/repository`` for
+    # GitHub rows, ``upload/<short-key>`` for uploaded rows
+    # (derived from ``canonical_url``). The frontend renders
+    # this as the muted sub-line under the primary title.
+    canonical_identity: str
+
+
+# v2.0.5: the search-mode field is included so the frontend
+# can render a search-state banner if it ever wants to. The
+# actual predicate is on the server side; the response does
+# not leak the literal query.
+RepositorySearchMode = Literal["free_text", "scan_id"]

@@ -88,6 +88,15 @@ class Repository(Base, TimestampMixin):
     last_provider_sync_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
+    # v2.0.5: original uploaded filename, basename only. Nullable
+    # because the v0.x and v2.0-v2.0.4 historical rows were
+    # created before this column existed; the upload-intake path
+    # populates it for new uploads. The intake service
+    # sanitises the value to a basename (``os.path.basename``
+    # semantics) so a client-supplied absolute path never
+    # reaches the database. The field is intentionally not
+    # user-editable: editable aliases are a future-work item.
+    original_filename: Mapped[str | None] = mapped_column(String(512), nullable=True)
 
     scans: Mapped[list[app.models.scan_run.ScanRun]] = relationship(  # type: ignore[name-defined]  # noqa: F821
         back_populates="repository",
