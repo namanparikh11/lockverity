@@ -1,6 +1,6 @@
 import { RefreshCw } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link } from "react-router";
 
 import { api } from "@/api/api";
 import type {

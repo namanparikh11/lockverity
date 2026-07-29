@@ -4,17 +4,22 @@
 
 | Version | Supported          |
 | ------- | ------------------ |
-| v0.1.x  | Yes                |
-| < v0.1  | No                 |
+| v2.0.x  | Yes                |
+| v0.5 - v1.9 | Best-effort, no backports |
+| < v0.5  | No                 |
 
-Lockverity is at architecture baseline (v0.1). Until 1.0 the project
-does not commit to any compatibility promises; the data model, the
-API, and the file formats may change between minor versions.
+Lockverity is in a `v2.0` local-first release-candidate line. Until
+`v2.0` reaches its `1.0` (long-term support) milestone, the project
+does not commit to long-term compatibility promises; the data
+model, the API, and the file formats may change between minor
+versions. Security fixes are backported to the current
+`v2.0.x` line only.
 
 ## Responsible disclosure
 
-Please report security issues to **security@lockverity.example**
-(replace with the project's real contact address before publishing).
+Please report security issues through the GitHub Security
+Advisories flow at
+[`https://github.com/namanparikh11/lockverity/security/advisories/new`](https://github.com/namanparikh11/lockverity/security/advisories/new).
 Do not file public issues for suspected vulnerabilities.
 
 We will:

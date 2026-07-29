@@ -199,7 +199,6 @@ The v0.2 surface keeps the v0.1 guarantees and adds:
 | Setting | Default | Purpose |
 | --- | --- | --- |
 | `LOCKVERITY_WORKSPACE_ROOT` | `./var/workspace` | root for the workspace tree |
-| `LOCKVERITY_GITHUB_API_URL` | `https://api.github.com` | override only for tests |
 | `LOCKVERITY_GITHUB_TOKEN` | unset | optional, server-side only |
 | `LOCKVERITY_GITHUB_TIMEOUT_SECONDS` | `15` | HTTP timeout for the GitHub API |
 | `LOCKVERITY_GITHUB_MAX_RESPONSE_BYTES` | `10 MiB` | API response cap |

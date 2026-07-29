@@ -8,7 +8,7 @@
 
 import { describe, expect, it, beforeEach, afterEach, vi } from "vitest";
 import { render, screen, waitFor, cleanup } from "@testing-library/react";
-import { MemoryRouter, Route, Routes } from "react-router-dom";
+import { MemoryRouter, Route, Routes } from "react-router";
 
 import { AppShell } from "@/layouts/AppShell";
 import { AboutPage } from "@/pages/AboutPage";
@@ -88,7 +88,7 @@ describe("About page current product copy", () => {
     cleanup();
   });
 
-  it("documents v1.0 capabilities and the defensive-only scope", () => {
+  it("documents v2.0.6 capabilities and the defensive-only scope", () => {
     render(
       <MemoryRouter initialEntries={["/about"]}>
         <Routes>
@@ -98,12 +98,12 @@ describe("About page current product copy", () => {
         </Routes>
       </MemoryRouter>
     );
-    // The "What v1.0 implements today" section header must be
+    // The "What v2.0.6 implements today" section header must be
     // present. The About page is the single source of truth
     // for the current milestone and must be kept in sync with
     // ``backend/app/_version.py``.
     expect(
-      screen.getByRole("heading", { name: /what v1\.0 implements today/i })
+      screen.getByRole("heading", { name: /what v2\.0\.6 implements today/i })
     ).toBeInTheDocument();
     // The v1.0 human-readable evidence report is described with
     // the bounded &ldquo;not a verdict / not a certification /
@@ -140,7 +140,7 @@ describe("About page current product copy", () => {
     ).toBeInTheDocument();
   });
 
-  it("does not regress to describing v0.1 as the current milestone", () => {
+  it("does not regress to describing v0.1 or v1.0 as the current milestone", () => {
     render(
       <MemoryRouter initialEntries={["/about"]}>
         <Routes>
@@ -157,6 +157,12 @@ describe("About page current product copy", () => {
     ).not.toBeInTheDocument();
     expect(
       screen.queryByRole("heading", { name: /what v0\.1 does not include/i })
+    ).not.toBeInTheDocument();
+    // The stale "What v1.0 implements today" header (the v2.0.6
+    // release replaced the v1.0 about copy with the v2.0.6 copy)
+    // must not be present any more either.
+    expect(
+      screen.queryByRole("heading", { name: /what v1\.0 implements today/i })
     ).not.toBeInTheDocument();
   });
 });

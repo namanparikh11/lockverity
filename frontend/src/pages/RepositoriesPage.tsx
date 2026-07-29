@@ -1,6 +1,6 @@
 import { GitBranch, GitCompare, ExternalLink, Plus, Upload } from "lucide-react";
 import { useEffect, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link } from "react-router";
 
 import { api } from "@/api/api";
 import type {

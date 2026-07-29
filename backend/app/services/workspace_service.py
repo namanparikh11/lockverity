@@ -164,18 +164,72 @@ class WorkspaceService:
         kind: WorkspaceKind,
         archive_filename: str | None = None,
     ) -> Workspace:
-        """Create a fresh workspace for ``scan`` and return the row."""
+        """Create a fresh workspace for ``scan`` and return the row.
+
+        ``archive_filename`` is the human-readable label of
+        the source archive. The sanitisation policy
+        depends on the origin of the value:
+
+        * Client-supplied filenames (``kind ==
+          UPLOADED_ARCHIVE``) are run through
+          :func:`basename_safely` at write time so a
+          Windows drive letter, POSIX ``/etc/passwd``-style
+          component, or a parent-traversal segment can
+          never reach the database.
+
+        * Trusted internally-generated GitHub provenance
+          (``kind == GITHUB``) is preserved verbatim. The
+          value is constructed inside
+          :mod:`app.services.intake_service` as
+          ``github/{owner}/{name}@{sha}.tar.gz`` and is
+          a safe relative path with no path-traversal
+          components. The previous implementation also
+          sanitised this trusted value, which stripped the
+          provenance context (e.g. ``owner`` was lost).
+
+        The ``safe_archive_filename`` column is computed
+        for both kinds: the basename-only form
+        (``basename_safely`` of the last path component)
+        is what the public search predicate matches
+        against, so a search for ``Users`` or ``home``
+        cannot match a row whose archive filename
+        incidentally contains a parent-directory
+        component.
+        """
         existing = workspace_repo.get_for_scan(self._session, scan.id)
         if existing is not None:
             # Idempotency: a scan always has at most one workspace.
             return existing
+        from app.utils.paths import basename_safely
+
+        if archive_filename is None:
+            persisted_archive_filename: str | None = None
+            safe_archive_filename: str | None = None
+        elif kind is WorkspaceKind.GITHUB:
+            # Trusted internally-generated provenance. Store
+            # the full value so the read-time API surfaces
+            # the owner/name/sha context.
+            persisted_archive_filename = archive_filename
+            # The query-time basename is the last path
+            # component, sanitised. For a GitHub value
+            # ``github/owner/repo@sha.tar.gz`` that is
+            # ``repo@sha.tar.gz``.
+            last_component = archive_filename.rsplit("/", 1)[-1]
+            safe_archive_filename = basename_safely(last_component) or None
+        else:
+            # Client-supplied (or any other untrusted) value.
+            # Sanitise before persistence.
+            sanitised = basename_safely(archive_filename) or None
+            persisted_archive_filename = sanitised
+            safe_archive_filename = sanitised
         workspace_key = new_workspace_key()
         workspace = workspace_repo.create(
             self._session,
             scan_run_id=scan.id,
             workspace_key=workspace_key,
             kind=kind,
-            archive_filename=archive_filename,
+            archive_filename=persisted_archive_filename,
+            safe_archive_filename=safe_archive_filename,
         )
         # Pre-create the on-disk layout so the path is known.
         self.paths_for(workspace_key).ensure()

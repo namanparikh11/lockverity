@@ -10,7 +10,7 @@
  *    v0.1 backend does not yet expose.
  */
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 
 import { isNotImplemented } from "@/api/fallback";
 import type { PageMeta, Scan, ScanStatus } from "@/api/types";
@@ -200,7 +200,18 @@ export function usePolling<T>(
   const stopRef = useRef(false);
   const refreshRef = useRef(0);
   const dataRef = useRef<T | null>(null);
-  dataRef.current = data;
+  // Sync the latest state into the ref via a layout effect
+  // (the canonical "latest ref" pattern, see
+  // https://react.dev/reference/react/useRef#caveats). We do
+  // not write ``dataRef.current = data`` during render: the
+  // React 19 docs recommend that ref writes happen in an
+  // effect or event handler. The ref is read only by the
+  // ``tick`` polling callback (an event-driven path) so a
+  // layout-effect sync after each commit is sufficient and
+  // free of the StrictMode double-write concern.
+  useLayoutEffect(() => {
+    dataRef.current = data;
+  }, [data]);
   const [, setForceUpdate] = useState(0);
 
   useEffect(() => {
@@ -209,6 +220,20 @@ export function usePolling<T>(
     setError(null);
     setPolls(0);
     setActive(true);
+    // Reset the polled data ref synchronously so the
+    // first tick of this new polling cycle cannot consult
+    // the prior cycle's terminal state. ``setData(null)``
+    // above only queues a state update; the ref-write
+    // would otherwise happen later in the layout effect
+    // *after* the new cycle's first tick has already
+    // returned early because ``dataRef.current`` was
+    // still terminal from the previous cycle. A
+    // dependency change between cycles is the common
+    // case where this race fires: a new fetcher is
+    // mounted, the old terminal result is still in
+    // ``dataRef.current``, and the new fetcher is never
+    // called because the tick short-circuits.
+    dataRef.current = null;
     let controller: AbortController | null = null;
     let timer: ReturnType<typeof setTimeout> | null = null;
 

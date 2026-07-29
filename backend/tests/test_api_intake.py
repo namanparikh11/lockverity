@@ -198,3 +198,170 @@ def test_upload_endpoint_rejects_traversal(client) -> None:
     )
     assert response.status_code == 400
     assert response.json()["error"]["code"] == "archive_unsafe"
+
+
+def test_upload_endpoint_rejects_oversized_declared_length(client, monkeypatch) -> None:
+    """A declared ``Content-Length`` that exceeds the cap must be
+    rejected before any body byte is read; the handler does not
+    read the request body in that case.
+    """
+    from app.api import intake as intake_module
+    from app.core.config import Settings
+
+    # Tighten the cap to a value we can prove.
+    small_settings = Settings(
+        environment="test",
+        database_url="sqlite:///:memory:",
+        workspace_root="./var/workspace",
+        archive_max_compressed_bytes=512,
+    )
+    monkeypatch.setattr(intake_module, "get_settings", lambda: small_settings)
+
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as zf:
+        zf.writestr("hello.txt", b"hi" * 1024)
+    body = buf.getvalue()
+    response = client.post(
+        "/api/v1/repositories/upload",
+        files={"file": ("big.zip", body, "application/zip")},
+    )
+    assert response.status_code == 422
+    error = response.json()["error"]
+    assert error["code"] == "validation_error"
+    assert error["details"]["declared_bytes"] > 512
+    assert error["details"]["max_compressed_bytes"] == 512
+
+
+def test_upload_endpoint_uses_configured_limit_not_hardcoded(client, monkeypatch) -> None:
+    """The endpoint must honour ``archive_max_compressed_bytes`` from
+    settings rather than a hard-coded 100 MiB value. We verify
+    this by tightening the cap and observing a rejection that
+    would not happen against a 100 MiB cap.
+    """
+    from app.api import intake as intake_module
+    from app.core.config import Settings
+
+    # Cap of 1 byte: every well-formed zip upload is rejected.
+    tiny_settings = Settings(
+        environment="test",
+        database_url="sqlite:///:memory:",
+        workspace_root="./var/workspace",
+        archive_max_compressed_bytes=1,
+    )
+    monkeypatch.setattr(intake_module, "get_settings", lambda: tiny_settings)
+
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as zf:
+        zf.writestr("hello.txt", b"hi")
+    body = buf.getvalue()
+    response = client.post(
+        "/api/v1/repositories/upload",
+        files={"file": ("hello.zip", body, "application/zip")},
+    )
+    assert response.status_code == 422
+    assert response.json()["error"]["code"] == "validation_error"
+
+
+def test_upload_endpoint_streams_body_to_quarantine(client, monkeypatch) -> None:
+    """The upload endpoint must hand the upload to the intake
+    service as a streaming source, not as a fully-buffered
+    ``bytes`` payload.
+
+    We confirm this by intercepting
+    ``IntakeService.intake_upload`` and recording the source
+    object it was called with. The source must be a callable
+    (the streaming contract) rather than a ``bytes`` /
+    ``list`` (the legacy read-all-into-memory contract).
+    """
+    from app.api import intake as intake_module
+
+    captured: dict = {}
+
+    def _capture_intake_upload(self, *, upload, archive_filename):
+        # Record the source type and the fact that the
+        # endpoint handed us a streaming callable.
+        captured["type"] = type(upload).__name__
+        captured["callable"] = callable(upload)
+        # Drain a single chunk to prove the source is
+        # callable; we do not run the full quarantine here
+        # because the real intake_upload writes to disk.
+        try:
+            first = upload(64)
+            captured["first_chunk_type"] = type(first).__name__
+            captured["first_chunk_len"] = len(first) if first else 0
+        except Exception as exc:  # pragma: no cover
+            captured["first_chunk_error"] = repr(exc)
+        # Return a minimal IntakeResult by bypassing the
+        # real pipeline. The test only cares that the
+        # endpoint handed us a streaming source.
+        from app.models.repository import (
+            Repository,
+            RepositoryProvider,
+            RepositorySourceType,
+            RepositoryVisibility,
+        )
+        from app.models.scan_run import ScanRun, ScanStatus
+        from app.models.workspace import Workspace, WorkspaceKind, WorkspaceState
+
+        # Persist a minimal repository / scan / workspace
+        # triplet so the API response can render.
+        repo = Repository(
+            source_type=RepositorySourceType.UPLOADED_ARCHIVE,
+            provider=RepositoryProvider.LOCAL_UPLOAD,
+            owner="upload",
+            name="placeholder",
+            canonical_url="upload://placeholder",
+            description="Uploaded archive",
+            default_branch=None,
+            visibility=RepositoryVisibility.PRIVATE,
+        )
+        self._session.add(repo)
+        self._session.flush()
+        scan = ScanRun(
+            repository_id=repo.id,
+            status=ScanStatus.COMPLETED,
+            trigger_type="upload",
+        )
+        self._session.add(scan)
+        self._session.flush()
+        workspace = Workspace(
+            scan_run_id=scan.id,
+            workspace_key="placeholder-key-min-16",
+            kind=WorkspaceKind.UPLOADED_ARCHIVE,
+            state=WorkspaceState.READY,
+            archive_filename=archive_filename,
+        )
+        self._session.add(workspace)
+        self._session.commit()
+        from app.services.intake_service import IntakeResult
+
+        return IntakeResult(
+            repository=repo,
+            scan=scan,
+            workspace=workspace,
+            intake_summary={"kind": "uploaded_archive"},
+        )
+
+    monkeypatch.setattr(
+        intake_module.intake_service.IntakeService,
+        "intake_upload",
+        _capture_intake_upload,
+    )
+
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as zf:
+        zf.writestr("hello.txt", b"hi" * 4096)
+    body = buf.getvalue()
+    response = client.post(
+        "/api/v1/repositories/upload",
+        files={"file": ("streamed.zip", body, "application/zip")},
+    )
+    assert response.status_code == 201
+    # The endpoint must hand the upload to the intake
+    # service as a streaming callable, not as a fully
+    # buffered ``list[bytes]`` or ``bytes`` object.
+    assert captured["callable"] is True
+    # The source must yield a ``bytes`` chunk; the size
+    # is bounded by the upload read chunk.
+    assert captured.get("first_chunk_type") == "bytes"
+    assert captured["first_chunk_len"] <= intake_module.UPLOAD_READ_CHUNK

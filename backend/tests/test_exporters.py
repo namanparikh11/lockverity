@@ -5,6 +5,7 @@ from __future__ import annotations
 import csv
 import io
 import json
+from datetime import UTC
 
 from app.exporters import (
     CycloneDxExporter,
@@ -124,6 +125,295 @@ def test_findings_json_exporter_returns_success(session) -> None:
     assert doc["schema"] == "lockverity.findings.v1"
     assert doc["scan_run_id"] == scan_id
     assert len(doc["findings"]) >= 2
+
+
+def test_findings_json_exporter_is_byte_deterministic_across_calls(
+    session,
+) -> None:
+    """Two exports of the same immutable scan must emit the same
+    bytes. The deterministic contract relies on a stable
+    ``fetched_at`` timestamp derived from the scan's own
+    ``completed_at`` (or ``created_at``) rather than the
+    wall-clock moment the export was triggered.
+    """
+    scan_id = _make_session_data(session)
+    exporter = FindingsJsonExporter(lambda: session)
+    first = exporter.export(scan_run_id=scan_id)
+    second = exporter.export(scan_run_id=scan_id)
+    assert isinstance(first, ProviderSuccess)
+    assert isinstance(second, ProviderSuccess)
+    assert first.data == second.data
+    # The ``fetched_at`` value is sourced from the scan,
+    # not the wall clock. The field name is the original
+    # ``lockverity.findings.v1`` contract.
+    doc = json.loads(first.data)
+    assert "fetched_at" in doc
+    assert doc["fetched_at"].endswith("Z") or doc["fetched_at"].endswith("+00:00")
+    # Schema v1 stability: the legacy ``exported_at`` key
+    # is not silently added by a v1 export; the wire
+    # format is unchanged.
+    assert "exported_at" not in doc
+
+
+def test_findings_csv_exporter_is_byte_deterministic_across_calls(
+    session,
+) -> None:
+    """Two CSV exports of the same immutable scan must emit the
+    same bytes. The deterministic contract relies on a stable
+    ``exported_at`` header derived from the scan's own
+    ``completed_at`` (or ``created_at``). The original
+    public CSV contract is the ``exported_at=`` key, which
+    the v2.0.6 closure restored from the cycle-6
+    incorrectly-renamed ``fetched_at=``.
+    """
+    scan_id = _make_session_data(session)
+    exporter = FindingsCsvExporter(lambda: session)
+    first = exporter.export(scan_run_id=scan_id)
+    second = exporter.export(scan_run_id=scan_id)
+    assert isinstance(first, ProviderSuccess)
+    assert isinstance(second, ProviderSuccess)
+    assert first.data == second.data
+    # The header carries the deterministic ``fetched_at``
+    # derived from the scan. The field name is the
+    # Original public contract: the v2.0.6 closure
+    # restored the historical ``exported_at=`` CSV
+    # header. The deterministic value is sourced from
+    # the scan's own ``completed_at`` (or
+    # ``created_at``).
+    text = first.data.decode("utf-8")
+    assert "exported_at=" in text
+    assert "exported_at=1970" not in text  # the scan has a real timestamp
+    # Schema stability: the JSON-schema ``fetched_at``
+    # key is not silently added to the CSV header by
+    # the v1 exporter.
+    assert "fetched_at=" not in text
+
+
+def test_findings_csv_exporter_completed_at_fallback_to_created_at(
+    session,
+) -> None:
+    """When the scan has a ``created_at`` but no
+    ``completed_at`` (e.g. an in-flight scan), the
+    ``exported_at`` header falls back to ``created_at``
+    and is still stable across calls.
+    """
+    from datetime import datetime
+
+    from app.models.repository import (
+        Repository,
+        RepositoryProvider,
+        RepositorySourceType,
+        RepositoryVisibility,
+    )
+    from app.models.scan_run import ScanRun, ScanTriggerType
+
+    repo = Repository(
+        source_type=RepositorySourceType.GITHUB,
+        provider=RepositoryProvider.GITHUB,
+        owner="fallback-csv",
+        name="repo",
+        canonical_url="https://github.com/fallback-csv/repo",
+        visibility=RepositoryVisibility.PUBLIC,
+    )
+    session.add(repo)
+    session.flush()
+    fixed_created = datetime(2026, 1, 1, 0, 0, 0, tzinfo=UTC)
+    scan = ScanRun(
+        repository_id=repo.id,
+        trigger_type=ScanTriggerType.MANUAL,
+        created_at=fixed_created,
+    )
+    session.add(scan)
+    session.commit()
+    exporter = FindingsCsvExporter(lambda: session)
+    first = exporter.export(scan_run_id=scan.id)
+    second = exporter.export(scan_run_id=scan.id)
+    assert isinstance(first, ProviderSuccess)
+    assert isinstance(second, ProviderSuccess)
+    assert first.data == second.data
+    text = first.data.decode("utf-8")
+    assert "exported_at=2026-01-01T00:00:00Z" in text
+
+
+def test_findings_csv_exporter_both_timestamps_missing_uses_epoch(
+    session,
+) -> None:
+    """A scan with neither ``completed_at`` nor
+    ``created_at`` produces the deterministic epoch
+    placeholder. SQLAlchemy's NOT NULL constraint on
+    ``created_at`` prevents us from round-tripping a
+    null through the real schema; the helper is
+    exercised here with a minimal stand-in scan.
+    """
+    from types import SimpleNamespace
+
+    from app.exporters.findings_json import _stable_fetched_at
+
+    scan = SimpleNamespace(completed_at=None, created_at=None)
+    assert _stable_fetched_at(scan) == "1970-01-01T00:00:00Z"
+
+
+def test_findings_csv_exporter_malformed_timestamp_uses_epoch(
+    session,
+) -> None:
+    """A non-datetime ``created_at`` / ``completed_at``
+    value is treated as missing; the header is the
+    deterministic epoch placeholder, not a raise.
+    """
+    from types import SimpleNamespace
+
+    from app.exporters.findings_json import _stable_fetched_at
+
+    scan = SimpleNamespace(completed_at="not-a-date", created_at="garbage")
+    assert _stable_fetched_at(scan) == "1970-01-01T00:00:00Z"
+
+
+def test_findings_csv_exporter_utc_formatting_is_stable(session) -> None:
+    """The ``exported_at`` header value always ends in
+    ``Z``; the formatter is deterministic across calls.
+    """
+    scan_id = _make_session_data(session)
+    exporter = FindingsCsvExporter(lambda: session)
+    first = exporter.export(scan_run_id=scan_id)
+    second = exporter.export(scan_run_id=scan_id)
+    assert isinstance(first, ProviderSuccess)
+    assert isinstance(second, ProviderSuccess)
+    text = first.data.decode("utf-8")
+    # Locate the ``exported_at=`` value in the header line.
+    header_line = text.splitlines()[0]
+    assert "exported_at=" in header_line
+    exported_value = header_line.split("exported_at=", 1)[1].strip()
+    assert exported_value.endswith("Z")
+
+
+def test_findings_json_exporter_completed_at_fallback_to_created_at(
+    session,
+) -> None:
+    """When the scan has a ``created_at`` but no
+    ``completed_at`` (e.g. an in-flight scan), the
+    ``fetched_at`` value falls back to ``created_at`` and
+    is still stable across calls.
+    """
+    from datetime import datetime
+
+    from app.models.repository import (
+        Repository,
+        RepositoryProvider,
+        RepositorySourceType,
+        RepositoryVisibility,
+    )
+    from app.models.scan_run import ScanRun, ScanStatus, ScanTriggerType
+
+    # We build a scan with created_at set explicitly and
+    # completed_at left null.
+    repo = Repository(
+        source_type=RepositorySourceType.GITHUB,
+        provider=RepositoryProvider.GITHUB,
+        owner="fallback",
+        name="repo",
+        canonical_url="https://github.com/fallback/repo",
+        visibility=RepositoryVisibility.PUBLIC,
+    )
+    session.add(repo)
+    session.flush()
+    fixed_created = datetime(2026, 1, 1, 0, 0, 0, tzinfo=UTC)
+    scan = ScanRun(
+        repository_id=repo.id,
+        trigger_type=ScanTriggerType.MANUAL,
+        status=ScanStatus.RUNNING,
+        created_at=fixed_created,
+    )
+    session.add(scan)
+    session.commit()
+    exporter = FindingsJsonExporter(lambda: session)
+    first = exporter.export(scan_run_id=scan.id)
+    second = exporter.export(scan_run_id=scan.id)
+    assert isinstance(first, ProviderSuccess)
+    assert isinstance(second, ProviderSuccess)
+    assert first.data == second.data
+    doc = json.loads(first.data)
+    assert doc["fetched_at"] == "2026-01-01T00:00:00Z"
+
+
+def test_findings_json_exporter_both_timestamps_missing_uses_epoch() -> None:
+    """The deterministic helper returns the epoch placeholder
+    when both ``completed_at`` and ``created_at`` are null.
+
+    SQLAlchemy's NOT NULL constraint on ``created_at``
+    prevents us from round-tripping a null through the
+    real schema; the helper is exercised here with a
+    minimal stand-in scan that has neither timestamp.
+    """
+    from types import SimpleNamespace
+
+    from app.exporters.findings_json import _stable_fetched_at
+
+    scan = SimpleNamespace(completed_at=None, created_at=None)
+    assert _stable_fetched_at(scan) == "1970-01-01T00:00:00Z"
+
+
+def test_findings_json_exporter_malformed_timestamp_uses_epoch() -> None:
+    """A non-datetime ``created_at`` value is treated as missing;
+    the helper returns the deterministic epoch placeholder
+    rather than raising.
+    """
+    from types import SimpleNamespace
+
+    from app.exporters.findings_json import _stable_fetched_at
+
+    # Malformed: a string the ORM would never produce, but
+    # the helper must still be defensive.
+    scan = SimpleNamespace(completed_at="not-a-date", created_at="garbage")
+    assert _stable_fetched_at(scan) == "1970-01-01T00:00:00Z"
+
+
+def test_findings_json_exporter_utc_formatting_is_stable(session) -> None:
+    """The ``fetched_at`` value always ends in ``Z`` (not
+    ``+00:00``); the formatter is deterministic across
+    calls.
+    """
+    scan_id = _make_session_data(session)
+    exporter = FindingsJsonExporter(lambda: session)
+    first = exporter.export(scan_run_id=scan_id)
+    second = exporter.export(scan_run_id=scan_id)
+    assert isinstance(first, ProviderSuccess)
+    assert isinstance(second, ProviderSuccess)
+    doc = json.loads(first.data)
+    assert doc["fetched_at"].endswith("Z")
+    # Re-serialise the document to confirm the
+    # ``sort_keys=True`` contract.
+    assert doc == json.loads(second.data)
+
+
+def test_findings_json_exporter_schema_v1_key_compatibility(session) -> None:
+    """The ``lockverity.findings.v1`` schema identifier is
+    preserved; the ``fetched_at`` key is the original
+    public name; no silent new keys are added.
+    """
+    scan_id = _make_session_data(session)
+    exporter = FindingsJsonExporter(lambda: session)
+    result = exporter.export(scan_run_id=scan_id)
+    assert isinstance(result, ProviderSuccess)
+    doc = json.loads(result.data)
+    assert doc["schema"] == "lockverity.findings.v1"
+    # The original public key is the only deterministic
+    # timestamp in the document.
+    assert "fetched_at" in doc
+    # A consumer that pinned the previous public wire
+    # format (``exported_at``) does not silently see a
+    # new key.
+    assert "exported_at" not in doc
+
+
+def _null_session():
+    """A no-op context manager used to keep the test bodies linear."""
+    import contextlib
+
+    @contextlib.contextmanager
+    def _cm():
+        yield
+
+    return _cm()
 
 
 def test_findings_csv_exporter_protects_against_formula_injection(session) -> None:

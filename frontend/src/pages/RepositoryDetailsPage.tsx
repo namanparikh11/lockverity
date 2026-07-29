@@ -1,6 +1,6 @@
 import { Plus, ScanSearch } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
+import { Link, useNavigate, useParams, useSearchParams } from "react-router";
 
 import { api } from "@/api/api";
 import { isNotImplemented } from "@/api/fallback";

@@ -31,7 +31,7 @@ export function AboutPage() {
         </p>
 
         <h2 className="mt-6 text-base font-semibold text-ink-900">
-          What v1.0 implements today
+          What v2.0.6 implements today
         </h2>
         <p className="text-xs uppercase tracking-wide text-ink-500">
           All items in this list have direct, exercised code paths in this
@@ -58,8 +58,8 @@ export function AboutPage() {
           </li>
           <li>
             <strong>Manifest parsers</strong> for npm
-            (<code>package.json</code>, <code>package-lock.json</code>),
-            pnpm, Yarn, Poetry,{" "}
+            (<code>package.json</code>, <code>package-lock.json</code>;
+            UTF-8 BOM-tolerant since v2.0.4), pnpm, Yarn, Poetry,{" "}
             <code>pyproject.toml</code>, and <code>requirements.txt</code>.
           </li>
           <li>
@@ -85,6 +85,37 @@ export function AboutPage() {
           <li>
             <strong>Exporters</strong> for CycloneDX 1.5 and 1.7 SBOM
             (JSON), SARIF 2.1.0 (JSON), findings JSON, and findings CSV.
+          </li>
+          <li>
+            <strong>Evidence-aware scan comparison</strong> (v0.5
+            vocabulary) for diffing two scans of the same repository
+            without inventing missing evidence; comparison is
+            nullable-key-safe (v2.0.5) and renders only
+            <code>newly_observed</code> / <code>still_observed</code> /
+            <code>no_longer_observed</code> /
+            <code>changed_observation</code> /
+            <code>coverage_changed</code> /
+            <code>comparison_indeterminate</code>.
+          </li>
+          <li>
+            <strong>Repository identification</strong> (v2.0.5 + v2.0.6):
+            the repository list shows <code>display_name</code>{" "}
+            (<code>owner/name</code> for GitHub; the original uploaded
+            filename for new uploads; the historical archive filename
+            derived from the <code>Workspace.archive_filename</code> rows
+            for v0.x&ndash;v2.0.4 historical rows), a per-row summary
+            with scan count, eligible comparison count, and latest
+            scan; search resolves the original filename, the historical
+            filename, owner / name, canonical URL, and exact scan IDs.
+          </li>
+          <li>
+            <strong>Stage outcome presentation</strong> (v2.0.6): the
+            additive <code>message_severity</code> field on every stage
+            (info / warning / error / none) is computed at the API
+            boundary from the existing structured fields; normal
+            no-data outcomes (no OSV advisories, no workflow files,
+            parser warnings) are no longer rendered as red
+            <code>Failure:</code> messages.
           </li>
           <li>
             <strong>CycloneDX 1.7 SBOM evidence preview</strong> on the
@@ -163,6 +194,16 @@ export function AboutPage() {
             out of scope by design.
           </li>
           <li>
+            <strong>Operational diagnostics</strong> (v1.9): a read-only
+            <code>/diagnostics</code> page and{" "}
+            <code>{"GET /api/v1/diagnostics/summary"}</code> endpoint
+            that surface application state, executor state, per-provider
+            persisted observations, recent partial / failed / cancelled
+            scan issues, and aggregated stage counts &mdash; all as
+            independent bounded cards, never collapsed into a single
+            verdict. Operational state is never security state.
+          </li>
+          <li>
             <strong>Local scan worker</strong> with a 10-stage pipeline,
             per-stage status, scan cancellation, and per-scan heartbeat
             monitoring.
@@ -185,30 +226,57 @@ export function AboutPage() {
             states that distinguish &ldquo;no data&rdquo; from
             &ldquo;verified clean&rdquo;.
           </li>
+          <li>
+            <strong>One-command release verification</strong>{" "}
+            (<code>backend/scripts/verify_release.py</code>) that runs
+            the documented 10-step plan (backend pytest, ruff check,
+            ruff format check, pip check, frontend tests, typecheck,
+            lint, build, <code>npm audit --omit=dev</code>, full{" "}
+            <code>npm audit</code>) and exits non-zero on the first
+            failure.
+          </li>
         </ul>
 
         <h2 className="mt-6 text-base font-semibold text-ink-900">
-          What v1.0 does <em>not</em> include
+          What v2.0.6 does <em>not</em> include
         </h2>
         <p className="text-xs uppercase tracking-wide text-ink-500">
           Planned for later milestones, not implemented today.
         </p>
         <ul className="ml-5 list-disc space-y-1">
-          <li>Authentication, multi-tenancy, billing, or self-service signup.</li>
-          <li>Continuous / scheduled scans. v0.5 scans are explicit operator actions.</li>
-          <li>Private GitHub repository analysis (v0.5 is public-only; the
-            <code>LOCKVERITY_GITHUB_TOKEN</code> environment variable is
-            honoured for public rate limits but private endpoints are out of
-            scope).
+          <li>
+            Authentication, multi-tenancy, billing, or self-service
+            signup. Lockverity is a single-tenant, local-first analyzer.
           </li>
           <li>
-            LLM-driven analysis, exploit generation, or any other offensive
-            feature.
+            Continuous / scheduled scans. v2.0.6 scans are explicit
+            operator actions; there is no background scheduler.
           </li>
           <li>
-            Dependency-path visualisation for transitive vulnerabilities
-            in the frontend (the data is on the wire; the page is not yet
-            wired in).
+            Private GitHub repository analysis. v2.0.6 is public-only;
+            the <code>LOCKVERITY_GITHUB_TOKEN</code> environment
+            variable is honoured for public rate limits but private
+            endpoints are out of scope.
+          </li>
+          <li>
+            LLM-driven analysis, exploit generation, or any other
+            offensive feature. The non-execution guarantee in{" "}
+            <code>SECURITY.md</code> is the binding boundary.
+          </li>
+          <li>
+            Editable repository aliases and other post-scan write
+            operations. v2.0.6 is read-only against the persisted
+            evidence; operator edits are intentionally future work.
+          </li>
+          <li>
+            Hosted SaaS, multi-user, or any centralised platform. The
+            product is local-first; it scales to the resources of the
+            host machine, not a multi-tenant backend.
+          </li>
+          <li>
+            PDF, DOCX, HTML, signed attestations, or any certification
+            export. The CycloneDX 1.7 SBOM and the Markdown evidence
+            report are evidence exports, not certifications.
           </li>
         </ul>
 

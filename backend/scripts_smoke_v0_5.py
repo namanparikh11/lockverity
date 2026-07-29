@@ -41,8 +41,6 @@ os.environ["LOCKVERITY_DATABASE_URL"] = f"sqlite:///{DB_PATH}"
 os.environ["LOCKVERITY_WORKSPACE_ROOT"] = str(ROOT / "var" / "workspace-smoke-v0_5")
 os.environ["LOCKVERITY_ENV"] = "development"
 
-from fastapi.testclient import TestClient  # noqa: E402
-
 from app.db import session as _db_session  # noqa: E402
 from app.main import app  # noqa: E402
 from app.models.advisory import Advisory  # noqa: E402
@@ -64,6 +62,7 @@ from app.models.repository import (  # noqa: E402
 )
 from app.models.scan_run import ScanRun, ScanStatus, ScanTriggerType  # noqa: E402
 from app.services import scan_service  # noqa: E402
+from fastapi.testclient import TestClient  # noqa: E402
 
 
 def _expect(condition: bool, message: str) -> None:
@@ -325,14 +324,15 @@ def main() -> int:
     with _db_session.SessionLocal() as s:
         before_runs = {r.id: r.updated_at for r in s.query(ScanRun).all()}
         before_components = {
-            (c.scan_run_id, c.package_name): c.updated_at
-            for c in s.query(Component).all()
+            (c.scan_run_id, c.package_name): c.updated_at for c in s.query(Component).all()
         }
 
     with TestClient(app) as client:
         # Forward comparison.
         cmp_resp = client.get(f"/api/v1/scans/{head_id}/compare/{base_id}")
-        _expect(cmp_resp.status_code == 200, f"comparison returned 200 (got {cmp_resp.status_code})")
+        _expect(
+            cmp_resp.status_code == 200, f"comparison returned 200 (got {cmp_resp.status_code})"
+        )
         body = cmp_resp.json()
         for key in (
             "coverage",
@@ -361,7 +361,8 @@ def main() -> int:
         # No legacy vocabulary in the components.
         for row in body["components"]:
             _expect(
-                row["state"] not in {"added", "removed", "updated", "persisting", "resolved", "new"},
+                row["state"]
+                not in {"added", "removed", "updated", "persisting", "resolved", "new"},
                 f"component state {row['state']!r} uses v0.5 vocabulary",
             )
         _expect(len(body["workflows"]) == 1, "1 workflow finding diffed")
@@ -392,14 +393,26 @@ def main() -> int:
         # Provider coverage is explicit.
         osv = next((p for p in body["providers"] if p["provider"] == "osv"), None)
         _expect(osv is not None, "OSV provider row present")
-        _expect(osv["state_base"] == "successful", f"OSV base state successful (got {osv['state_base']})")
+        _expect(
+            osv["state_base"] == "successful",
+            f"OSV base state successful (got {osv['state_base']})",
+        )
         _expect(osv["state_head"] == "cached", f"OSV head state cached (got {osv['state_head']})")
-        _expect(osv["state"] == "coverage_changed", f"OSV change state coverage_changed (got {osv['state']})")
-        _expect(osv["evidence_present_base"] is True, "OSV base row has a structured evidence envelope")
-        _expect(osv["evidence_present_head"] is True, "OSV head row has a structured evidence envelope")
+        _expect(
+            osv["state"] == "coverage_changed",
+            f"OSV change state coverage_changed (got {osv['state']})",
+        )
+        _expect(
+            osv["evidence_present_base"] is True, "OSV base row has a structured evidence envelope"
+        )
+        _expect(
+            osv["evidence_present_head"] is True, "OSV head row has a structured evidence envelope"
+        )
         # The evidence is never carried in error_summary.
         _expect(osv["error_summary_base"] is None, "successful OSV row carries no error_summary")
-        _expect(osv["error_summary_head"] is None, "successful OSV head row carries no error_summary")
+        _expect(
+            osv["error_summary_head"] is None, "successful OSV head row carries no error_summary"
+        )
 
         # No "fixed" / "resolved" / "clean" / "secure" / "all clear"
         # words in any string value of the response. Field names
@@ -415,6 +428,7 @@ def main() -> int:
             elif isinstance(node, dict):
                 for value in node.values():
                     _walk_strings(value, out)
+
         all_values: list[str] = []
         _walk_strings(body, all_values)
         joined = " ".join(all_values)
@@ -440,10 +454,12 @@ def main() -> int:
         forward_added = sum(1 for r in body["components"] if r["state"] == "newly_observed")
         forward_removed = sum(1 for r in body["components"] if r["state"] == "no_longer_observed")
         reverse_added = sum(1 for r in body_reverse["components"] if r["state"] == "newly_observed")
-        reverse_removed = sum(1 for r in body_reverse["components"] if r["state"] == "no_longer_observed")
+        reverse_removed = sum(
+            1 for r in body_reverse["components"] if r["state"] == "no_longer_observed"
+        )
         _expect(
             forward_added == reverse_removed and forward_removed == reverse_added,
-            f"reversing base/head swaps additions/removals (forward +/-, reverse -/+)",
+            "reversing base/head swaps additions/removals (forward +/-, reverse -/+)",
         )
 
         # Identity validation.
@@ -452,15 +468,18 @@ def main() -> int:
 
         # Cross-workspace validation.
         cross = client.get(f"/api/v1/scans/{other_id}/compare/{base_id}")
-        _expect(cross.status_code in (400, 422), f"cross-workspace comparison rejected (got {cross.status_code})")
+        _expect(
+            cross.status_code in (400, 422),
+            f"cross-workspace comparison rejected (got {cross.status_code})",
+        )
 
     # Snapshot the database after every smoke call.
     with _db_session.SessionLocal() as s:
         after_runs = {r.id: r.updated_at for r in s.query(ScanRun).all()}
         after_components = {
-            (c.scan_run_id, c.package_name): c.updated_at
-            for c in s.query(Component).all()
+            (c.scan_run_id, c.package_name): c.updated_at for c in s.query(Component).all()
         }
+
     # The ``updated_at`` column is bumped on every commit; the
     # comparison endpoint is read-only, so the row's
     # ``updated_at`` should be identical to the snapshot taken

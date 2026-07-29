@@ -31,6 +31,31 @@ The internal collection name ``_LOCAL_V03_STAGES`` is
 preserved (it merely means "executed by
 ``AnalysisPipeline``"); the contract under test is the
 failure semantics, not the name.
+
+External-network isolation
+==========================
+
+Every test in this module runs the orchestrator
+end-to-end via :class:`ScanOrchestrator`. Each test
+uses :func:`_patch_provider_service` to inject
+``MagicMock`` provider clients whose return value
+the test controls. The shared
+:func:`fake_providers_for_scan_tests` autouse
+fixture imported below is the *positive* complement
+to the :func:`conftest._block_external_network`
+network guard: it replaces the real
+``_default_provider_service_factory`` with a
+factory that builds a real :class:`ProviderService`
+whose OSV / deps.dev / Scorecard calls are
+short-circuited to honest ``ProviderUnavailable``
+results. Tests that need a specific provider
+outcome (the ``MagicMock`` clients in
+:func:`_patch_provider_service`) override the
+autouse fixture's patch via the test function's
+``monkeypatch`` parameter; the autouse fixture
+ensures that a future test that forgets to patch
+the provider factory still does not open a socket
+to a non-loopback host.
 """
 
 from __future__ import annotations
@@ -56,6 +81,13 @@ from app.providers.results import (
     ProviderUnavailable,
 )
 from app.services.orchestrator_service import ScanOrchestrator
+
+# The :func:`conftest._fake_providers_for_scan_tests`
+# autouse fixture is the backstop behind this module's
+# own :func:`_patch_provider_service` helper: a future
+# test that forgets to call the helper still does not
+# open a socket to a non-loopback host because the global
+# fixture has already applied the fakes.
 
 
 def _setup_scan_with_components(

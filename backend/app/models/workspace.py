@@ -69,6 +69,22 @@ class Workspace(Base, TimestampMixin):
         default=WorkspaceState.QUARANTINED,
     )
     archive_filename: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    # ``safe_archive_filename`` is the basename-only form
+    # of ``archive_filename`` (always run through
+    # :func:`app.utils.paths.basename_safely`). It is what
+    # the public search predicate matches against, so a
+    # search for a parent-directory component (``Users``,
+    # ``home``, ``..``) cannot match a row whose
+    # ``archive_filename`` happens to contain such a
+    # component in its raw form (e.g. a legacy
+    # ``C:\\Users\\me\\secret.zip`` value). For trusted
+    # GitHub provenance (``github/owner/repo@sha.tar.gz``)
+    # the safe basename is ``repo@sha.tar.gz``.
+    safe_archive_filename: Mapped[str | None] = mapped_column(
+        String(512),
+        nullable=True,
+        index=True,
+    )
     archive_sha256: Mapped[str | None] = mapped_column(String(64), nullable=True)
     archive_size: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     file_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)

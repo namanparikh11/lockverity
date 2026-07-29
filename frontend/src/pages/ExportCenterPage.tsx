@@ -1,6 +1,6 @@
 import { Download, FileText } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
-import { useParams } from "react-router-dom";
+import { useParams } from "react-router";
 
 import { api } from "@/api/api";
 import { ApiClientError, describeError } from "@/api/client";
@@ -774,7 +774,6 @@ function EvidenceReportPanel({ scanId }: { scanId: number }) {
     // caused by ``setLoading(true)`` or ``setReport(...)``
     // must not cancel the in-flight fetch. The
     // unmount-only effect below handles teardown.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [expanded, scanId]);
 
   useEffect(() => {

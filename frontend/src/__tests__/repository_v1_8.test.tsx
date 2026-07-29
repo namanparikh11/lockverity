@@ -30,7 +30,7 @@ import {
   waitFor,
   within,
 } from "@testing-library/react";
-import { MemoryRouter, Route, Routes } from "react-router-dom";
+import { MemoryRouter, Route, Routes } from "react-router";
 
 import { RepositoryDetailsPage } from "@/pages/RepositoryDetailsPage";
 import { RepositoryComparePage } from "@/pages/RepositoryComparePage";
@@ -729,20 +729,29 @@ describe("repository v1.8 - honesty and integrity", () => {
         </Routes>
       </MemoryRouter>
     );
+    // Wait for the data fetch to complete: the v0.5
+    // removed-finding disclaimer in the Vulnerabilities
+    // section only renders once the comparison body is
+    // mounted, so it is the reliable signal that data
+    // has loaded. The page header always shows the
+    // "no longer observed" copy, so it cannot be used
+    // as the wait condition (it would resolve before
+    // the data fetch settles and the next assertion
+    // would race the network).
     await waitFor(() => {
-      expect(screen.getByText(/no longer observed/i)).toBeInTheDocument();
+      expect(
+        screen.getByText(
+          /is not described as fixed or resolved/i
+        )
+      ).toBeInTheDocument();
     });
-    // The page must surface the v0.5 removed-finding
-    // disclaimer (the comparison engine plus the page
-    // copy) and must NOT claim security improved. The
-    // existing v0.5 wording in the Vulnerabilities
-    // section says: "is not described as fixed or
-    // resolved".
+    // The v0.5 state vocabulary is rendered for the
+    // removed-finding row once the data has loaded.
+    // The same copy also appears in the page header and
+    // the disclaimer, so use getAllByText.
     expect(
-      screen.getByText(
-        /is not described as fixed or resolved/i
-      )
-    ).toBeInTheDocument();
+      screen.getAllByText(/no longer observed/i).length
+    ).toBeGreaterThan(0);
     const body = document.body.textContent ?? "";
     expect(body).not.toMatch(/security improved/i);
     expect(body).not.toMatch(/security worsened/i);

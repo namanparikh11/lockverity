@@ -34,7 +34,7 @@ from app.providers.results import (
     ProviderUnavailable,
 )
 from app.utils.csv_safety import CsvCellError, csv_escape_field, sanitize_cell
-from app.utils.datetime import isoformat_utc, utcnow
+from app.utils.datetime import utcnow
 
 CSV_COLUMNS: tuple[str, ...] = (
     "scan_run_id",
@@ -91,11 +91,32 @@ class FindingsCsvExporter:
         )
 
     def _render_csv(self, scan, findings) -> str:
+        # Determinism contract: the export header carries
+        # ``exported_at`` derived from the scan's
+        # ``completed_at`` (falling back to ``created_at``).
+        # The wall-clock moment the export was triggered is
+        # never written into the document body. Two exports
+        # of the same scan therefore emit the same bytes
+        # bit-for-bit. The field name ``exported_at`` is the
+        # original public contract (the v2.0.5 cycle 6
+        # hardening pass renamed it to ``fetched_at`` in
+        # error; the v2.0.6 cycle 7 closure restores the
+        # historical name). The value semantics (a
+        # deterministic per-scan timestamp) are unchanged.
+        #
+        # The helper is shared with the JSON exporter
+        # (``app.exporters.findings_json._stable_fetched_at``);
+        # the duplicated logic would drift. The CSV
+        # exporter re-imports the helper at render time
+        # to avoid a circular import at module load.
+        from app.exporters.findings_json import _stable_fetched_at
+
+        when_iso = _stable_fetched_at(scan)
         lines: list[str] = []
         lines.append(
             f"# lockverity findings export, tool=lockverity, version={self._app_version}, "
             f"scan_run_id={scan.id}, repository_id={scan.repository_id}, "
-            f"exported_at={isoformat_utc(utcnow())}"
+            f"exported_at={when_iso}"
         )
         lines.append(_format_row(CSV_COLUMNS))
         for finding in findings:

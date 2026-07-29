@@ -5,6 +5,8 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Literal
 
+from pydantic import field_validator
+
 from app.models.repository import (
     RepositoryProvider,
     RepositorySourceType,
@@ -40,8 +42,32 @@ class RepositoryRead(TimestampMixin):
     # v2.0.5: human-readable primary label. Basename of the
     # uploaded filename for uploaded archives, ``None`` for
     # GitHub repositories (the operator uses ``owner/name``
-    # instead). Backwards-compatible additive field.
+    # instead). Backwards-compatible additive field. The
+    # value is sanitised at write time (``basename_safely``)
+    # by the intake service; the field validator below is
+    # defence-in-depth for historical rows that pre-date
+    # the sanitiser or that were inserted by an operator
+    # with a tool that bypassed it.
     original_filename: str | None = None
+
+    @field_validator("original_filename", mode="before")
+    @classmethod
+    def _sanitise_original_filename(cls, value: object) -> object:
+        """Apply :func:`basename_safely` at the API boundary.
+
+        Defence in depth: a pathful value is reduced to
+        a basename or ``None`` before the response is
+        serialised. The intake layer sanitises the
+        value at write time; this validator covers any
+        historical row that pre-dates the sanitiser.
+        """
+        if value is None:
+            return None
+        if not isinstance(value, str):
+            return None
+        from app.utils.paths import basename_safely
+
+        return basename_safely(value)
 
 
 # v2.0.5: per-row summary data returned alongside each

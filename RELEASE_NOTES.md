@@ -143,12 +143,12 @@ surface in under five minutes without any provider credentials
 or hosted services. The flow is:
 
 ```powershell
-cd "C:\Users\Naman Parikh\Documents\Minimax Projects\Lockverity\backend"
+cd backend
 .\.venv\Scripts\python.exe scripts\load_demo.py --reset-demo-db
 $env:LOCKVERITY_DATABASE_URL = "sqlite:///var/demo/lockverity-demo.sqlite"
 .\.venv\Scripts\python.exe -m uvicorn app.main:app --host 127.0.0.1 --port 8765
 
-cd "C:\Users\Naman Parikh\Documents\Minimax Projects\Lockverity\frontend"
+cd frontend
 $env:VITE_API_PROXY_TARGET = "http://127.0.0.1:8765"
 npm install
 npm run dev
@@ -259,7 +259,7 @@ The provider-honesty policy is in
 - **Continuous / scheduled scans.** Scans are explicit
   operator actions (manual trigger, archive upload, or
   `api`).
-- **Private GitHub repository analysis.** v1.3 is
+- **Private GitHub repository analysis.** v2.0.6 is
   public-only; the `LOCKVERITY_GITHUB_TOKEN` environment
   variable is honoured for public rate limits but private
   endpoints are out of scope.
@@ -272,22 +272,24 @@ The provider-honesty policy is in
   exports** for the human-readable evidence report. The
   Markdown report is the only evidence-report export; the
   others are explicitly out of scope by design.
-- **Public deployment of the application itself.** The
-  application is a private portfolio baseline, not a hosted
-  service. There is no marketing site, no signup flow, and
-  no public deployment.
+- **Hosted deployment of the application itself.** The
+  application is a local-first, portfolio-ready
+  baseline; there is no production deployment, no
+  hosted control plane, and no multi-tenant service.
+  There is no marketing site, no signup flow, and no
+  public deployment.
 
 ## Local development commands
 
 ```powershell
 # Backend
-cd "C:\Users\Naman Parikh\Documents\Minimax Projects\Lockverity\backend"
+cd backend
 .\.venv\Scripts\python.exe -m pytest tests
 .\.venv\Scripts\python.exe -m ruff check app tests scripts
 .\.venv\Scripts\python.exe -m ruff format --check app tests scripts
 
 # Frontend
-cd "C:\Users\Naman Parikh\Documents\Minimax Projects\Lockverity\frontend"
+cd frontend
 npm.cmd test -- --run
 npm.cmd run typecheck
 npm.cmd run lint
