@@ -44,6 +44,7 @@ from __future__ import annotations
 
 import json
 import os
+from pathlib import Path
 
 import pytest
 from app.db import session as _db_session
@@ -156,10 +157,15 @@ def test_index_components_by_version_preserves_null_versions() -> None:
 # call ``compare_scans`` with that engine's session. The
 # field-test DB is gitignored and may not exist in a fresh
 # clone; the v2.0.5 verification does not require it, only
-# the in-process unit/integration coverage does.
-FIELD_TEST_DB = (
-    "C:/Users/Naman Parikh/Documents/Minimax Projects/Lockverity/backend/"
-    "var/manual-review/lockverity-field-test.sqlite"
+# the in-process unit/integration coverage does. The path
+# is resolved relative to this test file so the test works
+# in any checkout location without leaking a developer
+# home directory into the source.
+FIELD_TEST_DB = str(
+    Path(__file__).resolve().parent.parent
+    / "var"
+    / "manual-review"
+    / "lockverity-field-test.sqlite"
 )
 
 

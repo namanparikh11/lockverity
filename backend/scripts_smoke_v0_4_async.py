@@ -41,10 +41,8 @@ os.environ["LOCKVERITY_WORKSPACE_ROOT"] = str(WORKSPACE_ROOT)
 os.environ["LOCKVERITY_ENV"] = "development"
 
 import httpx  # noqa: E402
-
-from fastapi.testclient import TestClient  # noqa: E402
-
 from app.main import app  # noqa: E402
+from fastapi.testclient import TestClient  # noqa: E402
 
 
 def _build_zip_with_manifest() -> bytes:
@@ -128,18 +126,18 @@ def main(base_url: str | None = None) -> int:
 
         cfg = Config(str(ROOT / "alembic.ini"))
         cfg.set_main_option("script_location", str(ROOT / "alembic"))
-        cfg.set_main_option(
-            "sqlalchemy.url", os.environ["LOCKVERITY_DATABASE_URL"]
-        )
+        cfg.set_main_option("sqlalchemy.url", os.environ["LOCKVERITY_DATABASE_URL"])
         command.upgrade(cfg, "head")
 
     print("== Lockverity v0.4 asynchronous integrated smoke ==")
     if base_url:
         client = httpx.Client(base_url=base_url, timeout=30.0)
+
         def request(method, path, **kw):
             return client.request(method, path, **kw)
     else:
         test_client = TestClient(app)
+
         def request(method, path, **kw):
             return test_client.request(method, path, **kw)
 
@@ -163,6 +161,7 @@ def main(base_url: str | None = None) -> int:
     body = r.json()
     scan_id = body["scan"]["id"]
     repo_id = body["repository"]["id"]
+    _ = repo_id  # smoke id retained for log/tracing
     initial = body["scan"]
     _expect(
         initial["status"] in {"queued", "running"},
@@ -278,7 +277,9 @@ def main(base_url: str | None = None) -> int:
     _expect(r.status_code == 200, f"GET /findings returns 200 (got {r.status_code})")
     findings = r.json()["items"]
     rule_engine_findings = [
-        f for f in findings if f["category"] in {"workflow", "vulnerability", "licence", "data_quality"}
+        f
+        for f in findings
+        if f["category"] in {"workflow", "vulnerability", "licence", "data_quality"}
     ]
     _expect(
         len(rule_engine_findings) >= 0,
@@ -291,7 +292,10 @@ def main(base_url: str | None = None) -> int:
     if base_url is None:
         client2 = TestClient(app)
         r = client2.get(f"/api/v1/scans/{scan_id}")
-        _expect(r.status_code == 200, f"GET /scans/{{id}} after restart returns 200 (got {r.status_code})")
+        _expect(
+            r.status_code == 200,
+            f"GET /scans/{{id}} after restart returns 200 (got {r.status_code})",
+        )
         body = r.json()
         _expect(body["id"] == scan_id, "scan id matches after restart")
         _expect(

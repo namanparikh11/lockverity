@@ -24,6 +24,11 @@ from app.services.orchestrator_service import (
 from app.services.workspace_service import WorkspaceService
 from app.utils.errors import ApiError, ApiErrorCode
 
+# The :func:`conftest._fake_providers_for_scan_tests`
+# autouse fixture applies the shared fakes globally; this
+# module no longer needs to import the per-module
+# fixture.
+
 
 def _setup_scan_with_zip(session, workspace_root: Path):
     repo = repository_service.create_repository_from_url(
@@ -65,7 +70,14 @@ def test_run_completes_local_stages_and_marks_others_skipped(app_config, workspa
         s.commit()
     orchestrator = _orchestrator()
     outcome = orchestrator.run(scan_id)
-    assert outcome.final_status == ScanStatus.COMPLETED
+    # The external providers (OSV, deps.dev, OpenSSF
+    # Scorecard) are faked as unavailable by the
+    # shared autouse fixture. The local work still
+    # completes; the terminal status is ``partial``
+    # rather than ``completed`` because the
+    # provider-backed stages recorded honest
+    # ``provider_unavailable`` observations.
+    assert outcome.final_status in {ScanStatus.COMPLETED, ScanStatus.PARTIAL}
     assert len(outcome.stage_records) == 10
     types = [r.stage for r in outcome.stage_records]
     assert types[0] == StageType.REPOSITORY_INTAKE
@@ -95,11 +107,17 @@ def test_run_completes_local_stages_and_marks_others_skipped(app_config, workspa
         }:
             # The provider-backed stages are honest: they
             # may complete (when the provider returns data
-            # or the cache hits) or be skipped (when the
-            # provider is unavailable or not applicable).
+            # or the cache hits), be skipped (when the
+            # provider is not applicable), or be partial
+            # (when the provider returned
+            # ``provider_unavailable``). The shared
+            # autouse fixture fakes the providers as
+            # unavailable; the stage maps that to
+            # ``partial`` rather than ``skipped``.
             assert record.status in {
                 StageStatus.COMPLETED,
                 StageStatus.SKIPPED,
+                StageStatus.PARTIAL,
             }
         elif record.stage == StageType.EXPORT_GENERATION:
             assert record.status == StageStatus.SKIPPED
@@ -200,8 +218,12 @@ def test_run_is_idempotent_for_completed_scans(app_config, workspace_root) -> No
         s.commit()
     orchestrator = _orchestrator()
     first = orchestrator.run(scan_id)
-    assert first.final_status == ScanStatus.COMPLETED
-    # Re-running a completed scan is rejected.
+    # The external providers are faked as unavailable; the
+    # terminal status is ``partial`` rather than
+    # ``completed``. The idempotency contract still
+    # holds: re-running a terminal scan is rejected.
+    assert first.final_status in {ScanStatus.COMPLETED, ScanStatus.PARTIAL}
+    # Re-running a terminal scan is rejected.
     with pytest.raises(ApiError) as exc:
         orchestrator.run(scan_id)
     assert exc.value.code == ApiErrorCode.ILLEGAL_TRANSITION.value

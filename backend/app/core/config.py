@@ -56,7 +56,22 @@ class Settings(BaseSettings):
     provider_retry_limit: int = Field(default=2)
 
     # --- GitHub intake ---
-    github_api_url: str = Field(default="https://api.github.com")
+    # The GitHub API origin is the canonical public
+    # ``https://api.github.com`` host. A configurable
+    # override was previously exposed as
+    # ``LOCKVERITY_GITHUB_API_URL`` but it was unused in
+    # the codebase (every URL builder hardcoded the
+    # canonical host and the bounded HTTP client's
+    # allowlist pinned the same two hosts). To remove a
+    # dead configuration surface area and eliminate the
+    # possibility of an operator pointing the analyzer at
+    # an attacker-controlled host, the override is no
+    # longer exposed. If a future release needs an
+    # alternate API origin, the change must wire it
+    # through every URL builder AND extend the bounded
+    # HTTP allowlist with the same SSRF and
+    # host-restriction validation applied to the
+    # canonical origin.
     github_token: str | None = Field(default=None)
     github_timeout_seconds: float = Field(default=15.0)
     github_max_response_bytes: int = Field(default=10 * 1024 * 1024)
@@ -143,13 +158,6 @@ class Settings(BaseSettings):
         if len(stripped) > 256:
             raise ValueError("github_token is unreasonably long.")
         return stripped
-
-    @field_validator("github_api_url")
-    @classmethod
-    def _github_api_url_must_be_https(cls, value: str) -> str:
-        if not isinstance(value, str) or not value.startswith("https://"):
-            raise ValueError("github_api_url must be an https:// URL.")
-        return value.rstrip("/")
 
     @property
     def is_production(self) -> bool:

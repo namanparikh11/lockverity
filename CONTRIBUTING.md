@@ -5,7 +5,13 @@ expectations for code, tests, migrations, and finding rules.
 
 ## Development setup
 
-1. Install Python 3.12 and Node.js 20 or 22.
+1. Install Python 3.12 and Node.js >=22.22.0. The Node.js floor
+   is dictated by `react-router@8.3.0` (declared via
+   `frontend/package.json` `engines.node` and confirmed in the
+   lockfile). Earlier 22.x releases (22.0-22.21) and the entire
+   20.x line are not supported. The repo ships an `.nvmrc` pinning
+   the floor; use `nvm use` (or `fnm use` / `volta pin`) to align
+   your local runtime. Validation was performed on Node.js 24.18.0.
 2. Backend: `cd backend && python -m venv .venv && pip install -e ".[dev]"`.
 3. Frontend: `cd frontend && npm install`.
 4. Run `alembic upgrade head` once after pulling.

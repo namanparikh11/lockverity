@@ -10,7 +10,7 @@
 
 import { describe, expect, it, beforeEach, afterEach, vi } from "vitest";
 import { render, screen, cleanup } from "@testing-library/react";
-import { MemoryRouter, Route, Routes } from "react-router-dom";
+import { MemoryRouter, Route, Routes } from "react-router";
 
 import { AppShell } from "@/layouts/AppShell";
 import { AboutPage } from "@/pages/AboutPage";

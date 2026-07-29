@@ -50,7 +50,6 @@ export async function fetchOrFallback<T>(
   } catch (err) {
     if (isNotImplemented(err)) {
       if (options.logPrefix && import.meta.env?.DEV) {
-        // eslint-disable-next-line no-console
         console.info(`[lockverity] ${options.logPrefix}: not implemented yet.`);
       }
       return fallback;

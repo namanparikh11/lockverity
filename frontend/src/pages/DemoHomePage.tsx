@@ -1,4 +1,4 @@
-import { Link } from "react-router-dom";
+import { Link } from "react-router";
 import {
   AlertOctagon,
   BookOpen,
@@ -28,7 +28,7 @@ export function DemoHomePage() {
     <>
       <PageHeader
         title="Local demo"
-        description="A 60-second guided walkthrough of the Lockverity v1.4 demo. The five pages below cover every v0.5–v1.4 surface; the live demo is the canonical evidence."
+        description="A 60-second guided walkthrough of the Lockverity v2.0.6 demo. The five pages below cover every v0.5–v2.0.6 surface; the live demo is the canonical evidence."
         breadcrumbs={[{ label: "Demo" }]}
       />
       <div className="space-y-6">
@@ -84,7 +84,7 @@ export function DemoHomePage() {
               >
                 /
               </Link>{" "}
-              — <strong>Scan list</strong>. Four scans with the v1.2 demo
+              — <strong>Scan list</strong>. Four scans with the v2.0.6 demo
               notice above them. Status badges: emerald (completed), amber
               (partial), rose (failed), ink-100 (cancelled).
             </li>
@@ -146,7 +146,7 @@ export function DemoHomePage() {
               </Link>{" "}
               — <strong>About page + product boundaries</strong>. The
               current milestone, the v1.0 evidence report bullet, the
-              bounded <em>What v1.3 does not include</em> section, the
+              bounded <em>What v2.0.6 does not include</em> section, the
               provider-honesty and non-execution guarantees.
             </li>
           </ol>
@@ -188,7 +188,7 @@ export function DemoHomePage() {
               for a failed or cancelled scan.
             </li>
             <li>
-              The v1.2 demo-dataset notice above the scan list; the
+              The v2.0.6 demo-dataset notice above the scan list; the
               notice does not appear on real repositories.
             </li>
           </ul>
@@ -253,12 +253,12 @@ export function DemoHomePage() {
             the Vite dev server on <code>127.0.0.1:5173</code>. PowerShell
             one-liners:
           </p>
-          <pre className="mt-3 overflow-x-auto rounded-md border border-ink-200 bg-ink-50 p-3 text-xs text-ink-800"><code>{`cd "C:\\Users\\Naman Parikh\\Documents\\Minimax Projects\\Lockverity\\backend"
+          <pre className="mt-3 overflow-x-auto rounded-md border border-ink-200 bg-ink-50 p-3 text-xs text-ink-800"><code>{`cd backend
 .\\.venv\\Scripts\\python.exe scripts\\load_demo.py --reset-demo-db
 $env:LOCKVERITY_DATABASE_URL = "sqlite:///var/demo/lockverity-demo.sqlite"
 .\\.venv\\Scripts\\python.exe -m uvicorn app.main:app --host 127.0.0.1 --port 8765
 
-cd "C:\\Users\\Naman Parikh\\Documents\\Minimax Projects\\Lockverity\\frontend"
+cd frontend
 $env:VITE_API_PROXY_TARGET = "http://127.0.0.1:8765"
 npm install
 npm run dev`}</code></pre>
@@ -304,7 +304,7 @@ npm run dev`}</code></pre>
 
         <DataCompletenessNotice
           title="This is a demo, not a hosted service"
-          description="The application has no authentication, no multi-tenancy, and no hosted control plane. The reviewer runs the demo on their own laptop; Lockverity makes no provider calls during the demo. The current status is a private portfolio-ready baseline; the public/private recommendation is in docs/demo-pack.md."
+          description="The application has no authentication, no multi-tenancy, and no hosted control plane. The reviewer runs the demo on their own laptop; Lockverity makes no provider calls during the demo. The current status is a local-first, portfolio-ready release candidate; the public/private recommendation is in docs/demo-pack.md."
           tone="muted"
         />
       </div>

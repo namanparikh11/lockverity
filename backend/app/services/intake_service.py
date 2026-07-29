@@ -282,13 +282,23 @@ class IntakeService:
                 self._session.commit()
             except Exception:
                 self._session.rollback()
+            # Sanitise the filename before it reaches the
+            # error envelope: a pathful value
+            # (``C:\\Users\\me\\secret.zip``) must not be
+            # echoed in the response. ``basename_safely``
+            # returns ``None`` for an unsafe value; we
+            # surface the bounded empty string in that
+            # case so the detail shape is stable.
+            from app.utils.paths import basename_safely
+
+            safe_archive_filename = basename_safely(archive_filename) or ""
             raise ApiError(
                 ApiErrorCode.ARCHIVE_UNSAFE,
                 "Archive was rejected.",
                 details={
                     "code": exc.code,
                     "message": exc.message,
-                    "filename": archive_filename,
+                    "filename": safe_archive_filename,
                 },
             ) from exc
         except Exception as exc:

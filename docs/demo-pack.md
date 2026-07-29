@@ -1,6 +1,6 @@
 # Lockverity — Local-First Release Candidate Demo Pack
 
-This is the v2.0.3 portfolio demo pack. It is a one-page
+This is the v2.0.6 portfolio demo pack. It is a one-page
 reviewer reference: the current version, the demo command
 flow, the screenshot list, the 60-second demo script, the
 "what to say" + "what not to claim" framing, and the current
@@ -15,42 +15,54 @@ release-validation checklist see
 
 ## Current version
 
-`v2.0.3` — First-run reproducibility repair.
+`v2.0.6` — Historical labels and stage-outcome clarity.
 
-The current milestone is a focused defect-repair release
-that ships one real release-blocking defect discovered
-during the v2.0.2 clean-state acceptance gate: the
-documented one-command release-verification script
-(`cd backend; .venv/Scripts/python.exe
-scripts/verify_release.py`) failed on a fresh clean
-checkout because `backend/pyproject.toml` declared
-`"ruff>=0.4.0"` and a clean `pip install -e ".[dev]"`
-resolved the latest ruff, which produced a different
-format than the committed files. v2.0.3 pins
-`"ruff==0.15.21"` in the dev extras (the exact patch
-that produced the committed format), so the
-one-command verification now passes on a fresh
-checkout. The supported review workflow is unchanged
-from v2.0.2. The v2.0 release-validation script and the
-v2.0.1 / v2.0.2 acceptance flows are documented in
-[`docs/release-checklist.md`](release-checklist.md). The
-v1.9 provider-health and operational-diagnostics page, the
-v1.8 repository history and comparison workflow, the
-v1.7 findings workbench, the v1.6.1 workspace-preserving
-rescan repair, the v1.6 scan workbench, the v1.5 guided
-intake, and the v1.0 Markdown evidence report remain in
-place. No new providers, no new export standards, no new
-evidence contracts, no new API endpoints, no migration.
+The current milestone is a narrowly scoped,
+field-testing-driven patch that ships two real
+usability defects uncovered by a v2.0.5 field-test
+run. v2.0.6 does not introduce a new feature. The first
+defect is a historical-label defect: v0.x-v2.0.4
+uploaded repositories have ``Repository.original_filename
+= NULL`` and the v2.0.5 list endpoint rendered the bounded
+opaque fallback ``Uploaded archive · upload/<short-key>``
+as the primary label. v2.0.6 introduces
+``get_repository_historical_filenames`` in
+``backend/app/repositories/repository_repo.py``: a single
+batched query that resolves a per-repository historical
+archive filename from the persisted
+``Workspace.archive_filename`` rows. The second defect is
+a stage-outcome presentation defect: v0.5-v2.0.5 rendered
+every stage ``failure_summary`` string with the red
+``"Failure: "`` prefix. v2.0.6 adds an additive
+``message_severity`` field on ``ScanStageRead``
+(``error`` / ``warning`` / ``info`` / ``none``) computed at
+the API boundary from the existing structured fields; the
+visible text never begins with ``"Failure: "`` for an
+``info`` or ``warning`` severity row. The v2.0.5
+comparison-stability and repository-identification
+release, the v2.0.4 BOM compatibility repair, the v2.0.3
+ruff pin + ``.gitattributes`` first-run reproducibility,
+the v2.0.2 nested-manifest discovery fix, the v2.0.1
+per-repository scan filter, and the v2.0 release-validation
+script all carry over verbatim; v2.0.6 does not change
+any of them. The v1.9 provider-health and
+operational-diagnostics page, the v1.8 repository history
+and comparison workflow, the v1.7 findings workbench, the
+v1.6.1 workspace-preserving rescan repair, the v1.6 scan
+workbench, the v1.5 guided intake, and the v1.0 Markdown
+evidence report remain in place. No new providers, no
+new export standards, no new evidence contracts, no new
+API endpoints, no migration.
 
 ## How to run the demo
 
 ```powershell
-cd "C:\Users\Naman Parikh\Documents\Minimax Projects\Lockverity\backend"
+cd backend
 .\.venv\Scripts\python.exe scripts\load_demo.py --reset-demo-db
 $env:LOCKVERITY_DATABASE_URL = "sqlite:///var/demo/lockverity-demo.sqlite"
 .\.venv\Scripts\python.exe -m uvicorn app.main:app --host 127.0.0.1 --port 8765
 
-cd "C:\Users\Naman Parikh\Documents\Minimax Projects\Lockverity\frontend"
+cd frontend
 $env:VITE_API_PROXY_TARGET = "http://127.0.0.1:8765"
 npm install
 npm run dev
@@ -250,22 +262,28 @@ reviewer asks for a deep dive, switch to the full
   resolved commit SHA is the `deadbeef` fill, and
   Lockverity makes no provider calls during the demo.
 - **Do not** call Lockverity "production-ready" or "a
-  hosted SaaS". The current status is a private portfolio-
-  ready baseline.
+  hosted SaaS". The current status is a local-first,
+  portfolio-ready release candidate.
 
 ## Public / private recommendation
 
-**Current recommendation: keep the repository private.**
-
-The application is a private portfolio-ready baseline, not a
-production SaaS, not a hosted service, and not a CI vendor.
-A reviewer or future public visitor can clone the
-repository, run the demo, and verify every claim in
-5 minutes. The codebase, the docs, and the demo dataset are
-all internally consistent and free of secrets.
+**Current recommendation: do not assume a visibility
+recommendation in the codebase.** The repository visibility
+is a deployment concern that is set via the explicit
+``gh repo edit --visibility public|private|internal`` flow
+documented in the Phase 1 public-release closure report.
+The Phase 1 public-closure cycle treats the codebase as
+suitable for publication but performs the visibility
+change only via that explicit flow. The application is a
+local-first release candidate, not a production SaaS, not a
+hosted service, and not a CI vendor. A reviewer or future
+public visitor can clone the repository, run the demo,
+and verify every claim in 5 minutes. The codebase, the
+docs, and the demo dataset are all internally consistent
+and free of secrets.
 
 The same wording is in `RELEASE_NOTES.md` under
-`## Status — private portfolio-ready baseline`. If a future
+`## Status — local-first release candidate`. If a future
 release changes this status (e.g. adds hosted deployment),
 this section will be the first thing rewritten and the
 change will be called out in `CHANGELOG.md`.
@@ -275,13 +293,13 @@ change will be called out in `CHANGELOG.md`.
 The demo deliberately does not show:
 
 - A **real provider scan result.** The demo dataset is
-  synthetic; production scanning would require a real
-  GitHub URL and (optionally) a `LOCKVERITY_GITHUB_TOKEN`
-  for public rate limits. The current v1.3 demo cannot
-  reach an external provider.
+  synthetic; production scanning requires a real public
+  GitHub URL. (A `LOCKVERITY_GITHUB_TOKEN` is honoured for
+  public rate limits but the upstream API surface is the
+  default; no custom API origin is accepted.)
 - A **multi-tenant deployment.** The application has no
   authentication, no per-tenant data, and no hosted
-  control plane. See "What v2.0.3 does not include" in
+  control plane. See "What v2.0.6 does not include" in
   the About page or `RELEASE_NOTES.md`.
 - A **vulnerability verdict.** The CycloneDX 1.7 export
   and the Markdown report are evidence exports, not

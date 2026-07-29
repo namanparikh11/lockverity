@@ -45,7 +45,7 @@ production deployment belongs in a separate deployment runbook
 - a defect-fix pass on real release-blocking issues found in
   the v1.9 audit (rescan error-envelope mapping, dead code in
   the diagnostics service);
-- a stable version bump to `2.0.0`.
+- a stable version bump to `2.0.6`.
 
 v2.0 introduces **no new product feature** and **no new
 provider**. The version bump signals that the prior milestones
@@ -54,13 +54,13 @@ on a single command.
 
 ## 2. Supported local workflow
 
-The supported review workflow is the v1.9 demo flow, which
+The supported review workflow is the v2.0.6 demo flow, which
 v2.0 does not change:
 
 1. **Generate the demo database** with the deterministic
    loader:
    ```powershell
-   cd "C:\Users\Naman Parikh\Documents\Minimax Projects\Lockverity\backend"
+   cd backend
    .\.venv\Scripts\python.exe scripts/load_demo.py --reset-demo-db
    ```
 2. **Start the backend** on `127.0.0.1:8765` with the
@@ -72,7 +72,7 @@ v2.0 does not change:
 3. **Start the frontend** on `127.0.0.1:5173` with the Vite
    proxy pointed at the backend:
    ```powershell
-   cd "C:\Users\Naman Parikh\Documents\Minimax Projects\Lockverity\frontend"
+   cd frontend
    $env:VITE_API_PROXY_TARGET = "http://127.0.0.1:8765"
    npm install
    npm run dev
@@ -92,13 +92,24 @@ v2.0 does not change:
   (`backend/.venv`) created by `python -m venv .venv` and
   populated by `pip install -e ".[dev]"` (or by the
   bootstrap path the developer has been using).
-- **Node.js 20 or 22** with a frontend `node_modules/`
-  populated by `npm install`.
+- **Node.js >=22.22.0** with a frontend `node_modules/`
+  populated by `npm install`. The Node.js floor is
+  dictated by `react-router@8.3.0` (declared in
+  `frontend/package.json` `engines.node` and confirmed
+  in the lockfile). Earlier 22.x releases (22.0-22.21)
+  and the entire 20.x line are not supported. The repo
+  ships an `.nvmrc` pinning the floor; use `nvm use`
+  (or `fnm use` / `volta pin`) to align your local
+  runtime. Validation was performed on Node.js 24.18.0;
+  v22.22.x is the minimum.
 - A clean working tree: `git status --short` must report no
   tracked-file changes other than the v2.0 files.
-- The local Git remote `origin` is the existing **private**
-  repository. The release does not change the remote URL,
-  the visibility, or any global Git config.
+- The local Git remote `origin` is the existing
+  repository. The release does not change the remote URL
+  or any global Git config. Repository visibility is
+  changed only via the explicit ``gh repo edit --visibility``
+  flow documented in the Phase 1 public-release closure
+  report; this script does not touch visibility.
 
 ## 4. Backend and frontend start commands
 
@@ -133,7 +144,7 @@ migrations the application uses.
 The single v2.0 entry point for verification is:
 
 ```powershell
-cd "C:\Users\Naman Parikh\Documents\Minimax Projects\Lockverity\backend"
+cd backend
 .\.venv\Scripts\python.exe scripts\verify_release.py
 ```
 
@@ -167,7 +178,63 @@ The exact step plan is defined in
 truth. If the step plan changes, this document and the
 script's test suite are updated in the same change.
 
-## 7. Core security boundaries
+## 7. External release-checklist commands
+
+The ten-stage verifier covers the automated regression
+suite and the lint / format / audit gates. Two
+operator-driven manual commands complement the
+verifier. They are not part of the ten-stage verifier
+(the verifier does not run them); the operator runs
+them as explicit release-checklist steps. Both are
+documented here by their exact command form so the
+release checklist names the scripts the verifier
+docstring references.
+
+### 7.1 Operator-driven manual migration round-trip confirmation
+
+The ``backend:pytest`` stage already runs the full
+backend test suite, which includes the automated
+migration tests:
+
+- ``tests/test_migration_cycle.py`` exercises
+  ``alembic upgrade head`` -> ``alembic downgrade base``
+  -> ``alembic upgrade head`` against a fresh SQLite
+  database (pytest entry point
+  ``test_alembic_upgrade_downgrade_reupgrade``).
+- ``tests/test_migration_f6a7b8c9d0e1.py`` pins the
+  v2.0.6 cycle-7-final migration's local sanitiser,
+  backfill, GitHub provenance preservation, and
+  upgrade / downgrade / re-upgrade cycle.
+
+The operator may additionally perform the manual
+round-trip as an explicit confirmation:
+
+```powershell
+cd backend
+.\.venv\Scripts\python.exe -m tests.manual_migration_cycle
+```
+
+This is an *additional* confirmation; the automated
+pytest coverage above must be green for the verifier
+to pass.
+
+### 7.2 Smoke validation
+
+The smoke flow is not part of the ten-stage verifier.
+The operator runs the v0.5 integrated smoke
+explicitly:
+
+```powershell
+cd backend
+.\.venv\Scripts\python.exe scripts_smoke_v0_5.py
+```
+
+The script exercises the alembic upgrade, two-scan
+comparison, lifecycle events, comparison refresh,
+cross-workspace rejection, evidence-envelope
+validation, and provider-cache preservation flows.
+
+## 8. Core security boundaries
 
 The release validation does not weaken any of the existing
 boundaries. It enforces them by running the same suites the
@@ -215,7 +282,7 @@ to these requires a SECURITY.md update, a
   filesystem paths, or raw stack traces are ever exposed by
   the API, the diagnostics endpoint, or the exports.
 
-## 8. Release validation checklist
+## 9. Release validation checklist
 
 The operator must run every step below in order. A failed
 step halts the release.
@@ -234,7 +301,7 @@ step halts the release.
       reflects the v2.0 step plan, prerequisites, and
       boundaries.
 - [ ] **Version bumped.** `backend/app/_version.py` and the
-      frontend version/about test agree on `2.0.0`. The
+      frontend version/about test agree on `2.0.6`. The
       README, CHANGELOG, and RELEASE_NOTES reference the
       same version.
 - [ ] **Backend verification passes.** `pytest`, `ruff
@@ -274,7 +341,7 @@ step halts the release.
       feature-branch push. No `--force`. No remote URL
       change.
 
-## 9. Known limitations
+## 10. Known limitations
 
 The release does not eliminate any of the following. They are
 documented here so the operator does not have to guess.
@@ -293,8 +360,8 @@ documented here so the operator does not have to guess.
   Markdown evidence report and the CycloneDX 1.7 SBOM are
   the only human-readable exports.
 - **No tracked screenshots.** The screenshot captures are
-  manual and local; the v1.3 checklist remains the canonical
-  guide.
+  manual and local; the v2.0.6 checklist remains the
+  canonical guide.
 - **In-process executor does not persist heartbeats.** The
   diagnostics page renders "Heartbeat not exposed by the
   current executor" rather than inventing a heartbeat.
@@ -309,7 +376,7 @@ documented here so the operator does not have to guess.
   organisation model is persisted; v2.0 stays at the
   single-tenant level.
 
-## 10. What v2.0 does not claim
+## 11. What v2.0 does not claim
 
 v2.0 is explicitly **not**:
 
@@ -341,16 +408,17 @@ v2.0 is explicitly **not**:
   cards and explicitly states that operational state is not
   security state.
 
-## 11. Repository visibility
+## 12. Repository visibility
 
-The repository remains a **private** GitHub repository. The
-release does not change the remote URL, the visibility, or
-any global Git configuration. The decision to keep the
-repository private (or, in the future, to make it public) is
-external to the code release; the v2.0 candidate does not
-make that decision.
+The release does not change repository visibility. The
+release does not change the remote URL or any global
+Git configuration. The decision to change the visibility
+is performed via the explicit ``gh repo edit
+--visibility public|private|internal`` flow and is
+external to the code release; the v2.0.6 candidate does
+not perform that change.
 
-## 12. Cross-links
+## 13. Cross-links
 
 - `docs/security-boundaries.md` — public-facing boundary
   statement.

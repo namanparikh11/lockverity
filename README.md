@@ -189,7 +189,7 @@ availability policy.
   backed by code that ships in this repository, never by a
   fixture or a mocked demo.
 
-## Key v1.2 demo flow
+## Key v2.0.6 demo flow
 
 1. Generate the deterministic demo database
    (`backend/scripts/load_demo.py --reset-demo-db`).
@@ -220,9 +220,9 @@ and `docs/screenshots.md` for the screenshot checklist.
 
 ## Run the demo
 
-The v1.5 demo is the fastest way to see every Lockverity
+The v2.0.6 demo is the fastest way to see every Lockverity
 surface end-to-end. Six steps, no provider credentials, no
-hosted services. The new v1.5 `/analyze` page adds a guided
+hosted services. The v2.0.6 `/analyze` page adds a guided
 intake flow for a public GitHub repository or a `zip` source
 archive on top of the seeded demo.
 
@@ -235,7 +235,7 @@ archive on top of the seeded demo.
    byte-equivalent to a fresh `alembic upgrade head`.
 
    ```powershell
-   cd "C:\Users\Naman Parikh\Documents\Minimax Projects\Lockverity\backend"
+   cd backend
    .\.venv\Scripts\python.exe scripts\load_demo.py --reset-demo-db
    ```
 
@@ -250,7 +250,7 @@ archive on top of the seeded demo.
 
    ```bash
    curl http://127.0.0.1:8765/api/v1/health
-   # {"status":"ok","database":"ok","version":"1.6.1", ...}
+   # {"status":"ok","database":"ok","version":"2.0.6", ...}
    ```
 
 3. **Start the frontend** on `127.0.0.1:5173` with the Vite
@@ -259,7 +259,7 @@ archive on top of the seeded demo.
    backend.
 
    ```powershell
-   cd "C:\Users\Naman Parikh\Documents\Minimax Projects\Lockverity\frontend"
+   cd frontend
    $env:VITE_API_PROXY_TARGET = "http://127.0.0.1:8765"
    npm install
    npm run dev
@@ -310,7 +310,7 @@ The full reviewer walkthrough lives in
 
 ## Screenshots
 
-The v1.3 release ships a screenshot **checklist and manual
+Lockverity v2.0.6 ships a screenshot **checklist and manual
 capture guide**, not a tracked set of image files. The 9
 recommended captures, the per-capture expected visible
 state, and the browser-agnostic capture shortcuts are in
@@ -326,7 +326,7 @@ is the canonical evidence, and the bounded wording in
 the application must be verifiable on a running
 application, not on a frozen image). A reviewer captures
 the 9 PNGs into a local portfolio folder such as
-`~/lockverity-portfolio/v1.3/`; the screenshots are not
+`~/lockverity-portfolio/v2.0.6/`; the screenshots are not
 pushed to the repository.
 
 ## Architecture overview
@@ -352,8 +352,16 @@ For more detail, see `docs/architecture.md`.
 ### Prerequisites
 
 - Python 3.12
-- Node.js 20 or 22
+- Node.js >=22.22.0
 - A POSIX or Windows shell
+
+The Node.js floor is dictated by `react-router@8.3.0`, which
+declares `engines.node = ">=22.22.0"` in `frontend/package-lock.json`.
+Earlier 22.x releases (22.0 through 22.21) and the entire 20.x line
+are not supported by the v2.0.6 release. The repo ships an
+`.nvmrc` pinning the floor; use `nvm use` (or `fnm use` /
+`volta pin`) to align your local runtime. Validation was
+performed on Node.js 24.18.0; v22.22.x is the minimum.
 
 ### Backend
 
@@ -370,7 +378,7 @@ The default SQLite database is `./lockverity.sqlite`. To use
 PostgreSQL instead, set `LOCKVERITY_DATABASE_URL` to a SQLAlchemy
 URL like `postgresql+psycopg://user:pass@host:5432/lockverity`.
 
-For the v1.2 demo dataset, the safest path is to use the bundled
+For the v2.0.6 demo dataset, the safest path is to use the bundled
 loader so the demo never depends on a hidden SQLite file. The
 loader creates the full schema via the same Alembic migrations
 the application uses and never calls `Base.metadata.create_all`:
@@ -684,7 +692,7 @@ pass: added `/demo` route and `DemoHomePage` (five
 sections, bounded wording, no API calls) plus a `Demo`
 entry in the AppShell primary nav.
 
-`v1.3` was the screenshot assets + private portfolio demo
+`v1.3` was the screenshot assets + portfolio demo
 pack pass: added the `## Screenshots` section to
 `README.md` (manual capture only, no tracked image
 files), the new [`docs/demo-pack.md`](docs/demo-pack.md)
@@ -719,21 +727,25 @@ No new features, no new providers, no new export standards.
 and a lazy JSON preview endpoint. No new providers, no new
 export standards.
 
-## What v2.0.5 does not include
+## What v2.0.6 does not include
 
-Planned for later milestones, not implemented today. v2.0.5
-is a non-feature comparison-stability and
-repository-identification repair; it inherits the v2.0.4
+Planned for later milestones, not implemented today.
+v2.0.6 is a narrowly scoped historical-label and
+stage-outcome clarity repair; it inherits the v2.0.5
 "does not include" list verbatim and adds nothing to it.
-The v2.0.5 surface area is two localised changes plus a
-reversible migration: the comparison comparator helper
-``_nullable_key_sort_key`` in
-``app/services/comparison_service.py``; the additive
-nullable ``original_filename`` column on
-``repositories`` and the new
-``RepositoryWithSummary`` list-endpoint shape; the
-extended ``search`` parameter; and the
-``e5f6a7b8c9d0`` Alembic revision.
+The v2.0.6 surface area is two additive read-time
+helpers plus the public-release closure hardening
+(``BoundedHttpClient`` rewrite to use ``client.stream``
+for real streaming; ``basename_safely`` defence in
+depth on every public filename surface; documentation
+cleanup; security-advisory upgrade of React Router
+to ``react-router@8.3.0``; removal of the unused
+configurable GitHub API origin override;
+deterministic-export compatibility preservation;
+release-verifier wording alignment; restoration of the
+historical ``exported_at=`` CSV header; preservation of
+trusted GitHub provenance in the workspace archive
+filename; safe-basename-only repository search).
 
 - Authentication, multi-tenancy, billing, or self-service
   signup.
@@ -742,23 +754,20 @@ extended ``search`` parameter; and the
   remediated / assigned / suppressed statuses are
   persisted in the database. The existing
   `Finding.status` enum (open / resolved / accepted /
-  suppressed) is read-only in v1.7; the UI exposes the
-  value but does not let an operator mutate it. v1.8
-  preserves this read-only contract. v2.0.3 does not
-  change this contract.
+  suppressed) is read-only; the UI exposes the value
+  but does not let an operator mutate it. v2.0.6 does
+  not change this contract.
 - Continuous / scheduled scans. v1.5 scans are explicit
   operator actions through the `/analyze` page or the
   legacy `/repositories/new` and `/repositories/upload`
   pages, with Start scan, Cancel scan, and
   Retry-as-new-scan (now backed by
-  `POST /repositories/{id}/rescan`). v1.8's "Run
-  another scan" action uses the same v1.6.1
-  workspace-preserving rescan endpoint. v2.0.3 does not
+  `POST /repositories/{id}/rescan`). v2.0.6 does not
   add scheduling, cron, or background polling.
-- Private GitHub repository analysis (v2.0.3 is public-only;
-  the `LOCKVERITY_GITHUB_TOKEN` environment variable is
-  honoured for public rate limits but private endpoints
-  are out of scope).
+- Private GitHub repository analysis (v2.0.6 is
+  public-only; the `LOCKVERITY_GITHUB_TOKEN` environment
+  variable is honoured for public rate limits but
+  private endpoints are out of scope).
 - LLM-driven analysis, exploit generation, or any other
   offensive feature.
 - PDF, DOCX, HTML, signed attestations, or certification
@@ -766,10 +775,13 @@ extended ``search`` parameter; and the
 - Dependency-path visualisation for transitive vulnerabilities
   in the frontend (the data is on the wire; the page is not yet
   wired in).
-- Public deployment of the application itself. The repository
-  is a private portfolio baseline, not a hosted service.
-  See `RELEASE_NOTES.md`.
-- Tracked screenshot image files. The v1.3 captures are
+- Hosted deployment of the application itself. The
+  repository is a local-first, portfolio-ready
+  baseline. There is no production deployment, no
+  hosted control plane, and no multi-tenant service.
+  See `RELEASE_NOTES.md` for the current release
+  posture.
+- Tracked screenshot image files. The captures are
   intentionally manual; see `## Status of the screenshot
   assets` in `docs/screenshots.md` for the rationale.
 - Backend calls from the `/demo` page. The page is

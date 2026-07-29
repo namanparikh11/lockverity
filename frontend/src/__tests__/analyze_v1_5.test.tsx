@@ -21,7 +21,7 @@
 
 import { describe, expect, it, beforeEach, afterEach, vi } from "vitest";
 import { act, render, screen, waitFor, cleanup, fireEvent } from "@testing-library/react";
-import { MemoryRouter, Route, Routes } from "react-router-dom";
+import { MemoryRouter, Route, Routes } from "react-router";
 
 import { AppShell } from "@/layouts/AppShell";
 import { AnalyzePage } from "@/pages/AnalyzePage";

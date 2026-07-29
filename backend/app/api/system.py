@@ -79,7 +79,15 @@ def system_info(settings: SettingsDep) -> SystemInfoResponse:
             "retry_limit": settings.provider_retry_limit,
         },
         intake={
-            "github_api_url": settings.github_api_url,
+            # The GitHub API origin is the canonical
+            # ``https://api.github.com`` host. The previous
+            # ``github_api_url`` field is intentionally
+            # absent: the configurable override was removed
+            # because the bounded HTTP allowlist and every
+            # URL builder pin the canonical host. Operators
+            # who need to verify the host see only the
+            # configuration knobs that actually do
+            # something.
             "github_max_download_bytes": settings.github_max_download_bytes,
             "github_timeout_seconds": settings.github_timeout_seconds,
             "github_token_configured": settings.github_token is not None,

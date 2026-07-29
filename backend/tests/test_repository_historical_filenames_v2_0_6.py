@@ -282,6 +282,170 @@ def test_basename_safely_strips_absolute_paths() -> None:
     assert basename_safely("C:\\Users\\me\\secret.zip") == "secret.zip"
     assert basename_safely("C:/Users/me/secret.zip") == "secret.zip"
     assert basename_safely("/etc/passwd") == "passwd"
+
+
+# ---------------------------------------------------------------------------
+# 6b. Read-time sanitization defends against historical
+#     rows that pre-date the v2.0.5 intake sanitiser.
+# ---------------------------------------------------------------------------
+
+
+def test_historical_pathful_archive_filename_is_sanitised(app_config, workspace_root) -> None:
+    """A historical ``Workspace.archive_filename`` value that
+    contains a Windows drive-letter path must be reduced to a
+    basename by the read-time sanitisation; the API must
+    never expose ``C:\\Users\\me\\secret.zip`` even when the
+    row was inserted by an operator with a tool that bypassed
+    the intake sanitiser.
+    """
+    repo_id = _build_repo(
+        owner="upload",
+        name="pathful-1",
+        source_type=RepositorySourceType.UPLOADED_ARCHIVE,
+        original_filename=None,
+    )
+    # Insert a workspace whose ``archive_filename`` is a raw
+    # Windows drive-letter path. This simulates a
+    # historical row from before the v2.0.5 sanitiser was
+    # added; the read-time sanitiser must catch it. We use
+    # the ``WorkspaceService`` to create the row so the
+    # ``workspace_key`` invariant is honoured, then
+    # overwrite the sanitised ``archive_filename`` with a
+    # deliberately-pathful value to bypass the
+    # intake-layer sanitiser.
+    with _db_session.SessionLocal() as s:
+        scan = scan_service.create_scan(
+            s, repository_id=repo_id, trigger_type=ScanTriggerType.UPLOAD
+        )
+        scan.status = ScanStatus.COMPLETED
+        workspace = WorkspaceService(s).create_for_scan(scan, kind=WorkspaceKind.UPLOADED_ARCHIVE)
+        workspace.archive_filename = "C:\\Users\\me\\secret.zip"
+        s.commit()
+
+    # The historical helper must surface the basename only.
+    with _db_session.SessionLocal() as s:
+        result = repository_repo.get_repository_historical_filenames(s, [repo_id])
+        hist = result[repo_id]
+        assert hist.historical_archive_filename == "secret.zip"
+        assert "C:\\Users" not in (hist.historical_archive_filename or "")
+        assert hist.historical_filename_conflict is False
+
+    # The list API must not surface the original pathful value.
+    client = TestClient(app)
+    response = client.get("/api/v1/repositories")
+    assert response.status_code == 200
+    body = response.json()
+    rows = [r for r in body["items"] if r["id"] == repo_id]
+    assert rows, "repository not in list response"
+    row = rows[0]
+    assert row["display_name"] == "secret.zip"
+    assert "C:\\" not in row["display_name"]
+    assert "C:/" not in row["display_name"]
+    assert "C:\\Users" not in response.text
+    assert "C:/Users" not in response.text
+
+    # The detail API must not surface the original pathful
+    # value either.
+    detail = client.get(f"/api/v1/repositories/{repo_id}")
+    assert detail.status_code == 200
+    assert "C:\\" not in detail.text
+    assert "C:/" not in detail.text
+
+
+def test_historical_posix_path_archive_filename_is_sanitised(app_config, workspace_root) -> None:
+    """A historical ``Workspace.archive_filename`` value that
+    contains a POSIX absolute path is reduced to a basename
+    at the read boundary; the API never exposes
+    ``/var/data/secret.zip`` even when the row was inserted
+    by an operator with a tool that bypassed the intake
+    sanitiser.
+    """
+    repo_id = _build_repo(
+        owner="upload",
+        name="pathful-2",
+        source_type=RepositorySourceType.UPLOADED_ARCHIVE,
+        original_filename=None,
+    )
+    with _db_session.SessionLocal() as s:
+        scan = scan_service.create_scan(
+            s, repository_id=repo_id, trigger_type=ScanTriggerType.UPLOAD
+        )
+        scan.status = ScanStatus.COMPLETED
+        workspace = WorkspaceService(s).create_for_scan(scan, kind=WorkspaceKind.UPLOADED_ARCHIVE)
+        workspace.archive_filename = "/var/data/secret.zip"
+        s.commit()
+    with _db_session.SessionLocal() as s:
+        result = repository_repo.get_repository_historical_filenames(s, [repo_id])
+        hist = result[repo_id]
+        assert hist.historical_archive_filename == "secret.zip"
+    client = TestClient(app)
+    response = client.get("/api/v1/repositories")
+    assert response.status_code == 200
+    body = response.json()
+    rows = [r for r in body["items"] if r["id"] == repo_id]
+    assert rows[0]["display_name"] == "secret.zip"
+    assert "/var/data" not in response.text
+
+
+def test_historical_traversal_archive_filename_is_sanitised(app_config, workspace_root) -> None:
+    """A historical ``Workspace.archive_filename`` value that
+    contains a parent-traversal segment is reduced to the
+    trailing basename at the read boundary.
+    """
+    repo_id = _build_repo(
+        owner="upload",
+        name="pathful-3",
+        source_type=RepositorySourceType.UPLOADED_ARCHIVE,
+        original_filename=None,
+    )
+    with _db_session.SessionLocal() as s:
+        scan = scan_service.create_scan(
+            s, repository_id=repo_id, trigger_type=ScanTriggerType.UPLOAD
+        )
+        scan.status = ScanStatus.COMPLETED
+        workspace = WorkspaceService(s).create_for_scan(scan, kind=WorkspaceKind.UPLOADED_ARCHIVE)
+        workspace.archive_filename = "../../../etc/passwd"
+        s.commit()
+    with _db_session.SessionLocal() as s:
+        result = repository_repo.get_repository_historical_filenames(s, [repo_id])
+        hist = result[repo_id]
+        assert hist.historical_archive_filename == "passwd"
+        assert ".." not in (hist.historical_archive_filename or "")
+
+
+def test_historical_empty_archive_filename_is_dropped(app_config, workspace_root) -> None:
+    """A historical ``Workspace.archive_filename`` value that
+    sanitises to ``None`` (root, dot-only, empty) is dropped
+    from the historical helper result; the API falls back to
+    the bounded opaque label.
+    """
+    repo_id = _build_repo(
+        owner="upload",
+        name="pathful-4",
+        source_type=RepositorySourceType.UPLOADED_ARCHIVE,
+        original_filename=None,
+    )
+    with _db_session.SessionLocal() as s:
+        scan = scan_service.create_scan(
+            s, repository_id=repo_id, trigger_type=ScanTriggerType.UPLOAD
+        )
+        scan.status = ScanStatus.COMPLETED
+        workspace = WorkspaceService(s).create_for_scan(scan, kind=WorkspaceKind.UPLOADED_ARCHIVE)
+        # An empty value. ``basename_safely("")`` is ``None``;
+        # the historical helper must drop the value.
+        workspace.archive_filename = ""
+        s.commit()
+    with _db_session.SessionLocal() as s:
+        result = repository_repo.get_repository_historical_filenames(s, [repo_id])
+        hist = result[repo_id]
+        assert hist.historical_archive_filename is None
+        assert hist.historical_filename_conflict is False
+        assert hist.historical_archive_filename_count == 0
+    client = TestClient(app)
+    response = client.get("/api/v1/repositories")
+    body = response.json()
+    rows = [r for r in body["items"] if r["id"] == repo_id]
+    assert rows[0]["display_name"].startswith("Uploaded archive · upload/")
     assert basename_safely("/var/data/archive.zip") == "archive.zip"
     assert basename_safely("../../etc/passwd") == "passwd"
 

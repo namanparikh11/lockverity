@@ -108,22 +108,61 @@ def join_relative(*parts: str) -> str:
 _BASENAME_MAX = 512
 
 
+# Drive-relative path: ``C:secret.zip`` (no separator
+# after the colon). The path is on the *current* drive's
+# working directory; the basename is the segment after the
+# drive prefix. Matched separately from the absolute
+# drive-letter form so the prefix can be stripped.
+_DRIVE_RELATIVE_RE = re.compile(r"^([A-Za-z]):")
+
+
 def basename_safely(raw: str | None) -> str | None:
     """Return the basename of ``raw``, defensively sanitised.
 
     The function is intentionally narrow: it returns only the
     basename, never the directory, and it is the only path
     operation that mutates a client-supplied value into a
-    field the API serves. A client that sends
-    ``C:\\Users\\me\\secret.zip`` sees ``secret.zip``; a
-    client that sends ``../../etc/passwd`` sees ``passwd``;
-    a client that sends ``C:\\`` or ``/`` sees ``None``; a
-    client that sends an empty string sees ``None``.
+    field the API serves.
 
-    Unicode is preserved (NFC-normalised, see below). A name
-    longer than :data:`_BASENAME_MAX` is truncated; the
-    truncation preserves the trailing extension so the
-    displayed label is still recognisable.
+    A client that sends any of the following shapes sees
+    only the trailing basename; the parent path, the drive
+    letter, the host share, and the leading separators
+    are all stripped at the API boundary.
+
+    - ``C:\\Users\\me\\secret.zip`` → ``secret.zip``
+    - ``C:/Users/me/secret.zip`` → ``secret.zip``
+    - ``C:secret.zip`` (drive-relative) → ``secret.zip``
+    - ``\\\\server\\share\\secret.zip`` → ``secret.zip``
+    - ``//server/share/secret.zip`` → ``secret.zip``
+    - ``/etc/passwd`` → ``passwd``
+    - ``../../etc/passwd`` → ``passwd``
+    - ``a/b/../../c.zip`` → ``c.zip``
+
+    A client that sends a value that resolves to *no*
+    basename (root, drive-letter alone, dot, dot-dot,
+    empty, whitespace) sees ``None``:
+
+    - ``C:`` → ``None``
+    - ``C:/`` → ``None``
+    - ``C:\\`` → ``None``
+    - ``/`` → ``None``
+    - ``\\`` → ``None``
+    - ``.`` → ``None``
+    - ``..`` → ``None``
+    - ``""`` → ``None``
+    - ``None`` → ``None``
+
+    A client that sends a single drive-letter
+    character (e.g. ``C`` without a colon) is treated as
+    a regular filename (the character is preserved);
+    a drive letter is not a security boundary on its own
+    and the consumer can decide whether to display the
+    single character.
+
+    Unicode is preserved (NFC-normalised, see below). A
+    name longer than :data:`_BASENAME_MAX` is truncated;
+    the truncation preserves the trailing extension so
+    the displayed label is still recognisable.
     """
     if raw is None:
         return None
@@ -135,20 +174,35 @@ def basename_safely(raw: str | None) -> str | None:
     # Forward-slash only basename (we are not on Windows for
     # this code path, but the project is Windows-friendly).
     cleaned = cleaned.replace("\\", "/")
-    # Strip a single leading ``/`` and a single trailing ``/``
-    # so that a root path or an explicit root-prefix returns
-    # ``None``. The basename extraction below operates on
-    # the remainder.
+    # Strip UNC leading slashes so the basename below
+    # operates on the share + path tail.
+    cleaned = re.sub(r"^/+", "", cleaned)
+    # Strip a single trailing ``/`` so that an explicit
+    # root-prefix returns ``None`` when only ``/`` is
+    # left. The basename extraction below operates on the
+    # remainder.
     trimmed = cleaned.strip("/")
     if not trimmed:
         return None
-    # A path that is purely a drive letter (e.g. ``C:`` or
-    # ``C:/``) returns ``None``: the basename of a drive
-    # letter alone is not a valid filename.
-    if _DRIVE_LETTER_RE.match(trimmed) is not None and trimmed == trimmed[:2]:
-        return None
-    # A path that contains a drive-letter segment (e.g.
-    # ``C:/a/b.zip``) keeps only the trailing segment.
+    # Absolute drive-letter path: ``C:`` / ``C:/`` / ``C:\\``
+    # returns ``None`` (drive-letter alone is not a valid
+    # filename).
+    if _DRIVE_LETTER_RE.match(trimmed) is not None:
+        # The whole string is just a drive-letter form
+        # (``C:`` or ``C:/`` or ``C:foo`` after the prefix
+        # is gone).
+        after_prefix = _DRIVE_LETTER_RE.sub("", trimmed, count=1)
+        if not after_prefix:
+            return None
+        # ``C:foo`` → the path is on the current drive's
+        # working directory; ``foo`` is the basename.
+        trimmed = after_prefix
+    # UNC tail: ``server/share/secret.zip`` keeps the
+    # trailing segment. The leading host share component
+    # is treated as a directory and discarded; the share
+    # is internal infrastructure the operator never sees.
+    # If the path is just a host share (``server/share``,
+    # no trailing file), drop the whole UNC tail.
     base = trimmed.rsplit("/", 1)[-1]
     if not base:
         return None

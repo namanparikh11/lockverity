@@ -6,6 +6,7 @@ migrations. We also import the application metadata to enable
 ``--autogenerate`` in later revisions, but the first migration is
 written by hand so it is fully reviewable.
 """
+
 from __future__ import annotations
 
 import sys
@@ -21,9 +22,9 @@ BACKEND_ROOT = Path(__file__).resolve().parent.parent
 if str(BACKEND_ROOT) not in sys.path:
     sys.path.insert(0, str(BACKEND_ROOT))
 
-from app.core.config import get_settings  # noqa: E402
-from app.db.base import Base  # noqa: E402
-import app.models  # noqa: F401, E402  - registers tables on Base.metadata
+import app.models
+from app.core.config import get_settings
+from app.db.base import Base
 
 config = context.config
 

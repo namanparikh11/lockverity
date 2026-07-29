@@ -1,6 +1,6 @@
 import { Github, ShieldCheck } from "lucide-react";
 import { useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate } from "react-router";
 
 import { api } from "@/api/api";
 import { ApiClientError, categorizeError, describeError } from "@/api/client";

@@ -229,104 +229,191 @@ class BoundedHttpClient:
         raise last_error
 
     def _execute_once(self, request: BoundedHttpRequest) -> BoundedHttpResponse:
+        return self._stream_with_redirects(
+            request,
+            current_url=request.url,
+            method=request.method,
+            body=request.body,
+            headers=self._build_request_headers(request),
+            redirects_followed=0,
+        )
+
+    def _build_request_headers(self, request: BoundedHttpRequest) -> dict[str, str]:
         headers = dict(request.headers)
         if self._token:
             headers.setdefault("Authorization", f"Bearer {self._token}")
         if "User-Agent" not in headers:
             headers["User-Agent"] = self._user_agent
+        return headers
 
-        # Walk the redirect chain manually so we can re-validate
-        # every destination against the allowlist.
-        current_url = request.url
-        redirects_followed = 0
+    def _stream_with_redirects(
+        self,
+        request: BoundedHttpRequest,
+        *,
+        current_url: str,
+        method: str,
+        body: bytes | None,
+        headers: dict[str, str],
+        redirects_followed: int,
+    ) -> BoundedHttpResponse:
+        """Walk the redirect chain under ``client.stream(...)``.
+
+        The recursion depth is bounded by ``max_redirects`` (5);
+        each step uses a fresh streaming context so the previous
+        connection is released before the next hop. The
+        recursion is the simplest way to keep the
+        ``with self._client.stream(...) as response:`` block
+        scoped to a single hop, which is what guarantees the
+        connection is closed even on the redirect path.
+        """
         max_redirects = 5
-        method = request.method
-        body = request.body
-        while True:
-            self._check_host_in_allowlist(current_url)
-            try:
-                response = self._client.request(
-                    method,
-                    current_url,
-                    headers=headers,
-                    content=body,
-                    timeout=request.timeout_seconds,
-                )
-            except httpx.TimeoutException as exc:
-                raise BoundedHttpError("http_timeout", "Request timed out.") from exc
-            except httpx.HTTPError as exc:
-                raise BoundedHttpError("http_connection_error", f"Connection error: {exc}") from exc
-
-            if response.status_code in (301, 302, 303, 307, 308) and request.allow_redirects:
-                redirects_followed += 1
-                if redirects_followed > max_redirects:
-                    raise BoundedHttpError(
-                        "http_too_many_redirects",
-                        "Redirect chain exceeded the maximum length.",
-                    )
-                location = response.headers.get("Location") or response.headers.get("location")
-                if not location:
-                    raise BoundedHttpError(
-                        "http_invalid_redirect",
-                        "Redirect response did not include a Location header.",
-                    )
-                # Body is consumed for redirects so the next
-                # request starts cleanly.
-                try:
-                    response.read()
-                except Exception:  # pragma: no cover - httpx swallows
-                    logger.debug("ignoring redirect body read failure", exc_info=True)
-                current_url = _resolve_redirect(current_url, location)
-                # 303 always switches to GET; 301/302 are kept as
-                # GET for our usage (we only GET or send a small
-                # JSON body). The archive download path is GET
-                # only.
-                if response.status_code == 303:
-                    method = "GET"
-                    body = None
-                continue
-
-            # Final response.
-            self._check_status(response, request)
-            content_type = (
-                (response.headers.get("Content-Type") or "").split(";")[0].strip().lower()
+        if redirects_followed > max_redirects:
+            raise BoundedHttpError(
+                "http_too_many_redirects",
+                "Redirect chain exceeded the maximum length.",
             )
-            if (
-                content_type
-                and request.accept_content_types
-                and (content_type not in request.accept_content_types)
-            ):
-                raise BoundedHttpError(
-                    "http_content_type_forbidden",
-                    f"Response content-type {content_type!r} is not in the allowlist.",
+        self._check_host_in_allowlist(current_url)
+        try:
+            with self._client.stream(
+                method,
+                current_url,
+                headers=headers,
+                content=body,
+                timeout=request.timeout_seconds,
+            ) as response:
+                # A redirect response: drain its body
+                # (bounded by the same cap), close the
+                # connection, and recurse with the next
+                # hop. A non-redirect response: return the
+                # bounded body.
+                if response.status_code in (301, 302, 303, 307, 308) and request.allow_redirects:
+                    self._drain_redirect_body(response, request.max_response_bytes)
+                    location = response.headers.get("Location") or response.headers.get("location")
+                    if not location:
+                        raise BoundedHttpError(
+                            "http_invalid_redirect",
+                            "Redirect response did not include a Location header.",
+                        )
+                    next_url = _resolve_redirect(current_url, location)
+                    # 303 always switches to GET; 301/302/307/308
+                    # preserve the method for our usage
+                    # (we only GET or send a small JSON body).
+                    next_method = "GET" if response.status_code == 303 else method
+                    next_body = None if response.status_code == 303 else body
+                    return self._stream_with_redirects(
+                        request,
+                        current_url=next_url,
+                        method=next_method,
+                        body=next_body,
+                        headers=headers,
+                        redirects_followed=redirects_followed + 1,
+                    )
+
+                # Final response.
+                self._check_status(response, request)
+                content_type = (
+                    (response.headers.get("Content-Type") or "").split(";")[0].strip().lower()
                 )
-            content_length = response.headers.get("Content-Length")
-            if content_length is not None:
-                try:
-                    declared = int(content_length)
-                except ValueError as exc:
+                if (
+                    content_type
+                    and request.accept_content_types
+                    and (content_type not in request.accept_content_types)
+                ):
                     raise BoundedHttpError(
-                        "http_invalid_content_length",
-                        "Response Content-Length is not an integer.",
-                    ) from exc
-                if declared > request.max_response_bytes:
+                        "http_content_type_forbidden",
+                        f"Response content-type {content_type!r} is not in the allowlist.",
+                    )
+                content_length = response.headers.get("Content-Length")
+                if content_length is not None:
+                    try:
+                        declared = int(content_length)
+                    except ValueError as exc:
+                        raise BoundedHttpError(
+                            "http_invalid_content_length",
+                            "Response Content-Length is not an integer.",
+                        ) from exc
+                    if declared > request.max_response_bytes:
+                        raise BoundedHttpError(
+                            "http_response_too_large",
+                            f"Response Content-Length {declared} exceeds the limit "
+                            f"{request.max_response_bytes}.",
+                        )
+                body_bytes = self._stream_bounded_body(response, request.max_response_bytes)
+                return BoundedHttpResponse(
+                    status_code=response.status_code,
+                    headers=dict(response.headers.items()),
+                    body=body_bytes,
+                )
+        except BoundedHttpError:
+            raise
+        except httpx.TimeoutException as exc:
+            raise BoundedHttpError("http_timeout", "Request timed out.") from exc
+        except httpx.HTTPError as exc:
+            raise BoundedHttpError("http_connection_error", f"Connection error: {exc}") from exc
+
+    def _drain_redirect_body(self, response: httpx.Response, max_bytes: int) -> None:
+        """Drain and discard a redirect response body.
+
+        The cap is the same ``max_response_bytes`` as the
+        final response: an attacker-controlled intermediate
+        hop cannot exhaust process memory. The body is
+        streamed; we do not retain the bytes.
+        """
+        chunk_size = max(64 * 1024, min(max_bytes, 1024 * 1024))
+        total = 0
+        try:
+            for chunk in response.iter_bytes(chunk_size=chunk_size):
+                if not chunk:
+                    continue
+                total += len(chunk)
+                if total > max_bytes:
                     raise BoundedHttpError(
                         "http_response_too_large",
-                        f"Response Content-Length {declared} exceeds the limit "
-                        f"{request.max_response_bytes}.",
+                        f"Redirect body exceeded the limit {max_bytes} while streaming.",
                     )
-            body_bytes = response.content
-            if len(body_bytes) > request.max_response_bytes:
-                raise BoundedHttpError(
-                    "http_response_too_large",
-                    f"Response body {len(body_bytes)} bytes exceeds the limit "
-                    f"{request.max_response_bytes}.",
-                )
-            return BoundedHttpResponse(
-                status_code=response.status_code,
-                headers=dict(response.headers.items()),
-                body=body_bytes,
-            )
+        except httpx.HTTPError as exc:
+            raise BoundedHttpError(
+                "http_connection_error",
+                f"Redirect stream interrupted: {exc}",
+            ) from exc
+
+    def _stream_bounded_body(self, response: httpx.Response, max_bytes: int) -> bytes:
+        """Stream the response body in fixed-size chunks.
+
+        The cap is enforced *while* the body is being read;
+        a hostile upstream that sends more bytes than the
+        cap is aborted as soon as the cap is crossed and
+        the partial body is discarded so a single
+        oversized response cannot exhaust process memory.
+        The function returns the bytes only when the
+        total fits within the cap; otherwise it raises
+        :class:`BoundedHttpError` with the
+        ``http_response_too_large`` code and no body is
+        retained.
+        """
+        chunk_size = max(64 * 1024, min(max_bytes, 1024 * 1024))
+        parts: list[bytes] = []
+        total = 0
+        try:
+            for chunk in response.iter_bytes(chunk_size=chunk_size):
+                if not chunk:
+                    continue
+                total += len(chunk)
+                if total > max_bytes:
+                    parts.clear()
+                    raise BoundedHttpError(
+                        "http_response_too_large",
+                        f"Response body exceeded the limit {max_bytes} while streaming.",
+                    )
+                parts.append(chunk)
+        except BoundedHttpError:
+            raise
+        except httpx.HTTPError as exc:
+            raise BoundedHttpError(
+                "http_connection_error",
+                f"Stream interrupted: {exc}",
+            ) from exc
+        return b"".join(parts)
 
     def _check_host_in_allowlist(self, url: str) -> None:
         from urllib.parse import urlsplit
@@ -376,8 +463,16 @@ class BoundedHttpClient:
                 f"Upstream returned {status}.",
                 http_status=status,
             )
-        # Any other 4xx surfaces as a generic client error and
-        # is not retried.
+        # Any other 4xx (including 400, 409, 422) surfaces as a
+        # generic client error. The 400, 409 and 422 statuses
+        # are explicitly enumerated for documentation; the
+        # fall-through ``raise`` covers every other 4xx (e.g.
+        # 410, 451). Retries are not attempted on 4xx.
+        raise BoundedHttpError(
+            "http_client_error",
+            f"Upstream returned {status}.",
+            http_status=status,
+        )
 
 
 def _resolve_redirect(current_url: str, location: str) -> str:

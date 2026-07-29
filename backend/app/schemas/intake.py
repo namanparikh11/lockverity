@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
-from pydantic import Field
+from pydantic import Field, field_validator
 
 from app.models.workspace import WorkspaceKind, WorkspaceState
 from app.schemas.common import NonEmptyStr, SchemaModel, ShortStr, TimestampMixin
@@ -39,6 +39,16 @@ class WorkspaceRead(TimestampMixin):
     workspace_key: str
     kind: WorkspaceKind
     state: WorkspaceState
+    # ``archive_filename`` is sanitised at write time
+    # (``basename_safely``) by the workspace service.
+    # The field validator below is defence-in-depth for
+    # historical rows that pre-date the sanitiser, or
+    # for operator-inserted rows that bypassed it. A
+    # pathful value (Windows drive letter, POSIX
+    # absolute path, parent traversal) is reduced to a
+    # basename or ``None`` at the API boundary so the
+    # public response never exposes a local absolute
+    # path.
     archive_filename: str | None = None
     archive_sha256: str | None = None
     archive_size: int
@@ -48,6 +58,31 @@ class WorkspaceRead(TimestampMixin):
     failure_summary: str | None = None
     ready_at: datetime | None = None
     cleaned_up_at: datetime | None = None
+
+    @field_validator("archive_filename", mode="before")
+    @classmethod
+    def _sanitise_archive_filename(cls, value: object) -> object:
+        """Apply :func:`basename_safely` at the API boundary.
+
+        The intake layer sanitises the value at write
+        time, but historical rows that pre-date the
+        sanitiser (or rows inserted by an operator with
+        a tool that bypassed it) can still carry a
+        pathful value. The validator is the public
+        boundary's last line of defence: a pathful value
+        is reduced to a basename or ``None`` before the
+        response is serialised.
+        """
+        if value is None:
+            return None
+        if not isinstance(value, str):
+            return None
+        # Local import to avoid a circular dependency at
+        # module load time; the helper is small and the
+        # import is cached after the first call.
+        from app.utils.paths import basename_safely
+
+        return basename_safely(value)
 
 
 class IntakeSummary(SchemaModel):

@@ -36,11 +36,9 @@ os.environ["LOCKVERITY_DATABASE_URL"] = f"sqlite:///{DB_PATH}"
 os.environ["LOCKVERITY_WORKSPACE_ROOT"] = str(ROOT / "var" / "workspace-smoke-v0_4")
 os.environ["LOCKVERITY_ENV"] = "development"
 
-import httpx  # noqa: E402
-
-from fastapi.testclient import TestClient  # noqa: E402
 
 from app.main import app  # noqa: E402
+from fastapi.testclient import TestClient  # noqa: E402
 
 
 def _build_zip_with_manifest() -> bytes:
@@ -116,8 +114,11 @@ def main() -> int:
     _expect(r.status_code == 201, f"POST /repositories returns 201 (got {r.status_code})")
     repo_id = r.json()["id"]
     r2 = client.post(f"/api/v1/repositories/{repo_id}/scans")
-    _expect(r2.status_code == 201, f"POST /repositories/{{id}}/scans returns 201 (got {r2.status_code})")
+    _expect(
+        r2.status_code == 201, f"POST /repositories/{{id}}/scans returns 201 (got {r2.status_code})"
+    )
     scan_id = r2.json()["id"]
+    _ = scan_id  # smoke id retained for log/tracing
     r3 = client.post(
         "/api/v1/repositories/upload",
         files={"file": ("sample.zip", _build_zip_with_manifest(), "application/zip")},
@@ -156,7 +157,9 @@ def main() -> int:
     print(f"  providers observed: {sorted(providers)}")
     _expect("osv" in providers, "OSV is recorded as a provider observation")
     _expect("deps_dev" in providers, "deps.dev is recorded as a provider observation")
-    _expect("openssf" in providers or "export_generation" in providers, "export_generation stage row")
+    _expect(
+        "openssf" in providers or "export_generation" in providers, "export_generation stage row"
+    )
 
     print("Test #6: vulnerabilities endpoint includes the v0.4 fields")
     r = client.get(f"/api/v1/scans/{uploaded_scan_id}/vulnerabilities")
@@ -181,9 +184,11 @@ def main() -> int:
     items = body["items"]
     _expect(
         any(
-            item.get("provider_status") in {"available", "unavailable", "not_requested", "partial", None}
+            item.get("provider_status")
+            in {"available", "unavailable", "not_requested", "partial", None}
             for item in items
-        ) or len(items) == 0,
+        )
+        or len(items) == 0,
         "enrichments rows carry a provider_status (or the list is empty)",
     )
     for item in items[:3]:
@@ -201,7 +206,9 @@ def main() -> int:
     _expect(r.status_code == 200, f"GET /exports/findings_json returns 200 (got {r.status_code})")
     body = r.json()
     _expect("providers" in body, "findings.json export carries the providers block")
-    print(f"  findings.json: {len(body.get('findings', []))} findings, {len(body.get('providers', []))} provider observations")
+    print(
+        f"  findings.json: {len(body.get('findings', []))} findings, {len(body.get('providers', []))} provider observations"
+    )
     r = client.get(f"/api/v1/scans/{uploaded_scan_id}/exports/sarif_json")
     _expect(r.status_code == 200, f"GET /exports/sarif_json returns 200 (got {r.status_code})")
     sarif = r.json()
@@ -217,7 +224,9 @@ def main() -> int:
     # rebuilt from the database.
     client2 = TestClient(app)
     r = client2.get(f"/api/v1/scans/{uploaded_scan_id}")
-    _expect(r.status_code == 200, f"GET /scans/{{id}} after restart returns 200 (got {r.status_code})")
+    _expect(
+        r.status_code == 200, f"GET /scans/{{id}} after restart returns 200 (got {r.status_code})"
+    )
     body = r.json()
     _expect(body["id"] == uploaded_scan_id, "scan id matches after restart")
     _expect(

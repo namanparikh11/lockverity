@@ -18,6 +18,32 @@ The v1.6.1 repair:
   evidence cannot be reconstructed (the route
   returns a bounded ``rescan_source_unavailable``
   error before any queued row is persisted).
+
+External-network isolation
+==========================
+
+Two tests in this module drive the orchestrator
+end-to-end via ``POST /api/v1/scans/{id}/run``:
+
+- :func:`test_github_rescan_creates_distinct_scan_and_workspace`
+- :func:`test_github_rescan_can_be_started_via_run_endpoint`
+
+If those runs reached the real OSV, deps.dev, or
+OpenSSF Scorecard endpoints, the
+:func:`conftest._block_external_network` autouse
+fixture would raise :exc:`NetworkAccessBlocked` and
+the test would fail. The
+:func:`conftest._fake_providers_for_scan_tests`
+autouse fixture replaces the real provider factories
+with in-process fakes that return
+``ProviderUnavailable`` for every external call. The
+fixture is global, so this module no longer needs to
+import it; a test that needs a specific provider
+outcome (e.g. the rescan fixtures that patch
+``fetch_repository_metadata`` and ``download_tarball``
+for the GitHub intake side) keeps its own patches;
+the autouse fixture only applies when no override is
+set.
 """
 
 from __future__ import annotations

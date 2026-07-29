@@ -22,10 +22,17 @@ display-name source for uploaded repositories whose
 ``Repository.original_filename`` is null (the v0.x-v2.0.4
 historical rows). The function also flags
 ``historical_filename_conflict`` when more than one distinct
-non-null filename is present. Search now also matches the
-historical ``Workspace.archive_filename`` set, so a filename
-search returns historical rows that pre-date the v2.0.5
-``original_filename`` column.
+non-null filename is present.
+
+v2.0.6 cycle-7-final: search no longer matches the raw
+``Workspace.archive_filename`` value (which may contain
+parent-directory components or trusted GitHub provenance).
+Search matches the safe basename
+``Workspace.safe_archive_filename`` (basename-only form,
+sanitised at write time) via a correlated subquery, so a
+filename search returns historical rows that pre-date the
+v2.0.5 ``original_filename`` column without leaking
+path components.
 """
 
 from __future__ import annotations
@@ -164,24 +171,42 @@ def _search_predicate(
         Repository.canonical_url.ilike(pattern),
         Repository.original_filename.ilike(pattern),
     ]
-    # v2.0.6: also match a repository if any of its
-    # workspaces carry the term in ``archive_filename``.
-    # The EXISTS subquery is correlated on
-    # ``scan_runs.repository_id``; it does not require
-    # reading workspace files from disk. The parameter
-    # is bound; raw SQL string interpolation is never
-    # used.
-    archive_match_subq = (
-        select(Workspace.id)
+    # v2.0.6: search is intentionally restricted to the
+    # already-sanitised fields above. We do not match
+    # against the raw ``Workspace.archive_filename``
+    # value because that column may contain trusted
+    # internally-generated GitHub provenance (e.g.
+    # ``github/owner/repo@sha.tar.gz``) or, on legacy
+    # pre-sanitisation rows, raw client-supplied path
+    # components (e.g. ``C:\\Users\\me\\secret.zip``).
+    # A search for a parent-directory component
+    # (``Users``, ``home``, ``..``) must not match
+    # merely because the raw historical database value
+    # contains it.
+    #
+    # The safe basename ``Workspace.safe_archive_filename``
+    # is the basename-only form of ``archive_filename``
+    # (computed at write time via :func:`basename_safely`),
+    # so it is safe to match against. It is the only
+    # workspace column the search predicate reads, and
+    # only via a correlated ``EXISTS`` subquery scoped
+    # to the repository. A search for the safe basename
+    # (e.g. ``build-payload.zip``) still matches the
+    # repository even when the basename lives only on a
+    # pre-v2.0.5 historical row that has no
+    # ``Repository.original_filename``.
+    safe_basename_subq = (
+        select(Workspace.scan_run_id)
         .join(ScanRun, ScanRun.id == Workspace.scan_run_id)
         .where(ScanRun.repository_id == Repository.id)
-        .where(Workspace.archive_filename.is_not(None))
-        .where(Workspace.archive_filename.ilike(pattern))
-        .limit(1)
+        .where(Workspace.safe_archive_filename.is_not(None))
+        .where(Workspace.safe_archive_filename.ilike(pattern))
+        .exists()
     )
-    free_text_clauses.append(
-        Repository.id.in_(select(Repository.id).where(archive_match_subq.exists()))
-    )
+    free_text_clauses.append(safe_basename_subq)
+    # The display-name helper applies the same sanitiser
+    # the read-time API uses, so the operator-facing
+    # label is always safe.
     return or_(*free_text_clauses)
 
 
@@ -442,14 +467,30 @@ def get_repository_historical_filenames(
     result with ``historical_archive_filename=None``,
     ``historical_filename_conflict=False``, and
     ``historical_archive_filename_count=0``.
+
+    Every persisted ``Workspace.archive_filename`` value
+    is re-sanitised through :func:`basename_safely` at
+    the read boundary so a historical row that pre-dates
+    the v2.0.5 intake sanitisation, or that was inserted
+    by an operator with a tool that bypassed the
+    sanitiser, can never expose a Windows drive-letter,
+    a POSIX absolute path, parent-traversal, or a root
+    path through the API. Values that fail sanitisation
+    are dropped from the result; the API falls back to
+    the bounded opaque label for them. The function is
+    read-only: it never mutates a workspace row.
     """
     if not repository_ids:
         return {}
+    from app.utils.paths import basename_safely
+
     rid_list = list(repository_ids)
     # Pull every (repository_id, archive_filename) pair
     # once. We deliberately read all non-null pairs (not
     # the MIN/MAX) so the conflict detection sees every
-    # distinct value.
+    # distinct value. The read-time sanitisation below
+    # defends against historical rows that pre-date the
+    # v2.0.5 intake sanitiser.
     rows = session.execute(
         select(ScanRun.repository_id, Workspace.archive_filename)
         .join(Workspace, Workspace.scan_run_id == ScanRun.id)
@@ -460,7 +501,14 @@ def get_repository_historical_filenames(
     for repo_id, archive_filename in rows:
         if archive_filename is None:
             continue
-        by_repo.setdefault(int(repo_id), set()).add(str(archive_filename))
+        safe = basename_safely(str(archive_filename))
+        if safe is None:
+            # Reject: empty, root, dot-only, or otherwise
+            # unsafe. The historical helper must never
+            # surface a value the intake sanitiser would
+            # have rejected.
+            continue
+        by_repo.setdefault(int(repo_id), set()).add(safe)
     out: dict[int, RepositoryHistoricalFilename] = {}
     for rid in rid_list:
         names = by_repo.get(rid, set())

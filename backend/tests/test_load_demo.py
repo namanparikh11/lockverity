@@ -29,10 +29,46 @@ from pathlib import Path
 
 BACKEND_DIR = Path(__file__).resolve().parent.parent
 SCRIPT = BACKEND_DIR / "scripts" / "load_demo.py"
-# The expected Alembic head revision. The loader must run
-# the same migration chain the application uses, so the
-# resulting ``alembic_version`` row must match this value.
-EXPECTED_ALEMBIC_HEAD = "e5f6a7b8c9d0"
+
+
+def _discover_alembic_head() -> str:
+    """Return the current Alembic head revision id.
+
+    The loader must run the same migration chain the
+    application uses, so the resulting ``alembic_version``
+    row must match the value ``alembic heads`` reports at
+    test time. We discover the head by reading the latest
+    migration file's ``revision`` variable rather than by
+    invoking the ``alembic`` CLI (the CLI is environment-
+    dependent and adds a hard subprocess dependency to
+    this test).
+    """
+    import re
+
+    versions_dir = BACKEND_DIR / "alembic" / "versions"
+    head: str | None = None
+    for migration in sorted(versions_dir.glob("*.py")):
+        if migration.name.startswith("_"):
+            continue
+        text = migration.read_text(encoding="utf-8")
+        match = re.search(
+            r"^revision\s*=\s*[\"']?([0-9a-f]+)[\"']?",
+            text,
+            re.MULTILINE,
+        )
+        if match is None:
+            continue
+        revision = match.group(1)
+        # The chain is linear in this repository; the
+        # lexicographically latest revision id is the head.
+        if head is None or revision > head:
+            head = revision
+    if head is None:
+        raise RuntimeError("could not discover Alembic head revision")
+    return head
+
+
+EXPECTED_ALEMBIC_HEAD = _discover_alembic_head()
 # The loader's output safety check requires the resolved
 # path to be under ``backend/var/``; the test temp paths
 # live under ``backend/var/loader-tests/`` so each test

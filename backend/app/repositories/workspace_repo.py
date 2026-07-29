@@ -54,6 +54,7 @@ def create(
     workspace_key: str,
     kind: WorkspaceKind,
     archive_filename: str | None = None,
+    safe_archive_filename: str | None = None,
 ) -> Workspace:
     workspace = Workspace(
         scan_run_id=scan_run_id,
@@ -61,6 +62,7 @@ def create(
         kind=kind,
         state=WorkspaceState.QUARANTINED,
         archive_filename=archive_filename,
+        safe_archive_filename=safe_archive_filename,
     )
     session.add(workspace)
     session.flush()

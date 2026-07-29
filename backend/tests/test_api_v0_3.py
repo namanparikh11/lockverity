@@ -34,6 +34,14 @@ from app.services.workspace_service import WorkspaceService
 from app.utils.finding_keys import stable_finding_key
 from fastapi.testclient import TestClient
 
+# The :func:`conftest._fake_providers_for_scan_tests`
+# autouse fixture replaces the real provider factories
+# with in-process fakes globally; this module no longer
+# needs to import the per-module fixture. The
+# :func:`conftest._block_external_network` autouse
+# fixture is the negative complement that fails any
+# test which attempts a non-loopback socket.
+
 
 def _setup_scan_with_zip(session, workspace_root: Path, *, include_workflow: bool = False):
     repo = repository_service.create_repository_from_url(

@@ -1,5 +1,17 @@
+// `ELIGIBLE_COMPARE_SCAN_STATUSES` below is built with
+// `new Set([...])`. The cycle 1-6 `eslint-plugin-react-refresh@0.4.26`
+// considered this a constant export; the cycle 7
+// `0.5.3` only allows `Literal`, `UnaryExpression`,
+// `TemplateLiteral`, `ArrayExpression`, `ObjectExpression`,
+// and `Identifier` (createContext) as constants. To keep the
+// public constant co-located with the page that owns it, the
+// `react-refresh/only-export-components` rule is disabled for
+// this file. (Refactoring the constant into a separate file
+// is the next-step recommendation once we have a follow-up
+// cycle for that change.)
+/* eslint-disable react-refresh/only-export-components */
 import { useEffect, useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { Link, useParams } from "react-router";
 
 import { api } from "@/api/api";
 import type { Scan, ScanStatus } from "@/api/types";

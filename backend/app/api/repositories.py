@@ -58,15 +58,22 @@ def _display_name(
 
     1. GitHub rows: ``owner/name``.
     2. Uploaded rows with ``Repository.original_filename``:
-       the persisted filename (basename-only, sanitised at
-       intake).
+       the persisted filename, **defensively sanitised
+       through :func:`basename_safely`** at the read
+       boundary. The intake layer already sanitises at
+       write time; this call is defence-in-depth for
+       historical rows that pre-date the sanitiser or
+       that were inserted by an operator with a tool
+       that bypassed it. A pathful value (Windows
+       drive-letter, POSIX absolute path, parent
+       traversal, root path) is reduced to a basename or
+       ``None`` here; ``None`` falls through to the
+       historical filename or the bounded fallback.
     3. Uploaded rows with a non-null
        ``Workspace.archive_filename`` from a single agreed
-       historical basename: that historical filename.
-       The helper is called with a value already resolved by
-       ``repository_repo.get_repository_historical_filenames``
-       so a conflict returns ``None`` here (the bounded
-       fallback is used instead).
+       historical basename: that historical filename
+       (already sanitised at the read boundary by
+       ``repository_repo.get_repository_historical_filenames``).
     4. Uploaded rows with no filename metadata at all: the
        bounded opaque fallback
        ``Uploaded archive · upload/<short-key>``.
@@ -78,8 +85,22 @@ def _display_name(
     """
     if repo.source_type.value == "github":
         return f"{repo.owner}/{repo.name}"
-    if repo.original_filename:
-        return repo.original_filename
+    # Defence-in-depth: sanitise the raw ``original_filename``
+    # attribute through the same helper the intake layer
+    # uses. The schema-level validator on
+    # ``RepositoryRead.original_filename`` already
+    # sanitises the JSON-serialised response, but the
+    # ``display_name`` field is built from the raw model
+    # attribute and bypasses the schema validator. The
+    # explicit sanitisation closes the gap so a
+    # historical row with a pathful ``original_filename``
+    # value cannot surface the path through the list /
+    # detail endpoints' ``display_name`` field.
+    from app.utils.paths import basename_safely
+
+    safe_original = basename_safely(repo.original_filename)
+    if safe_original:
+        return safe_original
     if historical_archive_filename:
         return historical_archive_filename
     return _upload_fallback_label(repo)

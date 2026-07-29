@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { useParams } from "react-router-dom";
+import { useParams } from "react-router";
 
 import { api } from "@/api/api";
 import { isNotImplemented } from "@/api/fallback";

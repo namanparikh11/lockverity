@@ -1,9 +1,148 @@
 """Release validation script for the Lockverity v2.0 local-first release candidate.
 
 The script runs the full backend + frontend verification suite
-in the documented order. It is intentionally read-only: it does
-not mutate the working tree, does not delete files, does not
-reset the demo database, and does not call external providers.
+in the documented order. It is intentionally bounded: it
+does not delete files, does not reset the demo database,
+and does not call external providers.
+
+The ten real stages (:func:`build_step_plan`)
+============================================
+
+The step plan is the single source of truth. Every stage
+named in the docstring below must be present in
+:func:`build_step_plan`; every stage in
+:func:`build_step_plan` must be documented below. The
+current ten stages are:
+
+  1. ``backend:pytest`` — ``pytest tests`` with the
+     :func:`_block_external_network` autouse fixture
+     patching :meth:`socket.socket.connect` to fail any
+     test that opens a non-loopback socket. The
+     :func:`fake_providers_for_scan_tests` autouse
+     fixture in ``backend/tests/test_provider_fakes.py``
+     replaces the real GitHub / OSV / deps.dev / OpenSSF
+     Scorecard factories with in-process fakes that
+     return ``ProviderUnavailable`` for every external
+     call. The combination of the two fixtures means
+     this step makes *no* outbound network calls.
+  2. ``backend:ruff-check`` — static lint of the
+     application, test, and scripts trees.
+  3. ``backend:ruff-format`` — ``ruff format --check``
+     on the same trees.
+  4. ``backend:pip-check`` — dependency-resolution
+     sanity check (``pip check``).
+  5. ``frontend:test`` — ``vitest run`` on the full test
+     suite.
+  6. ``frontend:typecheck`` — ``tsc -b --noEmit``.
+  7. ``frontend:lint`` — ``eslint . --max-warnings 0``.
+  8. ``frontend:build`` — ``tsc -b && vite build``.
+  9. ``frontend:audit-omit-dev`` — ``npm audit --omit=dev``.
+  10. ``frontend:audit`` — ``npm audit``.
+
+Stages 1-4 and 5-8 are CPU-bound and offline. Stages 9
+and 10 require outbound network access to the public
+npm advisory database at
+``https://registry.npmjs.org/-/npm/v1/security/audits``
+to fetch the current advisory feed; the auditor's
+invocation is therefore not a "purely offline" step.
+The auditor must be run from a host with registry
+reachability; a sandboxed build that blocks the
+registry cannot satisfy the audit gate. The backend
+fixture-based network guard does not apply to the
+auditor because the auditor runs as a sibling npm
+process and not inside a pytest process.
+
+External release-checklist checks (NOT in this verifier)
+========================================================
+
+The following items are *not* part of the ten-stage
+verifier and are not enumerated in the stages above.
+The verifier does not run them; the operator runs
+them separately during the release process.
+
+A note on what ``backend:pytest`` already covers
+------------------------------------------------
+
+The ``backend:pytest`` stage runs the full backend
+test suite, which already includes the repository's
+automated migration tests. A failure of any of these
+tests would fail ``backend:pytest`` and therefore the
+verifier. The automated migration coverage in
+``backend:pytest`` is:
+
+- ``tests/test_migration_cycle.py`` — the pytest
+  wrapper for the disposable upgrade / downgrade /
+  re-upgrade round-trip against a fresh SQLite
+  database. The pytest entry point is
+  ``test_alembic_upgrade_downgrade_reupgrade``; the
+  underlying script is
+  ``tests.manual_migration_cycle`` which can also be
+  invoked directly.
+- ``tests/test_migration_f6a7b8c9d0e1.py`` — the
+  v2.0.6 cycle-7-final migration's own dedicated
+  regression tests. They pin the migration-local
+  sanitiser, the backfill behaviour, the GitHub
+  provenance preservation, the null-handling
+  invariants, and the full upgrade / downgrade /
+  re-upgrade cycle.
+
+The items below are *operator-driven manual
+confirmations* that complement (do not replace) the
+automated coverage above.
+
+- **Operator-driven manual migration round-trip
+  confirmation.** The operator may additionally
+  perform a manual upgrade / downgrade / re-upgrade
+  confirmation as an explicit release-checklist
+  step. The recommended command is documented in
+  ``docs/release-checklist.md`` and is:
+
+  .. code-block:: powershell
+
+      cd backend
+      .venv\\Scripts\\python.exe -m tests.manual_migration_cycle
+
+  This is an *additional* operator confirmation; the
+  automated pytest coverage above already runs the
+  same upgrade / downgrade / re-upgrade cycle and
+  must be green for the verifier to pass.
+- **Smoke validation.** Run
+  ``python scripts_smoke_v0_5.py`` to exercise the
+  v0.5 integrated smoke flow (alembic upgrade, two-scan
+  comparison, lifecycle events, comparison refresh,
+  cross-workspace rejection, evidence-envelope
+  validation, provider-cache preservation). The
+  release checklist documents the exact command.
+  This step is not part of the ten-stage verifier.
+
+Adding or reordering a stage requires updating both
+:func:`build_step_plan` and this docstring in the same
+change.
+
+Network-isolation guarantee
+===========================
+
+The ``backend:pytest`` step runs offline because the
+:func:`_block_external_network` autouse fixture in
+``backend/tests/conftest.py` patches
+:meth:`socket.socket.connect` to fail any test that
+opens a non-loopback socket; the
+:func:`fake_providers_for_scan_tests` autouse fixture
+in ``backend/tests/test_provider_fakes.py`` replaces
+the real provider factories with in-process fakes. A
+test that forgets to apply the fakes would trip
+:exc:`NetworkAccessBlocked` and fail. Stages 2, 3, 4,
+5, 6, 7, and 8 are CPU-bound and make no HTTP calls.
+
+Note on disk effects: the ``frontend:build`` step writes a
+production bundle under ``frontend/dist/``. The ``dist/``
+directory is gitignored (see the repository
+``.gitignore``), so the working tree is not modified in
+the eyes of Git, but the bundle is created on disk as a
+side effect of the build. To keep the working tree
+byte-identical, run the verifier in a temporary clone or
+delete ``frontend/dist/`` after the run; the gitignored
+status keeps the working tree clean by contract.
 
 Exit status:
 
@@ -47,6 +186,15 @@ import time
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
+
+# Force UTF-8 on the operator's terminal so Unicode
+# characters (arrows, em-dashes, etc.) emitted by
+# vitest / ruff / pytest do not crash the cp1252
+# default codec on Windows.
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+if hasattr(sys.stderr, "reconfigure"):
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
 
 # Project root is two parents up from this file
 # (``backend/scripts/verify_release.py`` -> ``backend`` -> ``root``).
@@ -238,6 +386,8 @@ def run_step(step: Step, *, env: Mapping[str, str] | None = None) -> StepResult:
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
+        encoding="utf-8",
+        errors="replace",
     )
     try:
         stdout, stderr = process.communicate(timeout=step.timeout_seconds)
@@ -324,10 +474,18 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description=(
             "Run the Lockverity v2.0 release verification "
-            "suite. The script is read-only: it does not "
-            "mutate the working tree, does not delete "
-            "files, does not reset the demo database, and "
-            "does not call external providers."
+            "suite. The script does not delete files, "
+            "does not reset the demo database, does not "
+            "call external providers, and does not mutate "
+            "tracked repository files. The "
+            "``frontend:build`` step writes a production "
+            "bundle under ``frontend/dist/``; the directory "
+            "is gitignored, so the working tree is unchanged "
+            "in the eyes of Git, but the bundle is created "
+            "on disk as a bounded side effect of the build. "
+            "To keep the working tree byte-identical, run "
+            "the verifier in a temporary clone or delete "
+            "``frontend/dist/`` after the run."
         )
     )
     parser.add_argument(
