@@ -1,11 +1,11 @@
 /**
  * Favicon asset presence and HTML wiring tests.
  *
- * The v2.1 favicon is a tiny-size LV monogram shipped as a
- * set of compatibility assets. The tests below guard the
- * asset inventory and the index.html wiring so a future
- * change cannot silently drop a favicon file or break the
- * 404-free favicon contract.
+ * The v2.1 favicon is the Rounded App Icon variant from the
+ * brand design board, defined in ``frontend/public/favicon.svg``.
+ * The tests below guard the asset inventory and the
+ * index.html wiring so a future change cannot silently drop
+ * a favicon file or break the 404-free favicon contract.
  *
  * The tests read the filesystem relative to the frontend
  * root (the working directory of the vitest runner). The
@@ -24,18 +24,7 @@ const INDEX_HTML = resolve(FRONTEND_ROOT, "index.html");
 
 interface IconAsset {
   filename: string;
-  /**
-   * Optional expected width/height in pixels. When set,
-   * the test verifies the PNG dimensions match. ICO
-   * multi-resolution files are checked separately.
-   */
   expectedSize?: number;
-  /**
-   * Whether the asset must be present in production. All
-   * the favicon assets listed in the user-facing spec are
-   * required; the apple-touch-icon.png at 180x180 is
-   * required for iOS home-screen pinning.
-   */
   required: boolean;
 }
 
@@ -64,20 +53,29 @@ describe("favicon assets", () => {
     const text = readFileSync(resolve(PUBLIC_DIR, "favicon.svg"), "utf-8");
     // No implicit colour inheritance.
     expect(text).not.toMatch(/(?:fill|stroke)\s*=\s*"currentColor"/);
-    // Explicit hex fills for the documented brand colours.
-    expect(text).toMatch(/fill="#0f172a"/);
-    expect(text).toMatch(/fill="#f8fafc"/);
-    // The monogram is a 16x16 viewBox so the rasterised
-    // output is crisply aligned to the pixel grid.
+    // The background uses the documented Indigo 900.
+    expect(text).toMatch(/fill="#0[Bb]1324"/);
+    // The mark uses a vertical linear gradient with the
+    // two documented stops (Teal 500 at the top, Blue 600
+    // at the bottom). The palette section of the brand
+    // board uses these exact hex values; the colour names
+    // in the board's legend are unconventional but the
+    // hex codes are the source of truth.
+    expect(text).toMatch(/<linearGradient\b/);
+    expect(text).toMatch(/stop-color="#2[Ee]8[Bb][Ff]0"/);
+    expect(text).toMatch(/stop-color="#14[Bb]8[Aa]6"/);
+    // The mark is sized in a 16x16 viewBox so the
+    // rasterised output is crisply aligned to the pixel
+    // grid.
     expect(text).toMatch(/viewBox="0 0 16 16"/);
+    // The rounded-square background is present and the
+    // mark strokes use round caps (the chain-link ends
+    // must not be flat or square at 16x16).
+    expect(text).toMatch(/<rect\b[^>]*\brx="3\.5"/);
+    expect(text).toMatch(/stroke-linecap="round"/);
   });
 
   it("embeds 16, 32, and 48 pixel sizes in the ICO", () => {
-    // The ICO file format stores a 6-byte header followed
-    // by 16-byte directory entries. Each entry records the
-    // width in byte 0 and the height in byte 1 (0 means
-    // 256). We parse the header and directory to confirm
-    // the expected sizes are present.
     const buffer = readFileSync(resolve(PUBLIC_DIR, "favicon.ico"));
     expect(buffer.length).toBeGreaterThan(6);
     const reserved = buffer.readUInt16LE(0);
@@ -117,9 +115,7 @@ describe("favicon assets", () => {
         `index.html should reference ${ref}`
       ).toBe(true);
     }
-    // The apple-touch-icon must declare its 180x180 size.
     expect(html).toMatch(/rel="apple-touch-icon"\s+sizes="180x180"/);
-    // The PNG favicons must declare their sizes too.
     expect(html).toMatch(/rel="icon"\s+type="image\/png"\s+sizes="16x16"/);
     expect(html).toMatch(/rel="icon"\s+type="image\/png"\s+sizes="32x32"/);
     expect(html).toMatch(/rel="icon"\s+type="image\/png"\s+sizes="48x48"/);
@@ -127,8 +123,6 @@ describe("favicon assets", () => {
 
   it("uses a versioned cache-busting query on every icon URL", () => {
     const html = readFileSync(INDEX_HTML, "utf-8");
-    // Every icon href must carry a ?v= token so Chrome does
-    // not stick to a stale favicon after a deploy.
     const iconHrefs = Array.from(
       html.matchAll(/<link\s+rel="(?:icon|apple-touch-icon)"[^>]*href="([^"]+)"/g)
     ).map((m) => m[1]);
@@ -143,19 +137,14 @@ describe("favicon assets", () => {
 
   it("does not declare duplicate or contradictory icon rels", () => {
     const html = readFileSync(INDEX_HTML, "utf-8");
-    // The page must not declare more than one
-    // ``rel="apple-touch-icon"`` (iOS picks the last one and
-    // a duplicate declaration is a confusing regression).
     const appleCount = (
       html.match(/<link\s+rel="apple-touch-icon"/g) ?? []
     ).length;
     expect(appleCount).toBe(1);
-    // Exactly one SVG favicon is expected.
     const svgCount = (
       html.match(/<link\s+rel="icon"\s+type="image\/svg\+xml"/g) ?? []
     ).length;
     expect(svgCount).toBe(1);
-    // Exactly one ICO fallback.
     const icoCount = (
       html.match(/<link\s+rel="icon"\s+type="image\/x-icon"/g) ?? []
     ).length;

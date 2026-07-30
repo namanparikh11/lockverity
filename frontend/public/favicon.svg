@@ -1,50 +1,53 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!--
-  Lockverity favicon (tiny-size LV monogram).
+  Lockverity favicon (Rounded App Icon variant).
 
-  This is the dedicated small-size variant of the brand mark.
-  It is intentionally different from the full-size
-  ``frontend/public/brand/lockverity-mark.svg``: at 16x16
-  pixels the interlocking L+V stroke of the full-size mark
-  collapses into a shape that resembles a paperclip or a
-  chain link, and the L and V are no longer individually
-  recognisable. The favicon therefore uses two separate
-  filled shapes:
+  This is the canonical tiny-size favicon derived from the
+  v2.1 Part A brand design board. The board shows four
+  favicon / app icon variants in section "02 FAVICON / APP
+  ICON EXPLORATION":
 
-  - a vertical L stem with a lower horizontal foot;
-  - a V with two clearly visible diagonal strokes meeting
-    at a point at the bottom.
+    1. Square App Icon
+    2. Rounded App Icon       <-- this file
+    3. Monochrome
+    4. 16px / 32px
 
-  Both shapes use explicit fill colours (no
-  ``currentColor``) and are aligned to a small integer
-  pixel grid so the raster output at 16, 32, 48, and 180
-  pixels is crisp. The background is a rounded square in
-  deep navy; the monogram is high-contrast white. The
-  design preserves the documented brand colours from
-  ``docs/brand-assets.md`` (#0f172a background, #f8fafc
-  foreground) and is documented as the canonical tiny
-  variant. The full-size mark, the app icon, and the
-  monochrome variants in ``frontend/public/brand/`` are
-  unchanged.
+  The Rounded App Icon is a very rounded squircle (high
+  corner radius) with the interlocking L/V mark centered
+  inside. The mark itself is the same gradient symbol shown
+  in section "01 PRIMARY MARK" and is rendered at the
+  favicon's tiny size with the same blue-to-teal vertical
+  gradient.
+
+  Palette (from section "03 PALETTE"):
+
+    Indigo 900  #0B1324   background
+    Teal 500    #2E8BF0   gradient start (top)
+    Blue 600    #14B8A6   gradient end (bottom)
+
+  The full-size brand mark in
+  ``frontend/public/brand/lockverity-mark.svg`` and the
+  full-size application icon in
+  ``frontend/public/brand/lockverity-app-icon.svg`` keep
+  the interlocking LV concept for the larger surfaces. The
+  favicon here is a structural simplification: at 16x16 the
+  full-size mark is replaced by two interlocking S-curves
+  that trace the same visual rhythm but remain crisp at
+  tiny sizes.
 
   Geometry (16x16 viewBox, integer-aligned):
 
-    Background: rounded square, rx = 2 (12.5% of side).
-    Padding:    2 units on the left, 1 unit between the
-                L and the V, 1 unit on the right, 3 units
-                on the top and bottom.
-    L:          x = 2..6, y = 3..13. Stem 2 units wide
-                (x = 2..4), foot 4 units wide (x = 2..6)
-                and 2 units tall (y = 11..13).
-    V:          x = 7..15, y = 3..13. Outer apex at
-                (11, 13), inner apex at (11, 10). Arms
-                are 2 units thick at the top, with the
-                inner V (negative space) opening upward
-                from (11, 10) to (9, 3) and (13, 3). The
-                inner V is 4 units wide at the top and
-                7 units tall, so the V's two diagonal
-                strokes remain individually visible at
-                16x16 pixels.
+    Background: rounded square, rx = 3.5 (~22% of side).
+    Padding:    4 units on every side; the mark spans the
+                inner 8x8 unit area.
+    Mark:       two cubic Bezier curves forming an
+                interlocking chain-link pattern:
+                  Curve 1: M 4 4 C 4 8, 12 8, 12 12
+                  Curve 2: M 12 4 C 12 8, 4 8, 4 12
+                Both curves are 2 units thick with round
+                caps. The gradient is vertical, from the
+                Teal 500 blue at the top of the mark to
+                the Blue 600 teal at the bottom.
 -->
 <svg xmlns="http://www.w3.org/2000/svg"
      viewBox="0 0 16 16"
@@ -52,7 +55,15 @@
      height="16"
      role="img"
      aria-label="Lockverity">
-  <rect x="0" y="0" width="16" height="16" rx="2" ry="2" fill="#0f172a" />
-  <path d="M 2 3 H 4 V 11 H 6 V 13 H 2 Z" fill="#f8fafc" />
-  <path d="M 7 3 H 9 L 11 10 L 13 3 H 15 L 11 13 Z" fill="#f8fafc" />
+  <defs>
+    <linearGradient id="markGradient" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#2E8BF0" />
+      <stop offset="100%" stop-color="#14B8A6" />
+    </linearGradient>
+  </defs>
+  <rect x="0" y="0" width="16" height="16" rx="3.5" ry="3.5" fill="#0B1324" />
+  <g fill="none" stroke="url(#markGradient)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M 4 4 C 4 8, 12 8, 12 12" />
+    <path d="M 12 4 C 12 8, 4 8, 4 12" />
+  </g>
 </svg>

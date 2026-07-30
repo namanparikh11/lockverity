@@ -3,7 +3,9 @@
 Checks that:
 - The ICO file contains the expected sizes (16, 32, 48).
 - The PNG files exist at the expected pixel dimensions.
-- The SVG declares explicit fill colours (no currentColor).
+- The SVG declares explicit fill colours (no currentColor)
+  and the documented brand palette (Indigo 900 background,
+  Teal 500 + Blue 600 gradient stops).
 - The HTML references in frontend/index.html match the
   produced files.
 """
@@ -75,16 +77,26 @@ def check_svg(path: Path) -> str | None:
     if not path.is_file():
         return f"missing: {path}"
     text = path.read_text(encoding="utf-8")
-    # Must declare explicit fill colours; currentColor is not
-    # allowed in any fill or stroke attribute. The check
-    # matches the attribute form ``fill="currentColor"`` or
-    # ``stroke="currentColor"`` so a comment that mentions
+    # Must declare explicit fill / stroke colours; currentColor
+    # is not allowed in any fill or stroke attribute. The check
+    # matches the attribute form so a comment that mentions
     # the keyword does not trip the rule.
     if re.search(r'(?:fill|stroke)\s*=\s*"currentColor"', text):
         return f"{path.name}: references currentColor in fill/stroke (must be explicit)"
-    # Must contain an explicit hex colour.
-    if not re.search(r'fill="(#[0-9a-fA-F]{3,8})"', text):
-        return f"{path.name}: no explicit hex fill colour found"
+    # The background must use the documented Indigo 900.
+    if not re.search(r'fill="#0[Bb]1324"', text):
+        return f"{path.name}: missing Indigo 900 (#0B1324) background fill"
+    # The mark must declare a vertical linear gradient with the
+    # two documented colour stops. The palette section of the
+    # brand board uses these exact hex values; the colour
+    # names in the board's legend are unconventional but the
+    # hex codes are the source of truth.
+    if not re.search(r"<linearGradient\b", text):
+        return f"{path.name}: missing <linearGradient> element"
+    if not re.search(r'stop-color="#2[Ee]8[Bb][Ff]0"', text):
+        return f"{path.name}: missing Teal 500 (#2E8BF0) gradient stop"
+    if not re.search(r'stop-color="#14[Bb]8[Aa]6"', text):
+        return f"{path.name}: missing Blue 600 (#14B8A6) gradient stop"
     return None
 
 
@@ -93,7 +105,6 @@ def check_index_html() -> list[str]:
     if not INDEX_HTML.is_file():
         return [f"missing: {INDEX_HTML}"]
     text = INDEX_HTML.read_text(encoding="utf-8")
-    # Each produced asset must be referenced from index.html.
     expected_refs = [
         "/favicon.svg",
         "/favicon.ico",
@@ -105,7 +116,6 @@ def check_index_html() -> list[str]:
     for ref in expected_refs:
         if ref not in text:
             failures.append(f"index.html: missing reference to {ref}")
-    # Apple-touch-icon should be 180x180.
     if 'sizes="180x180"' not in text:
         failures.append("index.html: apple-touch-icon sizes=180x180 not declared")
     return failures
