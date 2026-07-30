@@ -1,28 +1,58 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!--
-  Lockverity simplified favicon mark.
+  Lockverity favicon (tiny-size LV monogram).
 
-  This is the highest-contrast, lowest-detail variant of the
-  brand mark. It is designed for the 16x16, 24x24, and 32x32
-  pixel slots where the full L+V would muddy into an unrecognisable
-  blob. Only the dominant V stroke remains; the L is dropped
-  because the V carries the brand identity on its own at
-  small sizes.
+  This is the dedicated small-size variant of the brand mark.
+  It is intentionally different from the full-size
+  ``frontend/public/brand/lockverity-mark.svg``: at 16x16
+  pixels the interlocking L+V stroke of the full-size mark
+  collapses into a shape that resembles a paperclip or a
+  chain link, and the L and V are no longer individually
+  recognisable. The favicon therefore uses two separate
+  filled shapes:
 
-  The background is a rounded square so the mark reads
-  correctly inside a square OS-bordered favicon slot. The
-  foreground is a high-contrast light value so the mark
-  remains visible on browser tabs (which may be light or dark).
+  - a vertical L stem with a lower horizontal foot;
+  - a V with two clearly visible diagonal strokes meeting
+    at a point at the bottom.
+
+  Both shapes use explicit fill colours (no
+  ``currentColor``) and are aligned to a small integer
+  pixel grid so the raster output at 16, 32, 48, and 180
+  pixels is crisp. The background is a rounded square in
+  deep navy; the monogram is high-contrast white. The
+  design preserves the documented brand colours from
+  ``docs/brand-assets.md`` (#0f172a background, #f8fafc
+  foreground) and is documented as the canonical tiny
+  variant. The full-size mark, the app icon, and the
+  monochrome variants in ``frontend/public/brand/`` are
+  unchanged.
+
+  Geometry (16x16 viewBox, integer-aligned):
+
+    Background: rounded square, rx = 2 (12.5% of side).
+    Padding:    2 units on the left, 1 unit between the
+                L and the V, 1 unit on the right, 3 units
+                on the top and bottom.
+    L:          x = 2..6, y = 3..13. Stem 2 units wide
+                (x = 2..4), foot 4 units wide (x = 2..6)
+                and 2 units tall (y = 11..13).
+    V:          x = 7..15, y = 3..13. Outer apex at
+                (11, 13), inner apex at (11, 10). Arms
+                are 2 units thick at the top, with the
+                inner V (negative space) opening upward
+                from (11, 10) to (9, 3) and (13, 3). The
+                inner V is 4 units wide at the top and
+                7 units tall, so the V's two diagonal
+                strokes remain individually visible at
+                16x16 pixels.
 -->
 <svg xmlns="http://www.w3.org/2000/svg"
-     viewBox="0 0 100 100"
+     viewBox="0 0 16 16"
+     width="16"
+     height="16"
      role="img"
      aria-label="Lockverity">
-  <rect x="0" y="0" width="100" height="100" rx="18" ry="18" fill="#0f172a" />
-  <path d="M 26 22 L 50 78 L 74 22"
-        fill="none"
-        stroke="#f8fafc"
-        stroke-width="14"
-        stroke-linecap="round"
-        stroke-linejoin="round" />
+  <rect x="0" y="0" width="16" height="16" rx="2" ry="2" fill="#0f172a" />
+  <path d="M 2 3 H 4 V 11 H 6 V 13 H 2 Z" fill="#f8fafc" />
+  <path d="M 7 3 H 9 L 11 10 L 13 3 H 15 L 11 13 Z" fill="#f8fafc" />
 </svg>
