@@ -12,6 +12,19 @@ The product is **defensive-only**, **read-only for analyzed evidence**,
 makes is backed by a file path, a manifest, a provider response, or
 an explicit omission marker.
 
+## Brand
+
+The v2.1 mark is a hand-authored interlocking L and V that suggests
+an evidence link. The geometry is not generated from a raster
+concept and is not derived from any third-party logo asset.
+Lockverity is currently an **unregistered open-source brand**; no
+trademark registration has been filed and no claim of trademark
+registration is made. The full asset inventory, the originality
+note, the documented colour palette, and the use restrictions live
+in [`docs/brand-assets.md`](docs/brand-assets.md). The visual
+language — colour, typography, spacing, focus, and motion — is
+documented in [`docs/design-tokens.md`](docs/design-tokens.md).
+
 ## Quick links
 
 - Demo walkthrough: [`docs/demo-walkthrough.md`](docs/demo-walkthrough.md)
@@ -19,6 +32,8 @@ an explicit omission marker.
 - Screenshot checklist + manual capture guide: [`docs/screenshots.md`](docs/screenshots.md)
 - Security boundaries: [`docs/security-boundaries.md`](docs/security-boundaries.md)
 - Provider-honesty policy: [`docs/provider-honesty.md`](docs/provider-honesty.md)
+- Brand assets: [`docs/brand-assets.md`](docs/brand-assets.md)
+- Design tokens: [`docs/design-tokens.md`](docs/design-tokens.md)
 - Changelog: [`CHANGELOG.md`](CHANGELOG.md)
 - Release notes: [`RELEASE_NOTES.md`](RELEASE_NOTES.md)
 - Release checklist: [`docs/release-checklist.md`](docs/release-checklist.md)
@@ -470,6 +485,28 @@ npm test -- --run src/__tests__/evidence_report_v1_0.test.tsx  # v1.0 evidence r
   SQLite is the default for local development.
 
 ## Current milestone
+
+**v2.1.0 — Local runtime brand polish.** A
+focused, additive release that ships the v2.1
+Part A milestone: original brand assets, favicon
+closure, a concise About page, Findings filter
+alignment, and bounded visual polish. No backend
+behaviour change, no new provider, no new export
+standard, no new evidence contract, no
+migration. The mark is hand-authored SVG
+geometry (interlocking L and V) shipped under
+``frontend/public/brand/``; the favicon 404
+reported in the v2.0.6 manual sweep is closed;
+the long v2.0.6 About page is replaced by a
+hero, three trust principles, six feature
+cards, an expandable limitations section, and
+a resources footer; the Findings Sort control
+sits inside the v0.9 coherent responsive filter
+grid alongside Category, Severity, Confidence,
+and Status. 7 new frontend tests; the
+``version_about`` test is updated to assert the
+dynamic version rendering and the v2.1.0 About
+copy. Version bumped to ``2.1.0``.
 
 **v2.0.6 — Historical upload identification and
 clearer stage-outcome presentation.** A narrowly

@@ -28,7 +28,7 @@ export function DemoHomePage() {
     <>
       <PageHeader
         title="Local demo"
-        description="A 60-second guided walkthrough of the Lockverity v2.0.6 demo. The five pages below cover every v0.5–v2.0.6 surface; the live demo is the canonical evidence."
+        description="A 60-second guided walkthrough of the Lockverity v2.1.0 demo. The five pages below cover every v0.5–v2.1.0 surface; the live demo is the canonical evidence."
         breadcrumbs={[{ label: "Demo" }]}
       />
       <div className="space-y-6">
@@ -84,7 +84,7 @@ export function DemoHomePage() {
               >
                 /
               </Link>{" "}
-              — <strong>Scan list</strong>. Four scans with the v2.0.6 demo
+              — <strong>Scan list</strong>. Four scans with the v2.1.0 demo
               notice above them. Status badges: emerald (completed), amber
               (partial), rose (failed), ink-100 (cancelled).
             </li>
@@ -146,7 +146,7 @@ export function DemoHomePage() {
               </Link>{" "}
               — <strong>About page + product boundaries</strong>. The
               current milestone, the v1.0 evidence report bullet, the
-              bounded <em>What v2.0.6 does not include</em> section, the
+              bounded <em>What v2.1.0 does not include</em> section, the
               provider-honesty and non-execution guarantees.
             </li>
           </ol>
@@ -188,7 +188,7 @@ export function DemoHomePage() {
               for a failed or cancelled scan.
             </li>
             <li>
-              The v2.0.6 demo-dataset notice above the scan list; the
+              The v2.1.0 demo-dataset notice above the scan list; the
               notice does not appear on real repositories.
             </li>
           </ul>

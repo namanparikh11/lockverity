@@ -15,6 +15,7 @@ import { useEffect, useState } from "react";
 import { NavLink, Outlet } from "react-router";
 
 import { api } from "@/api/api";
+import { BrandMark } from "@/components/BrandMark";
 
 interface NavItem {
   to: string;
@@ -82,14 +83,15 @@ export function AppShell() {
           <a
             href="/"
             className="flex items-center gap-2 font-semibold text-ink-900"
+            data-testid="brand-header-link"
           >
-            <span
-              className="inline-flex h-7 w-7 items-center justify-center rounded-md bg-accent-600 text-white"
-              aria-hidden="true"
-            >
-              L
-            </span>
-            Lockverity
+            <BrandMark
+              variant="app-icon"
+              size={28}
+              decorative
+              className="rounded-md"
+            />
+            <span>Lockverity</span>
           </a>
           <span
             className="hidden text-xs text-ink-500 sm:inline"
@@ -128,7 +130,11 @@ export function AppShell() {
             ))}
           </ul>
           <div className="border-t border-ink-100 p-3 text-xs text-ink-500">
-            <p className="flex items-center gap-2 px-3">
+            <p
+              className="flex items-center gap-2 px-3"
+              data-testid="brand-footer-version"
+            >
+              <BrandMark variant="mark" size={16} decorative />
               <ClipboardList aria-hidden="true" className="h-4 w-4" />
               {version ? `v${version}` : "Lockverity"}
             </p>

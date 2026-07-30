@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Lockverity simplified favicon mark.
+
+  This is the highest-contrast, lowest-detail variant of the
+  brand mark. It is designed for the 16x16, 24x24, and 32x32
+  pixel slots where the full L+V would muddy into an unrecognisable
+  blob. Only the dominant V stroke remains; the L is dropped
+  because the V carries the brand identity on its own at
+  small sizes.
+
+  The background is a rounded square so the mark reads
+  correctly inside a square OS-bordered favicon slot. The
+  foreground is a high-contrast light value so the mark
+  remains visible on browser tabs (which may be light or dark).
+-->
+<svg xmlns="http://www.w3.org/2000/svg"
+     viewBox="0 0 100 100"
+     role="img"
+     aria-label="Lockverity">
+  <rect x="0" y="0" width="100" height="100" rx="18" ry="18" fill="#0f172a" />
+  <path d="M 26 22 L 50 78 L 74 22"
+        fill="none"
+        stroke="#f8fafc"
+        stroke-width="14"
+        stroke-linecap="round"
+        stroke-linejoin="round" />
+</svg>

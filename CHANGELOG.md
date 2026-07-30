@@ -5,7 +5,92 @@ follow [Semantic Versioning](https://semver.org/). Lockverity is
 pre-1.0 in the sense that the public API may evolve; the
 underlying data model and Alembic migrations are stable.
 
-## v2.0.6 — Historical upload identification and clearer stage-outcome presentation (current)
+## v2.1.0 — Local runtime brand polish (current)
+
+A focused, additive release that ships the v2.1 Part A
+milestone: original brand assets, favicon closure, a
+concise About page, Findings filter alignment, and
+bounded visual polish. No backend behaviour change, no
+new provider, no new export standard, no new evidence
+contract, no migration.
+
+- **Original Lockverity mark.** v2.1 ships a hand-authored
+  SVG brand mark in ``frontend/public/brand/``:
+  ``lockverity-mark.svg`` (primary, ``currentColor``
+  stroke for inline use), ``lockverity-mark-mono-dark.svg``
+  and ``lockverity-mark-mono-light.svg`` (fixed-colour
+  monochrome variants for documented backgrounds),
+  ``lockverity-app-icon.svg`` (rounded-square icon for
+  application surfaces), and a simplified favicon in
+  ``frontend/public/favicon.svg`` that drops the L and
+  keeps the V for 16-32px legibility. The geometry is an
+  interlocking L and V that suggests an evidence link.
+  It is not generated from a raster concept and is not
+  derived from any third-party logo asset. See
+  ``docs/brand-assets.md`` for the originality and
+  ownership note.
+- **Favicon and application icon closure.** v2.1 closes
+  the favicon 404 reported in the v2.0.6 field-test
+  manual sweep. ``frontend/public/favicon.svg`` and
+  ``frontend/public/apple-touch-icon.svg`` are the
+  shipping assets; ``frontend/index.html`` references
+  both. A new ``BrandMark`` React component renders the
+  same geometry inline so the AppShell header, sidebar
+  footer, and About hero share a single source of truth.
+- **Concise About page.** The long v2.0.6 About copy is
+  replaced by a hero, three trust principles, six
+  feature cards, an expandable limitations section, and
+  a resources footer. The version string is rendered
+  from ``GET /system/info`` so the page cannot drift
+  from the running backend. The page still documents
+  the human-readable evidence report, the two evidence-
+  summary endpoints, the bounded
+  "not a security verdict / not a certification /
+  not a compliance pass-or-fail" wording, the
+  non-execution guarantee, the provider-honesty policy,
+  and the limitations list (authentication, multi-
+  tenancy, billing; private GitHub repos; continuous
+  scans; LLM/offensive features; hosted SaaS; and
+  PDF/DOCX/HTML/certifications).
+- **Findings filter alignment.** The Sort control on the
+  Findings page now sits inside the v0.9 coherent
+  responsive filter grid (Card layout) alongside
+  Category, Severity, Confidence, and Status. The grid
+  renders as 1 / 2 / 3 / 4 columns at sm / lg / xl
+  breakpoints and preserves URL state, the bounded sort
+  vocabulary, the advanced filters details, the
+  zero-result wording, and the partial / failed /
+  cancelled scan notices. Two new tests in
+  ``frontend/src/__tests__/findings_v2_1_filter_grid.test.tsx``
+  guard the layout and the API plumbing.
+- **Bounded UI polish.** The v2.1 release tightens
+  spacing, typography, and card hierarchy across the
+  AppShell, About, and Findings surfaces without
+  changing the visual language: ink/accent palette
+  unchanged, green/amber/red still reserved for status
+  semantics, no decorative animation, no neon effects,
+  no excessive gradients, and no hacker imagery.
+  Reduced-motion and visible focus states are preserved.
+  The ``Card`` component pattern in ``index.css`` is
+  unchanged so the existing pages still render.
+- **Brand and design-token documentation.** Two new
+  documents join the existing ``docs/`` set:
+  ``docs/brand-assets.md`` (asset inventory,
+  originality, ownership, sizes, and trademark note)
+  and ``docs/design-tokens.md`` (colour, typography,
+  spacing, focus, and motion tokens). The trademark
+  note records that Lockverity is currently an
+  unregistered open-source brand and makes no
+  trademark-registration claim.
+- **7 new frontend tests.** 5 in
+  ``frontend/src/components/BrandMark.test.tsx`` and 2
+  in
+  ``frontend/src/__tests__/findings_v2_1_filter_grid.test.tsx``.
+  ``frontend/src/__tests__/version_about.test.tsx`` is
+  updated to assert the dynamic version rendering and
+  the v2.1.0 About copy.
+
+## v2.0.6 — Historical upload identification and clearer stage-outcome presentation
 
 A narrowly scoped, field-testing-driven patch that ships
 two real usability defects uncovered by a v2.0.5 field-test

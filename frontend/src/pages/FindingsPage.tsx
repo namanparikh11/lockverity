@@ -416,6 +416,8 @@ export function FindingsPage() {
       ) : null}
       <div className="mb-4 space-y-3">
         <FilterBar
+          layout="card"
+          title="Filters"
           search={filters.q}
           onSearchChange={(v) => setFilter("q", v)}
           searchPlaceholder="Search title, summary, rule id, evidence, or PURL"
@@ -429,27 +431,7 @@ export function FindingsPage() {
             value={filters.category}
             onChange={(v) => setFilter("category", v as "all" | FindingCategory)}
             options={CATEGORY_OPTIONS}
-          />
-          <SelectFilter
-            id="severity-filter"
-            label="Severity"
-            value={filters.severity}
-            onChange={(v) => setFilter("severity", v as "all" | FindingSeverity)}
-            options={SEVERITY_OPTIONS}
-          />
-          <SelectFilter
-            id="confidence-filter"
-            label="Confidence"
-            value={filters.confidence}
-            onChange={(v) => setFilter("confidence", v as "all" | FindingConfidence)}
-            options={CONFIDENCE_OPTIONS}
-          />
-          <SelectFilter
-            id="status-filter"
-            label="Status"
-            value={filters.status}
-            onChange={(v) => setFilter("status", v as "all" | FindingStatus)}
-            options={STATUS_OPTIONS}
+            stacked
           />
           <SelectFilter
             id="sort-filter"
@@ -457,6 +439,31 @@ export function FindingsPage() {
             value={filters.sort}
             onChange={(v) => setFilter("sort", v)}
             options={SORT_OPTIONS}
+            stacked
+          />
+          <SelectFilter
+            id="severity-filter"
+            label="Severity"
+            value={filters.severity}
+            onChange={(v) => setFilter("severity", v as "all" | FindingSeverity)}
+            options={SEVERITY_OPTIONS}
+            stacked
+          />
+          <SelectFilter
+            id="confidence-filter"
+            label="Confidence"
+            value={filters.confidence}
+            onChange={(v) => setFilter("confidence", v as "all" | FindingConfidence)}
+            options={CONFIDENCE_OPTIONS}
+            stacked
+          />
+          <SelectFilter
+            id="status-filter"
+            label="Status"
+            value={filters.status}
+            onChange={(v) => setFilter("status", v as "all" | FindingStatus)}
+            options={STATUS_OPTIONS}
+            stacked
           />
         </FilterBar>
         <details className="rounded-md border border-ink-200 bg-white p-3 text-sm">
