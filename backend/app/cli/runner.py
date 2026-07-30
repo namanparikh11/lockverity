@@ -81,6 +81,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 import uuid
+import webbrowser
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -599,6 +600,8 @@ def start(
                 database_url=database_url,
                 open_browser=open_browser,
                 cli_logger=cli_logger,
+                instance_id=instance_id,
+                timeout=timeout,
             )
         process_handle, _log_handle = _launch_detached(
             argv=argv,
@@ -761,6 +764,113 @@ def _install_foreground_signal_handlers() -> None:
         signal.signal(signal.SIGBREAK, signal.default_int_handler)  # type: ignore[attr-defined]
 
 
+def _read_child_creation_time(pid: int) -> float:
+    """Return the OS-truth creation time of ``pid`` as a UNIX timestamp.
+
+    The helper is the single chokepoint for the
+    ``created_at`` field of the state file. The
+    function falls back to the current wall clock
+    if psutil cannot read the live process; the
+    identity check on ``stop`` then uses the same
+    fallback and the PID-reuse defence still works
+    (a reaped PID will report ``ProcessGone``
+    before the time check is consulted).
+    """
+    try:
+        live_process = psutil.Process(pid)
+        return float(live_process.create_time())
+    except (psutil.Error, OSError):
+        return time.time()
+
+
+def _publish_state(
+    *,
+    home: Path,
+    pid: int,
+    created_at_unix: float,
+    host: str,
+    port: int,
+    frontend_dist: Path,
+    log_path: Path,
+    instance_id: str,
+) -> InstanceState:
+    """Build and atomically write the runtime state for the live child.
+
+    The function is the single chokepoint used by
+    both the background and the foreground paths
+    after the child is healthy. The state records
+    the *child* identity (``pid`` is the Uvicorn
+    worker, not the supervisor's PID) and never
+    persists the database URL, the full command
+    line, or any provider token. The atomic
+    ``tempfile + os.replace`` write inside
+    :func:`app.cli.state.write_state` is the same
+    primitive the rest of the runner uses.
+    """
+    state = make_state(
+        pid=pid,
+        created_at=_format_unix(created_at_unix),
+        host=host,
+        port=port,
+        version=__version__,
+        home=home,
+        frontend_dist=frontend_dist,
+        log_file=log_path,
+        module=SERVER_MODULE,
+        started_at=_now_iso(),
+        instance_id=instance_id,
+    )
+    write_state(home, state)
+    return state
+
+
+def _cleanup_foreground_state(home: Path, instance_id: str) -> None:
+    """Remove the state file only if it still matches the recorded instance.
+
+    The helper is the foreground supervisor's
+    instance-scoped cleanup. It is the safety net
+    that prevents an older process from removing
+    a newer instance's state. The function:
+
+      1. Reads the current state file under
+         ``run/lockverity.state.json``.
+      2. Returns without removing the file if the
+         ``instance_id`` does not match the value
+         the supervisor recorded at start time
+         (a newer instance has taken over the home
+         and the older supervisor must not touch
+         the newer instance's state).
+      3. Returns without removing the file if the
+         state file is missing (a parallel clean
+         shutdown already removed it).
+      4. Otherwise removes the file via
+         :func:`app.cli.state.clear_state`.
+
+    The function is silent on errors so a
+    foreground shutdown is best-effort; the
+    state file is operator-visible and an
+    operator can remove it manually if the
+    supervisor's cleanup is interrupted.
+    """
+    try:
+        existing = read_state(home)
+    except ValueError:
+        # Corrupt or unreadable state file. Leave
+        # it for the operator to inspect; the
+        # supervisor's stop / start flow is the
+        # documented recovery path.
+        return
+    if existing is None:
+        return
+    if existing.instance_id != instance_id:
+        # A newer instance has taken over the home;
+        # the older supervisor's cleanup is a no-op
+        # so the newer instance is not disturbed.
+        return
+    with contextlib.suppress(OSError):
+        clear_state(home)
+
+
 def _start_foreground(
     *,
     argv: list[str],
@@ -774,81 +884,297 @@ def _start_foreground(
     database_url: str,
     open_browser: bool,
     cli_logger: object,
+    instance_id: str,
+    timeout: float,
 ) -> StartResult:
     """Run the server in the current TTY (no daemonisation).
 
-    Foreground mode is intended for debugging. The
-    process is *not* detached, so Ctrl+C propagates
-    to the child naturally. The state file is *not*
-    written in foreground mode because the CLI does
-    not own the lifetime of the child.
+    Foreground mode attaches the supervisor to the
+    child in the same console. The supervisor:
 
-    The supervisor installs a ``SIGBREAK`` handler
-    that translates the Windows ``CTRL_BREAK_EVENT``
-    into a :class:`KeyboardInterrupt`. The
-    interrupt unwinds the
-    ``with start_lock.acquire(home):`` block in the
-    caller so the start lock is released, the
-    child is reaped, the port is freed, and the
-    log file is flushed. A
-    :class:`KeyboardInterrupt` raised by the
-    foreground ``subprocess.run`` call is caught
-    here so the start lock and the state file are
-    cleaned up before the supervisor exits with the
-    documented exit code (130 = 128 + SIGINT on
-    POSIX, or 0xC000013A on Windows when the
-    console delivered ``CTRL_C_EVENT`` directly).
+      1. Installs a ``SIGBREAK`` → ``KeyboardInterrupt``
+         translator so a Windows
+         ``CTRL_BREAK_EVENT`` from an external
+         test harness (or a ``START /B`` shell)
+         unwinds the surrounding
+         ``with start_lock.acquire(home):`` block
+         and the documented KeyboardInterrupt exit
+         code propagates to the operator.
+      2. Launches the ``app.cli._serve`` child via
+         :class:`subprocess.Popen` (not detached)
+         so the child shares the supervisor's
+         console; ``Ctrl+C`` in the console goes
+         to both the supervisor and the child.
+      3. Waits for the documented health readiness
+         before publishing the runtime state. The
+         state file records the *child* identity
+         (PID, creation time, instance UUID,
+         module) so a second terminal can run
+         ``status`` / ``status --json`` /
+         ``open --print-url`` / ``logs`` /
+         ``stop`` against the same instance.
+      4. Waits for the child to exit. The wait
+         observes three documented exit paths:
+         (a) the operator presses Ctrl+C (or
+         ``CTRL_BREAK_EVENT`` is delivered to the
+         supervisor's process group);
+         (b) the operator runs ``lockverity stop``
+         from a second terminal; the
+         ``runner.stop`` function reads the state
+         file, verifies the live-process identity,
+         and signals the child PID; the supervisor
+         observes the child exit and unwinds
+         normally;
+         (c) the child exits unexpectedly (crash,
+         external kill). The supervisor cleans up
+         the state file (instance-scoped) and the
+         surrounding ``with`` block releases the
+         start lock.
+      5. Always cleans up the state file
+         instance-scoped before returning, so no
+         false-running state remains on disk.
+
+    A :class:`KeyboardInterrupt` raised during
+    the wait is caught and re-raised only after
+    the child has been terminated, the state has
+    been removed, and the supervisor's log line
+    has been written. The caller (``start()``) does
+    not catch the exception; it propagates to the
+    CLI main entry point which converts it to
+    ``SystemExit(130)`` and the documented exit
+    code.
     """
     _install_foreground_signal_handlers()
-    result: subprocess.CompletedProcess[str] | None = None
+    cli_logger.info(
+        "lockverity %s foreground starting (home=%s, host=%s, port=%d, dist=%s, instance_id=%s)",
+        __version__,
+        home,
+        host,
+        port,
+        frontend_dist,
+        instance_id,
+    )
+    # Launch the child via ``Popen`` (not detached)
+    # so it shares the supervisor's console. The
+    # child inherits the supervisor's stdout /
+    # stderr so a ``Ctrl+C`` in the console goes to
+    # both processes. The supervisor's
+    # :func:`cli_logger` writes to the rotating
+    # log file via the handler installed by
+    # :func:`configure_logging`; the child's stdout
+    # is inherited from the supervisor and the
+    # child itself logs via its own
+    # :func:`configure_logging` call inside
+    # :mod:`app.cli._serve`, so the log file is the
+    # single artefact an operator inspects after a
+    # foreground run.
+    kwargs: dict[str, object] = {
+        "stdin": subprocess.DEVNULL,
+        "env": env,
+        "cwd": str(Path(__file__).resolve().parents[2]),
+        "close_fds": True,
+    }
+    if sys.stdout is not None and hasattr(sys.stdout, "fileno"):
+        # The child inherits the supervisor's stdout
+        # so a ``Ctrl+C`` in the console goes to both.
+        # The test harness redirects the supervisor's
+        # stdout to a file (see ``_fg_state_smoke``);
+        # the child inherits that redirect and writes
+        # to the same file.
+        kwargs["stdout"] = None  # inherit
+        kwargs["stderr"] = None  # inherit
+    proc = subprocess.Popen(argv, **kwargs)
+    state: InstanceState | None = None
     try:
-        result = subprocess.run(
-            argv,
-            env=env,
-            cwd=str(Path(__file__).resolve().parents[2]),
+        # Wait for the health endpoint. The supervisor
+        # does not publish state before the child is
+        # healthy, so a child that fails to start does
+        # not leave a false-running state. A bounded
+        # timeout ensures a child that never becomes
+        # healthy does not stall the supervisor
+        # forever.
+        health_ok = _wait_for_health(host, port, timeout=timeout)
+        if not health_ok:
+            cli_logger.error(
+                "foreground: health check at http://%s:%d%s/health did not respond within %.1fs",
+                host,
+                port,
+                get_settings().api_prefix,
+                timeout,
+            )
+            # The child may still be starting; give it
+            # a bounded chance to exit on its own, then
+            # terminate it explicitly so the supervisor
+            # does not leak a child process.
+            try:
+                proc.wait(timeout=5.0)
+            except subprocess.TimeoutExpired:
+                proc.terminate()
+                try:
+                    proc.wait(timeout=10.0)
+                except subprocess.TimeoutExpired:
+                    proc.kill()
+                    proc.wait(timeout=5.0)
+            raise RuntimeError(
+                f"foreground child did not report healthy at "
+                f"http://{host}:{port}{get_settings().api_prefix}/health "
+                f"within {timeout:.1f}s"
+            )
+        # Publish the runtime state with the live
+        # child's PID and creation time. The state
+        # file is the contract ``status`` /
+        # ``open --print-url`` / ``logs`` / ``stop``
+        # rely on from a second terminal.
+        state = _publish_state(
+            home=home,
+            pid=proc.pid,
+            created_at_unix=_read_child_creation_time(proc.pid),
+            host=host,
+            port=port,
+            frontend_dist=frontend_dist,
+            log_path=log_path,
+            instance_id=instance_id,
         )
-    except KeyboardInterrupt:
-        # The operator pressed Ctrl+C in the console.
-        # ``subprocess.run`` raised ``KeyboardInterrupt``
-        # because the child was killed by the same
-        # signal. The child has already exited; the
-        # lock and the state file are cleaned up by
-        # the surrounding ``with`` block in the
-        # caller. We re-raise so the documented
-        # KeyboardInterrupt exit code (130 on POSIX,
-        # ``0xC000013A`` on Windows) propagates to
-        # the operator. The caller (``start()``) does
-        # not catch this exception; it propagates up
-        # to the CLI main entry point which converts
-        # it to ``SystemExit(130)``.
-        cli_logger.info("foreground: KeyboardInterrupt received; cleaning up")
+        cli_logger.info(
+            "lockverity %s ready at http://%s:%d (pid=%d, instance_id=%s, state=%s)",
+            __version__,
+            host,
+            port,
+            proc.pid,
+            instance_id,
+            state_file_path(home),
+        )
+        if open_browser:
+            # The CLI does not block on the browser; the
+            # call returns once the OS has been asked to
+            # open the URL. Errors are logged but do not
+            # fail the foreground command.
+            try:
+                webbrowser.open(f"http://{host}:{port}/")
+            except Exception as exc:  # pragma: no cover - OS-specific
+                cli_logger.warning("foreground: open browser failed: %s", exc)
+        # Keep the supervisor attached to the child.
+        # ``proc.wait()`` blocks until the child exits.
+        # On Windows ``proc.wait()`` does not react to
+        # signals; the signal handler runs in the
+        # supervisor's main thread but the wait
+        # continues. The KeyboardInterrupt is raised
+        # in the supervisor's main thread at the next
+        # bytecode boundary; the wait returns when the
+        # child exits (either via the supervisor's
+        # ``terminate`` call below or via the child
+        # reacting to the same console signal).
+        try:
+            returncode = proc.wait()
+        except KeyboardInterrupt:
+            # The operator pressed Ctrl+C in the
+            # console (or an external test harness
+            # delivered ``CTRL_BREAK_EVENT`` to the
+            # supervisor's process group). The child
+            # is in the same console, so the same
+            # signal went to the child; Uvicorn's
+            # graceful shutdown is already in
+            # progress. Give the child a bounded
+            # window to exit, escalate to
+            # ``TerminateProcess`` / ``SIGKILL`` only
+            # on timeout.
+            cli_logger.info("foreground: KeyboardInterrupt received; terminating child")
+            if proc.poll() is None:
+                try:
+                    proc.terminate()
+                except (psutil.Error, OSError) as exc:
+                    cli_logger.warning("foreground: terminate failed: %s", exc)
+                try:
+                    proc.wait(timeout=10.0)
+                except subprocess.TimeoutExpired:
+                    cli_logger.warning("foreground: child did not exit after terminate; killing")
+                    try:
+                        proc.kill()
+                    except (psutil.Error, OSError) as exc:
+                        cli_logger.warning("foreground: kill failed: %s", exc)
+                    proc.wait(timeout=5.0)
+            raise
+    except BaseException:
+        # Any exception during the foreground flow
+        # (health timeout, KeyboardInterrupt, OOM,
+        # state-write failure, ...) must clean up the
+        # state file before propagating. The lock is
+        # released by the caller's ``with`` block.
+        if state is not None:
+            _cleanup_foreground_state(home, state.instance_id)
+        elif proc.poll() is not None and state_file_path(home).is_file():
+            # Health succeeded and the state was
+            # published, but the exception happened
+            # after the wait returned; the ``state``
+            # binding was never reached. Use the
+            # recorded instance_id from the file for
+            # the instance-scoped cleanup.
+            try:
+                existing = read_state(home)
+                if existing is not None:
+                    _cleanup_foreground_state(home, existing.instance_id)
+            except ValueError:
+                pass
+        # Reap the child if it is still alive. The
+        # exception path always terminates the child
+        # before returning so the supervisor does not
+        # leak an orphan server process.
+        if proc.poll() is None:
+            with contextlib.suppress(psutil.Error, OSError):
+                proc.terminate()
+            try:
+                proc.wait(timeout=10.0)
+            except subprocess.TimeoutExpired:
+                with contextlib.suppress(psutil.Error, OSError):
+                    proc.kill()
+                proc.wait(timeout=5.0)
         raise
-    elapsed = time.monotonic() - started
-    # The state dataclass is required by the typed
-    # return; in foreground mode the PID is the
-    # child's PID, but the operator owns it. We still
-    # record the state in a transient form so the
-    # caller has a well-typed result.
-    returncode = result.returncode if result is not None else 0
-    fake_state = make_state(
-        pid=returncode if isinstance(returncode, int) else 0 or os.getpid(),
-        created_at=_now_iso(),
-        host=host,
-        port=port,
-        version=__version__,
-        home=home,
-        frontend_dist=frontend_dist,
-        log_file=log_path,
-        module=SERVER_MODULE,
-        started_at=_now_iso(),
-        instance_id=str(uuid.uuid4()),
-    )
-    return StartResult(
-        state=fake_state,
-        process_handle=None,
-        elapsed_seconds=elapsed,
-        health_check_ok=returncode == 0,
-    )
+    else:
+        # The child exited normally. ``runner.stop``
+        # from a second terminal, the operator's
+        # ``Ctrl+C`` in the console, the child
+        # reacting to a shutdown signal, or a child
+        # crash all land here. Remove the state
+        # instance-scoped so a follow-up ``start``
+        # is not blocked by a stale state file.
+        elapsed = time.monotonic() - started
+        if state is not None:
+            _cleanup_foreground_state(home, state.instance_id)
+        # ``StartResult`` is the typed return; in
+        # foreground mode the supervisor does not
+        # retain a handle to the child (the child has
+        # already exited and been reaped), and the
+        # ``state`` field is a transient placeholder
+        # that mirrors the recorded identity. The
+        # placeholder is never written to disk
+        # because the on-disk state was already
+        # removed by the instance-scoped cleanup
+        # above; the value is the *child* PID, not
+        # the supervisor's PID.
+        placeholder = make_state(
+            pid=proc.pid,
+            created_at=_now_iso(),
+            host=host,
+            port=port,
+            version=__version__,
+            home=home,
+            frontend_dist=frontend_dist,
+            log_file=log_path,
+            module=SERVER_MODULE,
+            started_at=_now_iso(),
+            instance_id=instance_id,
+        )
+        cli_logger.info(
+            "foreground: child exited (returncode=%d) after %.1fs",
+            returncode,
+            elapsed,
+        )
+        return StartResult(
+            state=placeholder,
+            process_handle=None,
+            elapsed_seconds=elapsed,
+            health_check_ok=health_ok,
+        )
 
 
 def _now_iso() -> str:
@@ -1091,8 +1417,6 @@ def open_browser(host: str, port: int) -> bool:
         return False
     url = f"http://{host}:{port}/"
     try:
-        import webbrowser
-
         return webbrowser.open(url, new=2, autoraise=True)
     except (OSError, webbrowser.Error):  # type: ignore[attr-defined]
         return False

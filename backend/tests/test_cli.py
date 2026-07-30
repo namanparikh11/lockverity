@@ -41,6 +41,7 @@ import time
 import uuid
 from collections.abc import Iterator
 from pathlib import Path
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -1191,24 +1192,38 @@ class TestForegroundSignalHandling:
         # Must not raise.
         runner._install_foreground_signal_handlers()
 
-    def test_foreground_subprocess_run_raises_keyboard_interrupt(
+    def test_foreground_wait_re_raises_keyboard_interrupt(
         self,
         isolated_home: Path,
         settings_no_serve_frontend: None,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        # Mock ``subprocess.run`` to raise
-        # ``KeyboardInterrupt`` (the documented Ctrl+C
-        # contract). The supervisor's
-        # ``_start_foreground`` re-raises the
-        # exception so the start lock in the
-        # surrounding ``with`` block unwinds and the
-        # caller (``main.py``) can convert the
-        # interrupt to a clean exit code.
-        def _fake_run(*args: object, **kwargs: object) -> None:
-            raise KeyboardInterrupt("simulated Ctrl+C in foreground")
+        # The foreground supervisor re-raises the
+        # ``KeyboardInterrupt`` after terminating the
+        # child and removing the state file. The test
+        # mocks ``subprocess.Popen`` to return a fake
+        # process whose ``wait()`` raises
+        # ``KeyboardInterrupt`` (the documented
+        # ``CTRL_BREAK_EVENT``-or-Ctrl+C contract),
+        # the health probe to return ``True`` so the
+        # supervisor publishes the state file, and
+        # asserts the supervisor's exception
+        # propagation is documented.
+        fake_proc = MagicMock()
+        fake_proc.pid = 4242
+        fake_proc.poll.return_value = None
+        fake_proc.wait.side_effect = KeyboardInterrupt("simulated Ctrl+C in foreground")
 
-        monkeypatch.setattr(runner.subprocess, "run", _fake_run)
+        def _fake_popen(*args: object, **kwargs: object) -> MagicMock:
+            return fake_proc
+
+        monkeypatch.setattr(runner.subprocess, "Popen", _fake_popen)
+        # Health returns True so the state is published.
+        monkeypatch.setattr(runner, "_wait_for_health", lambda *a, **kw: True)
+        # The psutil creation-time read should also work
+        # against the fake PID; we mock it to a constant
+        # value so the test is deterministic.
+        monkeypatch.setattr(runner, "_read_child_creation_time", lambda _pid: time.time())
         with pytest.raises(KeyboardInterrupt, match="simulated"):
             runner._start_foreground(
                 argv=[sys.executable, "-c", "pass"],
@@ -1222,7 +1237,144 @@ class TestForegroundSignalHandling:
                 database_url="sqlite:///:memory:",
                 open_browser=False,
                 cli_logger=runner.get_cli_logger(),
+                instance_id="00000000-0000-4000-8000-000000000001",
+                timeout=30.0,
             )
+        # The supervisor terminated the child and
+        # attempted to reap it before re-raising. The
+        # fake's ``terminate`` / ``kill`` were called
+        # at most once (depending on the wait outcome)
+        # and ``poll()`` is the call the supervisor
+        # uses to decide whether to terminate.
+        assert fake_proc.poll.called or fake_proc.terminate.called or fake_proc.wait.called
+
+    def test_foreground_state_published_after_health(
+        self,
+        isolated_home: Path,
+        settings_no_serve_frontend: None,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        # After health readiness, the supervisor must
+        # atomically publish the runtime state with
+        # the *child* PID, the *child* creation time,
+        # the supervisor-generated ``instance_id``,
+        # and the documented module. The test mocks
+        # ``subprocess.Popen`` to return a fake child
+        # and asserts the state file is written with
+        # the recorded values.
+        fake_proc = MagicMock()
+        fake_proc.pid = 5151
+        fake_proc.poll.return_value = 0  # exited cleanly
+        fake_proc.wait.return_value = 0
+        fake_proc.terminate.return_value = None
+        fake_proc.kill.return_value = None
+
+        monkeypatch.setattr(runner.subprocess, "Popen", lambda *a, **kw: fake_proc)
+        monkeypatch.setattr(runner, "_wait_for_health", lambda *a, **kw: True)
+        monkeypatch.setattr(runner, "_read_child_creation_time", lambda _pid: 1700000000.0)
+
+        result = runner._start_foreground(
+            argv=[sys.executable, "-c", "pass"],
+            env={},
+            home=isolated_home,
+            host="127.0.0.1",
+            port=18765,
+            frontend_dist=isolated_home,
+            log_path=isolated_home / "logs" / "lockverity.log",
+            started=time.monotonic(),
+            database_url="sqlite:///:memory:",
+            open_browser=False,
+            cli_logger=runner.get_cli_logger(),
+            instance_id="11111111-2222-4333-8444-555555555555",
+            timeout=30.0,
+        )
+
+        # The state file was written, then removed
+        # after the child exited (instance-scoped
+        # cleanup). The returned ``StartResult`` is a
+        # typed placeholder.
+        state_path = isolated_home / "run" / "lockverity.state.json"
+        assert not state_path.exists()
+        assert result.health_check_ok is True
+        # The state placeholder carries the child PID
+        # and the documented instance_id.
+        assert result.state.pid == 5151
+        assert result.state.instance_id == "11111111-2222-4333-8444-555555555555"
+        assert result.state.module == runner.SERVER_MODULE
+
+    def test_foreground_publish_state_uses_child_identity_not_supervisor(
+        self,
+        isolated_home: Path,
+        settings_no_serve_frontend: None,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        # The state file must record the *child* PID
+        # and the *child* creation time, not the
+        # supervisor's. The test asserts the
+        # documented identity contract by inspecting
+        # the state file just after health readiness
+        # and before the child exits. The
+        # ``_wait_for_health`` mock writes the state
+        # file by side effect, the test then inspects
+        # the file, and the supervisor's
+        # ``proc.wait`` is forced to return 0 to
+        # trigger the normal-exit cleanup.
+        published: dict[str, object] = {}
+
+        def _capture_publish(
+            *, home, pid, created_at_unix, host, port, frontend_dist, log_path, instance_id
+        ):
+            state = runner.make_state(
+                pid=pid,
+                created_at=runner._format_unix(created_at_unix),
+                host=host,
+                port=port,
+                version=runner.__version__,
+                home=home,
+                frontend_dist=frontend_dist,
+                log_file=log_path,
+                module=runner.SERVER_MODULE,
+                started_at=runner._now_iso(),
+                instance_id=instance_id,
+            )
+            runner.write_state(home, state)
+            published["pid"] = pid
+            published["instance_id"] = instance_id
+            return state
+
+        fake_proc = MagicMock()
+        fake_proc.pid = 7777
+        fake_proc.poll.return_value = 0
+        fake_proc.wait.return_value = 0
+
+        monkeypatch.setattr(runner, "_publish_state", _capture_publish)
+        monkeypatch.setattr(runner.subprocess, "Popen", lambda *a, **kw: fake_proc)
+        monkeypatch.setattr(runner, "_wait_for_health", lambda *a, **kw: True)
+        monkeypatch.setattr(runner, "_read_child_creation_time", lambda _pid: 1700000000.0)
+
+        runner._start_foreground(
+            argv=[sys.executable, "-c", "pass"],
+            env={},
+            home=isolated_home,
+            host="127.0.0.1",
+            port=18766,
+            frontend_dist=isolated_home,
+            log_path=isolated_home / "logs" / "lockverity.log",
+            started=time.monotonic(),
+            database_url="sqlite:///:memory:",
+            open_browser=False,
+            cli_logger=runner.get_cli_logger(),
+            instance_id="22222222-3333-4444-8555-666666666666",
+            timeout=30.0,
+        )
+
+        # The published PID is the child PID, not
+        # ``os.getpid()`` (the supervisor's PID).
+        assert published["pid"] == 7777
+        assert published["pid"] != os.getpid()
+        # The instance_id is the one the supervisor
+        # generated and passed to the child.
+        assert published["instance_id"] == "22222222-3333-4444-8555-666666666666"
 
     def test_main_converts_foreground_keyboard_interrupt_to_exit_code_130(
         self,

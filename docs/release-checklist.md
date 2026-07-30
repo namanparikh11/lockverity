@@ -299,11 +299,30 @@ runtime home with the documented precedence:
 The runtime home has four sub-directories
 (``data/``, ``logs/``, ``run/``, ``config/``) created
 with safe permissions. The instance state file
-``<home>/run/lockverity.state.json`` records the PID,
-process creation time, command line, module, bound
-host / port, and an instance UUID. The state file is
-written atomically (``tempfile + os.replace``) and
-intentionally contains no secrets.
+``<home>/run/lockverity.state.json`` records the
+child PID, the child's process creation time, the
+``--instance-id`` UUID the supervisor generated and
+passed to the child, the bound host / port, the
+module, the runtime paths, and a short
+identity-token. The state file is written
+atomically (``tempfile + os.replace``) after the
+child reports healthy and intentionally contains
+no secrets: no full command line, no database URL,
+no provider token, no environment dump. The live
+command line is read at verification time to
+confirm the ``--instance-id`` token is present but
+the live command line is never written to disk.
+
+The same state file is published by both the
+background (``start``) and foreground
+(``start --foreground``) paths. In foreground
+mode the supervisor is attached to the child in
+the same console so ``Ctrl+C`` propagates to both
+processes; ``lockverity status`` /
+``status --json`` / ``open --print-url`` /
+``logs`` / ``stop`` work from a second terminal
+against the same instance, exactly as in
+background mode.
 
 ### Process identity and PID-reuse protection
 
@@ -358,8 +377,9 @@ authorization headers, or other secrets.
 
 | Command | Purpose |
 | --- | --- |
-| ``lockverity start`` | Run Alembic migrations, launch Uvicorn detached, wait for ``/api/v1/health`` to respond, write the state file. |
-| ``lockverity stop`` | Verify the recorded identity, send ``SIGTERM`` (POSIX) or ``CTRL_BREAK_EVENT`` (Windows), wait for the process to exit, clear the state file. |
+| ``lockverity start`` | Run Alembic migrations, launch Uvicorn (detached by default; in the same console with ``--foreground``), wait for ``/api/v1/health`` to respond, write the state file. |
+| ``lockverity start --foreground`` | Run the server in the current TTY. The supervisor publishes the state file with the *child* identity and stays attached until the child exits. ``status`` / ``open`` / ``logs`` / ``stop`` from a second terminal manage the same instance. |
+| ``lockverity stop`` | Verify the recorded identity, send ``SIGTERM`` (POSIX) or ``CTRL_BREAK_EVENT`` (Windows), wait for the process to exit, clear the state file and release the start lock. |
 | ``lockverity status`` | Show the current instance state in human-readable text or in the documented ``--json`` schema. |
 | ``lockverity open`` | Open the local URL in the default browser via the platform ``webbrowser`` facility. |
 | ``lockverity doctor`` | Run a read-only diagnostic checklist and report each check as PASS / WARN / FAIL. |
