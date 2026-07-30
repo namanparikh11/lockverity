@@ -22,10 +22,11 @@ product does not use them as brand or decorative colours.
 ### Ink scale (neutrals)
 
 The ink scale is used for surfaces, text, borders, and
-shadows.
+shadows. The hex codes match the brand design board's
+section 03 palette exactly.
 
-| Token | Light value | Use |
-| ----- | ----------- | --- |
+| Token | Value | Use |
+| ----- | ----- | --- |
 | ``ink-50`` | ``#f8fafc`` | Page background. |
 | ``ink-100`` | ``#f1f5f9`` | Subtle surface, hover. |
 | ``ink-200`` | ``#e2e8f0`` | Border, divider, card edge. |
@@ -33,7 +34,18 @@ shadows.
 | ``ink-500`` | ``#64748b`` | Muted text, label, caption. |
 | ``ink-700`` | ``#334155`` | Body text, primary content. |
 | ``ink-800`` | ``#1e293b`` | Headline, important body. |
-| ``ink-900`` | ``#0f172a`` | Strongest text, brand mark background. |
+| ``ink-900`` | ``#0f172a`` | Strongest text. |
+
+### Indigo (background)
+
+The Indigo scale is the brand background palette. The
+favicon / app-icon background uses Indigo 900 from the
+brand board (``#0B1324``); the UI surfaces use the ink
+scale above for ergonomic contrast.
+
+| Token | Value | Use |
+| ----- | ----- | --- |
+| ``indigo-900`` | ``#0B1324`` | Brand app-icon background. |
 
 ### Accent (interaction)
 
@@ -48,6 +60,19 @@ for status.
 | ``accent-600`` | ``#2563eb`` | Link, primary button background. |
 | ``accent-700`` | ``#1d4ed8`` | Link hover, primary button hover text. |
 | ``accent-800`` | ``#1e40af`` | Active navigation text. |
+
+### Brand gradient (mark and symbol)
+
+The brand mark and the standalone product symbol use a
+vertical blue-to-teal gradient. The hex codes match the
+brand design board's section 03 palette exactly. The
+gradient runs from Blue 600 at the top of the mark to
+Teal 500 at the bottom.
+
+| Token | Value | Use |
+| ----- | ----- | --- |
+| ``blue-600`` | ``#2563eb`` | Gradient start (top of the mark). |
+| ``teal-500`` | ``#14b8a6`` | Gradient end (bottom of the mark). |
 
 ### Status (semantic)
 
@@ -136,3 +161,6 @@ the product respects the user's system setting.
   imagery, or decorative animation.
 - Do not remove the focus ring. Keyboard accessibility is a
   hard requirement.
+- Do not redraw, trace, or reinterpret the brand mark or
+  the standalone product symbol. The source PNGs in
+  ``frontend/public/`` are the single source of truth.

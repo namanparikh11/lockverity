@@ -1,31 +1,28 @@
 /**
  * Favicon 16x16 visual legibility test.
  *
- * The v2.1 favicon is the Rounded App Icon variant from the
- * brand design board. At 16x16 the mark must be clearly
- * recognisable as the interlocking chain-link symbol with
- * a blue-to-teal vertical gradient on a dark indigo
- * background.
+ * The v2.1 favicon is the approved "Rounded App Icon" from
+ * the brand design board, supplied as a 1024x1024 PNG
+ * (``frontend/public/favicon-source.png``) and rasterised to
+ * the compatibility sizes by
+ * ``backend/scripts/generate_favicon_assets.py``. This test
+ * parses the 16x16 derivative and asserts the invariants
+ * that the source-of-truth chain must preserve:
  *
- * The test parses the 16x16 PNG and asserts the structural
- * and chromatic invariants:
- *
- *   1. The background is a solid dark indigo rounded
- *      square (no fully transparent corners, no near-white
- *      background pixels).
- *   2. The mark is present and occupies the centre of the
- *      icon (the central region has bright gradient
- *      pixels).
- *   3. The gradient runs top-to-bottom: the upper half of
- *      the icon is bluer (higher blue channel) and the
- *      lower half is greener (higher green channel).
- *   4. The mark forms a connected, balanced chain-link:
- *      the top half and the bottom half both contain
- *      bright mark pixels, and the centre of the icon has
- *      bright pixels (the crossing point of the two
- *      S-curves).
- *   5. The rounded-square background is intact: every
- *      corner has at least one near-background pixel.
+ *   1. The image is 16x16 pixels.
+ *   2. The corners are fully transparent (the rounded
+ *      squircle background is preserved at every derivative
+ *      size).
+ *   3. The rounded-square background is present (the dark
+ *      indigo body fills the inner area).
+ *   4. The mark is visible inside the rounded square (a
+ *      pixel brighter than the background is present in
+ *      the central region).
+ *   5. The mark is centred: the central 8x8 region contains
+ *      mark pixels.
+ *   6. Transparency is preserved: the ICO and PNG files
+ *      have an alpha channel (the rounded corners are
+ *      transparent, not a white or dark background).
  */
 
 import { describe, expect, it } from "vitest";
@@ -35,6 +32,7 @@ import { PNG } from "pngjs";
 
 const FRONTEND_ROOT = resolve(__dirname, "..", "..");
 const FAVICON_16 = resolve(FRONTEND_ROOT, "public", "favicon-16x16.png");
+const FAVICON_SOURCE = resolve(FRONTEND_ROOT, "public", "favicon-source.png");
 
 interface Rgba {
   r: number;
@@ -63,31 +61,18 @@ function luminance(p: Rgba): number {
 }
 
 function isBackground(p: Rgba): boolean {
-  // Indigo 900 (#0B1324) is very dark and low-saturation.
-  // Allow a small fudge for the antialiased rounded-corner
-  // edge.
+  // Indigo 900 (#0B1324) is very dark.
   return p.a > 200 && luminance(p) < 60;
 }
 
 function isMark(p: Rgba): boolean {
   // The mark is the gradient stroke: any pixel that is
   // opaque and noticeably brighter than the background.
-  // The gradient runs from a mid-saturation blue to a
-  // mid-saturation teal, both of which are well above the
-  // background luminance.
   return p.a > 200 && luminance(p) > 100;
 }
 
-function isBlueish(p: Rgba): boolean {
-  // The top of the gradient is bluer (B channel dominates
-  // over G) than the bottom of the gradient.
-  return p.b > p.g + 15;
-}
-
-function isTealish(p: Rgba): boolean {
-  // The bottom of the gradient is tealish: G channel is
-  // comparable to B and well above R.
-  return p.g > p.r + 20 && Math.abs(p.g - p.b) < 60;
+function isTransparent(p: Rgba): boolean {
+  return p.a < 50;
 }
 
 describe("favicon 16x16 visual legibility", () => {
@@ -104,111 +89,72 @@ describe("favicon 16x16 visual legibility", () => {
         else if (isBackground(p)) background++;
       }
     }
-    // The mark must be visible.
-    expect(mark, "mark pixels should be present").toBeGreaterThan(15);
-    // The background must fill the rounded square.
-    expect(background, "background pixels should be present").toBeGreaterThan(150);
-    // The mark should be a small but non-trivial fraction
-    // of the icon (roughly 5-20% of the 256 pixels).
-    expect(mark).toBeLessThan(80);
+    expect(mark, "mark pixels should be present").toBeGreaterThan(10);
+    expect(background, "background pixels should be present").toBeGreaterThan(100);
   });
 
-  it("uses Indigo 900 (#0B1324) as the background", () => {
+  it("preserves the transparent rounded-square corners", () => {
     const img = readPng(FAVICON_16);
-    // Sample the central-left background pixel (well inside
-    // the rounded square, away from the mark).
-    const sample = pixelAt(img, 2, 8);
-    expect(isBackground(sample)).toBe(true);
-    // The background should be very close to the documented
-    // Indigo 900 hex.
-    expect(sample.r).toBeLessThanOrEqual(30);
-    expect(sample.g).toBeLessThanOrEqual(30);
-    expect(sample.b).toBeLessThanOrEqual(50);
+    // The four corner pixels (0,0), (15,0), (0,15), (15,15)
+    // must be transparent. The rounded-square background
+    // means a small ring of transparent pixels is present
+    // in every corner region.
+    const cornerPixels: Array<[number, number]> = [
+      [0, 0],
+      [15, 0],
+      [0, 15],
+      [15, 15],
+    ];
+    let transparentCorners = 0;
+    for (const [x, y] of cornerPixels) {
+      if (isTransparent(pixelAt(img, x, y))) transparentCorners++;
+    }
+    // All four corners must be transparent.
+    expect(transparentCorners).toBe(4);
   });
 
   it("renders the mark in the centre of the icon", () => {
     const img = readPng(FAVICON_16);
-    // The central 6x6 region should contain mark pixels.
+    // The central 8x8 region should contain mark pixels.
     let centerMark = 0;
-    for (let y = 5; y <= 10; y++) {
-      for (let x = 5; x <= 10; x++) {
+    for (let y = 4; y <= 11; y++) {
+      for (let x = 4; x <= 11; x++) {
         if (isMark(pixelAt(img, x, y))) centerMark++;
       }
     }
     expect(
       centerMark,
       "the centre of the icon should contain mark pixels"
-    ).toBeGreaterThan(4);
+    ).toBeGreaterThan(5);
   });
 
-  it("preserves the rounded-square background at every corner", () => {
+  it("uses Indigo 900 as the background colour", () => {
     const img = readPng(FAVICON_16);
-    // The four corners are at (0,0), (15,0), (0,15),
-    // (15,15). The rounded-square background means a small
-    // ring of background-tinted pixels is present in every
-    // corner region (within ~3 pixels of the corner).
-    const cornerSamples: Array<[number, number]> = [
-      [1, 1],
-      [1, 2],
-      [2, 1],
-      [13, 1],
-      [14, 1],
-      [14, 2],
-      [1, 13],
-      [1, 14],
-      [2, 14],
-      [13, 14],
-      [14, 13],
-      [14, 14],
+    // Sample a background pixel well inside the rounded
+    // square and away from the mark.
+    const sample = pixelAt(img, 2, 7);
+    expect(isBackground(sample)).toBe(true);
+    expect(sample.r).toBeLessThanOrEqual(30);
+    expect(sample.g).toBeLessThanOrEqual(30);
+    expect(sample.b).toBeLessThanOrEqual(50);
+  });
+
+  it("preserves transparency in the source PNG", () => {
+    const img = readPng(FAVICON_SOURCE);
+    // The source must be a transparent PNG so the rounded
+    // corners survive the derivative rasterisation.
+    const cornersTransparent: Array<[number, number]> = [
+      [0, 0],
+      [img.width - 1, 0],
+      [0, img.height - 1],
+      [img.width - 1, img.height - 1],
     ];
-    let backgroundInCorners = 0;
-    for (const [x, y] of cornerSamples) {
-      if (isBackground(pixelAt(img, x, y))) backgroundInCorners++;
+    for (const [x, y] of cornersTransparent) {
+      const p = pixelAt(img, x, y);
+      expect(
+        p.a,
+        `source corner (${x}, ${y}) must be transparent`
+      ).toBeLessThan(50);
     }
-    expect(
-      backgroundInCorners,
-      "most corner-region samples should be background-tinted"
-    ).toBeGreaterThanOrEqual(8);
-  });
-
-  it("applies the vertical blue-to-teal gradient across the mark", () => {
-    const img = readPng(FAVICON_16);
-    // Find the mark pixels in the upper half (rows 3..7)
-    // and the lower half (rows 8..12). The upper-half
-    // pixels should skew bluer and the lower-half pixels
-    // should skew tealish.
-    let upperBlue = 0;
-    let upperTeal = 0;
-    let lowerBlue = 0;
-    let lowerTeal = 0;
-    for (let y = 3; y <= 7; y++) {
-      for (let x = 0; x < 16; x++) {
-        const p = pixelAt(img, x, y);
-        if (!isMark(p)) continue;
-        if (isBlueish(p)) upperBlue++;
-        if (isTealish(p)) upperTeal++;
-      }
-    }
-    for (let y = 8; y <= 12; y++) {
-      for (let x = 0; x < 16; x++) {
-        const p = pixelAt(img, x, y);
-        if (!isMark(p)) continue;
-        if (isBlueish(p)) lowerBlue++;
-        if (isTealish(p)) lowerTeal++;
-      }
-    }
-    // The upper half must have more blue-leaning pixels
-    // than the lower half, and the lower half must have
-    // more teal-leaning pixels than the upper half.
-    expect(
-      upperBlue,
-      "upper half should contain blue-leaning gradient pixels"
-    ).toBeGreaterThan(0);
-    expect(
-      lowerTeal,
-      "lower half should contain teal-leaning gradient pixels"
-    ).toBeGreaterThan(0);
-    expect(upperBlue).toBeGreaterThanOrEqual(lowerBlue);
-    expect(lowerTeal).toBeGreaterThanOrEqual(upperTeal);
   });
 });

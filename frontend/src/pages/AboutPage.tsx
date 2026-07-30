@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { Link } from "react-router";
 
 import { api } from "@/api/api";
-import { BrandMark } from "@/components/BrandMark";
+import { LockveritySymbol } from "@/components/LockveritySymbol";
 import { PageHeader } from "@/components/PageHeader";
 
 /**
@@ -146,7 +146,7 @@ export function AboutPage() {
         aria-label="Lockverity brand"
         data-testid="about-hero"
       >
-        <BrandMark variant="app-icon" size={64} />
+        <LockveritySymbol size={64} ariaLabel="Lockverity product symbol" />
         <div>
           <h2 className="text-lg font-semibold text-ink-900">
             Lockverity{" "}

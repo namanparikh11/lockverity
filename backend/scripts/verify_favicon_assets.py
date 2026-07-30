@@ -1,13 +1,24 @@
 """Verify the generated favicon assets.
 
-Checks that:
+The v2.1 favicon is the approved "Rounded App Icon" from the
+brand design board, supplied as a 1024x1024 PNG
+(``frontend/public/favicon-source.png``). Every compatibility
+asset is derived from the source by
+``backend/scripts/generate_favicon_assets.py``. This script
+verifies the source-of-truth chain.
+
+Checks:
+
+- The source PNG exists and is a transparent raster.
 - The ICO file contains the expected sizes (16, 32, 48).
-- The PNG files exist at the expected pixel dimensions.
-- The SVG declares explicit fill colours (no currentColor)
-  and the documented brand palette (Indigo 900 background,
-  Teal 500 + Blue 600 gradient stops).
-- The HTML references in frontend/index.html match the
-  produced files.
+- The PNG derivatives exist at the expected pixel
+  dimensions.
+- The standalone symbol and horizontal logo brand assets
+  exist.
+- The HTML references in ``frontend/index.html`` match the
+  produced files and carry a versioned cache-busting query.
+- No ``favicon.svg`` is referenced (the v2.1 design is
+  PNG-only).
 """
 
 from __future__ import annotations
@@ -20,15 +31,31 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[2]
 PUBLIC_DIR = REPO_ROOT / "frontend" / "public"
 INDEX_HTML = REPO_ROOT / "frontend" / "index.html"
-FAVICON_SVG = PUBLIC_DIR / "favicon.svg"
 
 EXPECTED_ICO_SIZES = {16, 32, 48}
 EXPECTED_PNG_FILES = {
     "favicon-16x16.png": 16,
     "favicon-32x32.png": 32,
     "favicon-48x48.png": 48,
+    "favicon-180x180.png": 180,
+    "favicon-256x256.png": 256,
+    "favicon-512x512.png": 512,
     "apple-touch-icon.png": 180,
 }
+EXPECTED_BRAND_FILES = (
+    "brand/lockverity-symbol.png",
+    "brand/lockverity-horizontal-logo.png",
+)
+EXPECTED_INDEX_REFS = [
+    "/favicon.ico",
+    "/favicon-16x16.png",
+    "/favicon-32x32.png",
+    "/favicon-48x48.png",
+    "/favicon-180x180.png",
+    "/favicon-256x256.png",
+    "/favicon-512x512.png",
+    "/apple-touch-icon.png",
+]
 
 
 def check_png(path: Path, expected_size: int) -> str | None:
@@ -40,7 +67,37 @@ def check_png(path: Path, expected_size: int) -> str | None:
         return "Pillow not available"
     with Image.open(path) as img:
         if img.size != (expected_size, expected_size):
-            return f"{path.name}: expected {expected_size}x{expected_size}, got {img.size[0]}x{img.size[1]}"
+            return (
+                f"{path.name}: expected {expected_size}x{expected_size}, "
+                f"got {img.size[0]}x{img.size[1]}"
+            )
+    return None
+
+
+def check_source(path: Path) -> str | None:
+    if not path.is_file():
+        return f"missing source: {path}"
+    try:
+        from PIL import Image
+    except ImportError:
+        return "Pillow not available"
+    with Image.open(path) as img:
+        # The source must support transparency (the rounded
+        # corners depend on the alpha channel).
+        if img.mode != "RGBA":
+            return f"{path.name}: source must be RGBA (got {img.mode})"
+        if img.size != (1024, 1024):
+            return f"{path.name}: source must be 1024x1024 (got {img.size[0]}x{img.size[1]})"
+        # The four corners must be transparent.
+        for x, y in [
+            (0, 0),
+            (img.width - 1, 0),
+            (0, img.height - 1),
+            (img.width - 1, img.height - 1),
+        ]:
+            _r, _g, _b, a = img.getpixel((x, y))
+            if a > 50:
+                return f"{path.name}: corner ({x},{y}) is not transparent (a={a})"
     return None
 
 
@@ -73,72 +130,54 @@ def check_ico(path: Path) -> str | None:
     return None
 
 
-def check_svg(path: Path) -> str | None:
-    if not path.is_file():
-        return f"missing: {path}"
-    text = path.read_text(encoding="utf-8")
-    # Must declare explicit fill / stroke colours; currentColor
-    # is not allowed in any fill or stroke attribute. The check
-    # matches the attribute form so a comment that mentions
-    # the keyword does not trip the rule.
-    if re.search(r'(?:fill|stroke)\s*=\s*"currentColor"', text):
-        return f"{path.name}: references currentColor in fill/stroke (must be explicit)"
-    # The background must use the documented Indigo 900.
-    if not re.search(r'fill="#0[Bb]1324"', text):
-        return f"{path.name}: missing Indigo 900 (#0B1324) background fill"
-    # The mark must declare a vertical linear gradient with the
-    # two documented colour stops. The palette section of the
-    # brand board uses these exact hex values; the colour
-    # names in the board's legend are unconventional but the
-    # hex codes are the source of truth.
-    if not re.search(r"<linearGradient\b", text):
-        return f"{path.name}: missing <linearGradient> element"
-    if not re.search(r'stop-color="#2[Ee]8[Bb][Ff]0"', text):
-        return f"{path.name}: missing Teal 500 (#2E8BF0) gradient stop"
-    if not re.search(r'stop-color="#14[Bb]8[Aa]6"', text):
-        return f"{path.name}: missing Blue 600 (#14B8A6) gradient stop"
-    return None
-
-
 def check_index_html() -> list[str]:
     failures: list[str] = []
     if not INDEX_HTML.is_file():
         return [f"missing: {INDEX_HTML}"]
     text = INDEX_HTML.read_text(encoding="utf-8")
-    expected_refs = [
-        "/favicon.svg",
-        "/favicon.ico",
-        "/favicon-16x16.png",
-        "/favicon-32x32.png",
-        "/favicon-48x48.png",
-        "/apple-touch-icon.png",
-    ]
-    for ref in expected_refs:
+    for ref in EXPECTED_INDEX_REFS:
         if ref not in text:
             failures.append(f"index.html: missing reference to {ref}")
-    if 'sizes="180x180"' not in text:
-        failures.append("index.html: apple-touch-icon sizes=180x180 not declared")
+    # The v2.1 design is PNG-only. An SVG favicon reference
+    # would be a regression.
+    if re.search(r'href="/favicon\.svg', text):
+        failures.append("index.html: references favicon.svg (v2.1 design is PNG-only)")
+    if re.search(r'type="image/svg\+xml"', text):
+        failures.append("index.html: declares an SVG icon (v2.1 design is PNG-only)")
+    # Every icon href must carry a ?v= cache-busting query.
+    hrefs = re.findall(r'<link\s+rel="(?:icon|apple-touch-icon)"[^>]*href="([^"]+)"', text)
+    for href in hrefs:
+        if not re.search(r"\?v=\d+", href):
+            failures.append(f"index.html: icon href {href} is missing ?v= cache-busting")
     return failures
 
 
 def main() -> int:
     failures: list[str] = []
+    source_err = check_source(PUBLIC_DIR / "favicon-source.png")
+    if source_err:
+        failures.append(source_err)
     for filename, size in EXPECTED_PNG_FILES.items():
         err = check_png(PUBLIC_DIR / filename, size)
         if err:
             failures.append(err)
-    err = check_ico(PUBLIC_DIR / "favicon.ico")
-    if err:
-        failures.append(err)
-    err = check_svg(FAVICON_SVG)
-    if err:
-        failures.append(err)
+    ico_err = check_ico(PUBLIC_DIR / "favicon.ico")
+    if ico_err:
+        failures.append(ico_err)
+    for filename in EXPECTED_BRAND_FILES:
+        path = PUBLIC_DIR / filename
+        if not path.is_file():
+            failures.append(f"missing brand asset: {path}")
     failures.extend(check_index_html())
     if failures:
         for f in failures:
             print(f"FAIL: {f}", file=sys.stderr)
         return 1
-    print("OK: all favicon assets present, correct size, and referenced from index.html")
+    print(
+        "OK: source-of-truth chain intact; favicon, symbol, "
+        "and horizontal-logo assets present and wired into "
+        "index.html with cache-busting."
+    )
     return 0
 
 
