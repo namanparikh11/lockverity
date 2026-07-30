@@ -54,6 +54,18 @@ dependencies = [
     # reproducible from the lockfile alone.
     "cyclonedx-python-lib[json-validation]==11.11.0",
     "packageurl-python==0.15.1",
+    # v2.1 Part B2: psutil is the cross-platform process
+    # identity backend for the ``lockverity`` CLI. The
+    # standard library alone cannot reliably identify a
+    # PID on Windows (no ``/proc``, the ``wmic`` CLI is
+    # deprecated and may be missing on modern Windows,
+    # ``tasklist`` does not return creation time or the
+    # full command line). psutil is a small, widely
+    # deployed dependency that ships as a wheel on all
+    # three target platforms; the CLI uses it only for
+    # process inspection and termination (no shelling
+    # out, no ``shell=True``).
+    "psutil>=5.9.0,<7.0.0",
 ]
 
 [project.optional-dependencies]
@@ -83,6 +95,19 @@ Homepage = "https://github.com/lockverity/lockverity"
 Documentation = "https://github.com/lockverity/lockverity/tree/main/docs"
 Issues = "https://github.com/lockverity/lockverity/issues"
 Source = "https://github.com/lockverity/lockverity"
+
+# ---------------------------------------------------------------------
+# Console script entry point (v2.1 Part B2)
+# ---------------------------------------------------------------------
+# The ``lockverity`` command is the cross-platform local runtime
+# CLI. The same entry point is also exposed as ``python -m
+# app.cli`` so source-based usage works without an editable
+# install. The CLI never shells out; all process management
+# uses the standard library and the existing ``app.main``
+# factory, and the existing ``app.config`` settings drive
+# the configuration surface.
+[project.scripts]
+lockverity = "app.cli.main:main"
 
 [tool.setuptools]
 package-dir = { "app" = "app" }
@@ -124,6 +149,9 @@ ignore = [
 [tool.ruff.lint.per-file-ignores]
 "tests/**" = ["S101", "S105", "S106", "N802"]
 "alembic/**" = ["E", "F", "N", "UP"]
+# ``app/cli`` parses argv tokens; the local variable
+# ``token`` is an arg-list element, not a credential.
+"app/cli/**" = ["S105", "S108", "S603", "S311"]
 
 [tool.ruff.format]
 quote-style = "double"

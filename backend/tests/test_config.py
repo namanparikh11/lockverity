@@ -3,11 +3,25 @@
 from __future__ import annotations
 
 import pytest
-from app.core.config import Settings
+from app.core.config import Settings, get_settings
 from pydantic import ValidationError
 
 
-def test_default_settings() -> None:
+def test_default_settings(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Strip every LOCKVERITY_* env var so the test sees
+    # the documented default. ``Settings(_env_file=None)``
+    # only disables the ``.env`` file; explicit env
+    # variables override the field defaults and would
+    # otherwise leak from the test infrastructure.
+    for name in (
+        "LOCKVERITY_ENVIRONMENT",
+        "LOCKVERITY_DATABASE_URL",
+        "LOCKVERITY_WORKSPACE_ROOT",
+        "LOCKVERITY_SERVE_FRONTEND",
+        "LOCKVERITY_FRONTEND_DIST",
+    ):
+        monkeypatch.delenv(name, raising=False)
+    get_settings.cache_clear()
     s = Settings(_env_file=None)  # type: ignore[call-arg]
     assert s.environment == "development"
     assert s.api_prefix == "/api/v1"
@@ -15,12 +29,32 @@ def test_default_settings() -> None:
     assert s.pagination_default_page_size <= s.pagination_max_page_size
 
 
-def test_cors_origins_accepts_csv() -> None:
+def test_cors_origins_accepts_csv(monkeypatch: pytest.MonkeyPatch) -> None:
+    for name in (
+        "LOCKVERITY_ENVIRONMENT",
+        "LOCKVERITY_DATABASE_URL",
+        "LOCKVERITY_WORKSPACE_ROOT",
+        "LOCKVERITY_SERVE_FRONTEND",
+        "LOCKVERITY_FRONTEND_DIST",
+    ):
+        monkeypatch.delenv(name, raising=False)
+    get_settings.cache_clear()
     s = Settings(_env_file=None, cors_origins="a.com,b.com,c.com")  # type: ignore[call-arg]
     assert s.cors_origins == ["a.com", "b.com", "c.com"]
 
 
-def test_cors_origins_rejects_wildcard_in_production() -> None:
+def test_cors_origins_rejects_wildcard_in_production(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    for name in (
+        "LOCKVERITY_ENVIRONMENT",
+        "LOCKVERITY_DATABASE_URL",
+        "LOCKVERITY_WORKSPACE_ROOT",
+        "LOCKVERITY_SERVE_FRONTEND",
+        "LOCKVERITY_FRONTEND_DIST",
+    ):
+        monkeypatch.delenv(name, raising=False)
+    get_settings.cache_clear()
     with pytest.raises(ValidationError):
         Settings(_env_file=None, environment="production", cors_origins="*")  # type: ignore[call-arg]
 

@@ -10,8 +10,193 @@ underlying data model and Alembic migrations are stable.
 A focused, additive release that ships the v2.1 Part A
 milestone (original brand assets, favicon closure,
 concise About page, Findings filter alignment, and
-bounded visual polish) and the v2.1 Part B1 milestone
-(single-port production runtime).
+bounded visual polish), the v2.1 Part B1 milestone
+(single-port production runtime), and the v2.1 Part B2
+milestone (cross-platform local runtime CLI).
+
+### v2.1 Part B2: cross-platform local runtime CLI
+
+The v2.1 Part B2 milestone adds the ``lockverity``
+command, a cross-platform local runtime CLI for the
+single-port production runtime introduced in Part B1.
+The CLI wraps the existing application factory and
+the Part B1 settings; it is the supported operator
+path for starting, stopping, and inspecting the
+local instance on Windows, macOS, and Linux.
+
+- **Public subcommands.** ``lockverity start``,
+  ``lockverity stop``, ``lockverity status``,
+  ``lockverity open``, ``lockverity doctor``, and
+  ``lockverity logs``. Each subcommand is also
+  accessible through ``python -m app.cli
+  <subcommand>`` so source-based usage works without
+  an editable install.
+- **Console-script entry point.** A new
+  ``[project.scripts]`` entry in
+  ``backend/pyproject.toml`` installs
+  ``lockverity = "app.cli.main:main"`` alongside the
+  Python module form. The CLI never shells out with
+  ``shell=True``; every subprocess is constructed
+  with an explicit argument list.
+- **Runtime home.** The CLI persists state under an
+  operator-controlled runtime home, precedence
+  ``--home`` > ``LOCKVERITY_HOME`` > OS-appropriate
+  default (``%LOCALAPPDATA%\\Lockverity`` on Windows,
+  ``~/Library/Application Support/Lockverity`` on
+  macOS, ``${XDG_DATA_HOME:-~/.local/share}/lockverity``
+  on Linux). The home has four sub-directories
+  (``data/``, ``logs/``, ``run/``, ``config/``)
+  created with safe permissions and never written
+  to the source repository.
+- **Atomic instance-state file.** The state file
+  under ``run/lockverity.state.json`` records the PID
+  + recorded process creation time + command-line
+  fingerprint + module + instance UUID. The writer
+  uses a ``tempfile + os.replace`` atomic write so a
+  crash mid-write never produces a half-written
+  file. The state file intentionally stores no
+  secrets (tokens, passwords, full URLs).
+- **Process identity and PID-reuse protection.** The
+  cross-platform process identity check compares
+  the recorded PID + creation time + command line
+  against the live process via ``psutil``. The
+  standard library alone cannot reliably identify a
+  PID on Windows: ``/proc`` is not available on
+  macOS, the ``wmic`` CLI is deprecated and may be
+  missing on modern Windows, and ``tasklist`` does
+  not return creation time or the full command
+  line. ``psutil`` ships as a wheel on Windows,
+  macOS, and Linux and gives a uniform API for
+  every dimension the identity check needs (PID
+  existence, creation time, command line, module
+  extraction, zombie detection, termination). A PID
+  that has been recycled for an unrelated process
+  never matches the recorded identity; the
+  ``stop`` and ``status`` commands refuse to
+  terminate the unrelated process. The CLI never
+  uses ``shell=True``, never shells out to ``wmic``
+  or ``tasklist`` for normal operation, and never
+  assumes ``/proc`` is available.
+- **Cross-platform start lock.** The ``start``
+  command acquires an advisory file lock under
+  ``run/lockverity.start.lock`` so two simultaneous
+  ``lockverity start`` invocations against the same
+  runtime home cannot both launch servers. The
+  lock uses ``O_CREAT | O_EXCL`` on POSIX and a
+  matching atomic create on Windows; a stale lock
+  whose owner PID has been gone for more than 30
+  seconds is recovered automatically. A
+  ``test_real_concurrency_two_start_attempts`` test
+  exercises the start lock with two concurrent
+  acquisitions and asserts that exactly one
+  succeeds.
+- **Secret-free state file.** The state file
+  intentionally stores no full command line, no
+  database URL, and no provider tokens. The CLI
+  generates a non-secret ``UUID4`` ``instance_id``
+  at start time, passes it to the private child
+  serve entry point ``app.cli._serve`` as
+  ``--instance-id <UUID>``, and stores only the
+  UUID in the state file. The live-process
+  identity check reads the live command line at
+  verification time and confirms the
+  ``--instance-id <UUID>`` token is present -- the
+  live command line is *read* but never *written*
+  to disk. A ``test_state_does_not_store_cmdline_or_db_url``
+  regression test asserts that no full command
+  line, no database URL, and no ``--log-level``
+  string appear in the persisted state.
+- **One new pip dependency: ``psutil``.** The
+  process identity and termination paths depend
+  on ``psutil>=5.9.0,<7.0.0``. ``psutil`` ships as
+  a wheel on every supported host; the CLI uses
+  it for process inspection and termination
+  only. No other pip dependencies are added in the
+  v2.1 cycle. The constraint is pinned in
+  ``backend/pyproject.toml`` and a comment in the
+  dependency list explains why ``psutil`` is
+  preferred over a ``wmic`` / ``tasklist`` /
+  ``/proc`` polyglot.
+- **Alembic migrations before launch.** The
+  ``start`` command runs ``alembic upgrade head`` in
+  a clean subprocess before launching Uvicorn. The
+  subprocess is constructed with an explicit
+  argument list (no ``shell=True``); the database URL
+  is passed through the documented
+  ``LOCKVERITY_DATABASE_URL`` environment variable
+  so the application's ``alembic/env.py`` does not
+  override it.
+- **Bounded rotating log.** The runtime log uses
+  ``logging.handlers.RotatingFileHandler`` with
+  ``maxBytes`` of 10 MiB and ``backupCount`` of 5
+  (bounded total footprint ~50 MiB). The handler is
+  UTF-8 and never logs provider tokens, request
+  authorization headers, or other secrets.
+- **Loopback bind by default.** The CLI binds to
+  ``127.0.0.1`` by default and refuses to bind a
+  non-loopback host without the explicit
+  ``--allow-remote`` flag. A clear warning is printed
+  when ``--allow-remote`` is supplied; the built-in
+  server does not terminate TLS, so the operator is
+  responsible for a reverse proxy in front of any
+  remote exposure.
+- **Diagnostic ``doctor`` command.** The doctor
+  command runs a read-only checklist (Python version,
+  Lockverity version, runtime-home resolution,
+  directory writeability, database file, Alembic
+  state, frontend dist, default port availability,
+  state-file integrity, Node availability) and
+  reports each check as PASS / WARN / FAIL with a
+  clear message. Secret env values are redacted. The
+  command exits non-zero only for blocking failures;
+  warnings do not block operator workflow.
+- **Status and ``--json`` schemas.** Every
+  subcommand supports a ``--json`` output flag with
+  a documented stable top-level schema suitable for
+  future launchers. ``status`` returns the JSON
+  schema ``{status, instance_id, pid, host, port,
+  url, version, home, frontend_dist, log_file,
+  started_at, uptime, health, state_file}`` so a
+  wrapper script can introspect a running instance
+  without parsing human-readable text.
+- **Exit-code contract.** ``status`` returns
+  ``0`` for running-and-healthy, ``1`` for stopped,
+  and ``2`` for unhealthy, stale, or misconfigured.
+  ``start`` returns ``0`` on success, ``1`` on
+  any documented failure, ``2`` for the
+  ``--allow-remote`` guard, and ``3`` for a
+  health-timeout (the process is running but did
+  not report healthy in time). ``stop`` returns
+  ``0`` for ``stopped`` / ``force_killed`` /
+  ``was_not_running`` and ``1`` for
+  identity-mismatch / inaccessible / grace-period
+  exceeded without ``--force``.
+- **No system service / installer.** The Part B2
+  CLI is a process supervisor for source-based
+  installations; it does not create Windows
+  services, systemd units, launchd agents, scheduled
+  tasks, MSI / DMG / DEB / RPM packages, or any other
+  packaging artefact. Those deliverables belong to
+  later milestones (Part B3 and beyond).
+- **Forward-compatible state schema.** The
+  ``InstanceState`` schema version is bumped
+  forward only on breaking changes; new keys are
+  backward-compatible. The reader is tolerant of
+  unknown keys; missing required keys raise
+  ``ValueError`` so a corrupt state file is detected
+  at the boundary.
+- **Test coverage.** The Part B2 release adds the
+  ``backend/tests/test_cli.py`` test module with
+  focused tests for the runtime-home resolver, the
+  atomic state-file writer/reader, the cross-platform
+  process identity checks, the rotating log
+  handler, the runner helpers (port probe, loopback
+  check, log tail, migrations, health probe), the
+  start / stop flow guards, the CLI argparse
+  grammar, the per-subcommand behaviour, and the
+  ``python -m app.cli`` public entry point.
+
+### v2.1 Part B1: single-port production runtime
 
 ### v2.1 Part B1: single-port production runtime
 

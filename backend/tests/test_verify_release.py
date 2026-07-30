@@ -32,6 +32,7 @@ def test_step_plan_runs_every_documented_step() -> None:
     The documented order is:
 
     - backend:pytest
+    - backend:cli-tests
     - backend:ruff-check
     - backend:ruff-format
     - backend:pip-check
@@ -46,6 +47,7 @@ def test_step_plan_runs_every_documented_step() -> None:
     labels = [step.label for step in plan]
     assert labels == [
         "backend:pytest",
+        "backend:cli-tests",
         "backend:ruff-check",
         "backend:ruff-format",
         "backend:pip-check",
@@ -304,13 +306,17 @@ def test_docstring_npm_audit_network_wording_is_accurate() -> None:
 
 
 def test_no_verifier_stage_was_added_removed_renamed_or_weakened() -> None:
-    """The ten-stage verifier is the single source of
+    """The eleven-stage verifier is the single source of
     truth. The step plan must be exactly the documented
-    set of ten stages in the documented order; no stage
-    may be added, removed, renamed, or weakened.
+    set of eleven stages in the documented order; no
+    stage may be added, removed, renamed, or weakened.
+    The v2.1 Part B2 release adds the dedicated
+    ``backend:cli-tests`` stage for the new
+    ``tests/test_cli.py`` module.
     """
     expected_labels = [
         "backend:pytest",
+        "backend:cli-tests",
         "backend:ruff-check",
         "backend:ruff-format",
         "backend:pip-check",
@@ -323,14 +329,14 @@ def test_no_verifier_stage_was_added_removed_renamed_or_weakened() -> None:
     ]
     plan_labels = [step.label for step in build_step_plan()]
     assert plan_labels == expected_labels, (
-        f"build_step_plan does not match the documented ten-stage plan. "
+        f"build_step_plan does not match the documented eleven-stage plan. "
         f"Expected {expected_labels!r}, got {plan_labels!r}. The verifier "
         f"is the single source of truth; update the docstring and the "
         f"release checklist in the same change."
     )
-    # The plan must have exactly ten stages.
-    assert len(plan_labels) == 10, (
-        f"build_step_plan must have exactly ten stages, got {len(plan_labels)}"
+    # The plan must have exactly eleven stages.
+    assert len(plan_labels) == 11, (
+        f"build_step_plan must have exactly eleven stages, got {len(plan_labels)}"
     )
     # No stage label may duplicate another.
     assert len(set(plan_labels)) == len(plan_labels), (

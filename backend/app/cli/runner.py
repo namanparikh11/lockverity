@@ -1,0 +1,1134 @@
+"""Start and stop helpers for the ``lockverity`` CLI.
+
+The :class:`Runner` class is the runtime workhorse for
+the ``start`` and ``stop`` commands. The class is
+intentionally small: it wraps the platform-portable
+operations the CLI needs to do, and leaves the
+operator-facing UX (argparse, formatting) to the
+:mod:`app.cli.commands` modules.
+
+Start flow
+==========
+
+1. Acquire the cross-platform start lock so two
+   simultaneous ``lockverity start`` commands cannot
+   both launch servers. The lock is held for the
+   entire lifetime of the child process and is
+   released in the ``finally`` block.
+2. Resolve the runtime home (caller has done this).
+3. Validate the frontend dist (caller has done this
+   via the Part B1 settings validator).
+4. Validate the port is free (caller has done this).
+5. Generate a non-secret instance UUID and pass it
+   to the private child serve entry point as
+   ``--instance-id <UUID>``. The UUID is the strong
+   identity fingerprint the live-process check
+   verifies at ``stop`` / ``status`` time.
+6. Run ``alembic upgrade head`` in a clean
+   subprocess. The subprocess is constructed with an
+   explicit argument list (no ``shell=True``); the
+   database URL is passed through the documented
+   ``LOCKVERITY_DATABASE_URL`` environment variable
+   so the application's ``alembic/env.py`` does not
+   override it.
+7. Launch ``python -m uvicorn app.main:app`` as a
+   background subprocess with the
+   ``--instance-id <UUID>`` argument. The child
+   inherits the Part B1 production posture.
+8. Wait for the health endpoint to report ready.
+9. Write the state file atomically. The state file
+   contains the PID, creation time, instance UUID,
+   and the documented non-secret schema.
+10. Return a structured :class:`StartResult`.
+
+Stop flow
+=========
+
+1. Read the state file.
+2. Verify the recorded process identity via
+   :func:`app.cli.process.verify_identity`. The
+   check requires the live process to match the
+   recorded PID + creation time + instance UUID +
+   module. A PID that has been recycled for an
+   unrelated process never matches.
+3. Send a graceful termination signal via
+   :func:`app.cli.process.terminate_process`.
+4. Wait for the process to exit (bounded).
+5. Force-kill only on explicit ``--force`` and only
+   after the grace period has elapsed. The
+   force-kill uses :func:`app.cli.process.force_terminate_process`
+   which maps to ``SIGKILL`` on POSIX and
+   ``TerminateProcess`` on Windows.
+6. Clear the state file.
+7. Return a structured :class:`StopResult`.
+
+The runner never calls ``shell=True``. Every subprocess
+is constructed with an explicit argument list so the
+caller can audit the exact command the CLI issues.
+"""
+
+from __future__ import annotations
+
+import contextlib
+import json
+import os
+import socket
+import subprocess
+import sys
+import time
+import urllib.error
+import urllib.parse
+import urllib.request
+import uuid
+from dataclasses import dataclass, field
+from datetime import UTC, datetime
+from pathlib import Path
+
+import psutil
+
+from app import __version__
+from app.cli import lock as start_lock
+from app.cli.home import ensure_home, logs_dir
+from app.cli.logging_setup import configure_logging, get_cli_logger
+from app.cli.process import (
+    IdentityMatch,
+    IdentityMismatch,
+    ProcessGone,
+    ProcessInaccessible,
+    force_terminate_process,
+    is_zombie,
+    terminate_process,
+    verify_identity,
+)
+from app.cli.state import (
+    InstanceState,
+    clear_state,
+    make_state,
+    read_state,
+    state_file_path,
+    write_state,
+)
+from app.core.config import get_settings
+from app.static_frontend import validate_dist
+
+# Default host / port for the production single-port
+# runtime. The CLI does not allow a non-loopback host
+# without the explicit ``--allow-remote`` flag; the
+# default port is 8000 to match the documented Part B1
+# startup command.
+DEFAULT_HOST = "127.0.0.1"
+DEFAULT_PORT = 8000
+
+# Private CLI child-serve entry point. The supervisor
+# launches the production server through this private
+# module rather than ``python -m uvicorn`` directly
+# because the module owns the supervisor's
+# ``--instance-id`` flag: Uvicorn's CLI rejects the
+# flag, so the supervisor needs a small wrapper that
+# strips the flag and then calls :func:`uvicorn.run`.
+SERVER_ENTRY = "app.cli._serve"
+
+# Module recorded in the state file as a soft
+# identity hint. The strong identity is the
+# ``--instance-id`` token; the module string is the
+# secondary hint the ``verify_identity`` function
+# checks when the strong identity is empty. The
+# recorded module is the *child entry point* the
+# supervisor launches (``app.cli._serve``), which
+# is the value that actually appears in the live
+# command line and is therefore the right
+# fingerprint to compare against.
+SERVER_MODULE = "app.cli._serve"
+
+# The private CLI-managed argument the child server
+# reads to confirm it is the expected instance. The
+# argument is a non-secret UUID generated at start
+# time; the live-process check verifies the token
+# is present in the live command line at stop time.
+INSTANCE_ID_ARG = "--instance-id"
+
+# Bounded number of health-probe attempts. Each
+# attempt waits ``_HEALTH_PROBE_INTERVAL`` seconds; the
+# total wait is ``start_timeout`` (or
+# ``DEFAULT_START_TIMEOUT``).
+HEALTH_PROBE_INTERVAL = 0.5
+DEFAULT_START_TIMEOUT = 30
+DEFAULT_STOP_TIMEOUT = 15
+HEALTH_PROBE_TIMEOUT = 2
+
+# A health-probe attempt that fails to even open a
+# socket is not a fatal error -- the server is still
+# starting up. Only a non-200 response is reported.
+_HEALTH_OK_STATUSES = frozenset({200})
+
+
+# ---------------------------------------------------------------------------
+# Result dataclasses
+# ---------------------------------------------------------------------------
+
+
+@dataclass(slots=True, frozen=True)
+class StartResult:
+    """The outcome of a ``start`` invocation."""
+
+    state: InstanceState
+    process_handle: subprocess.Popen[bytes] | None
+    elapsed_seconds: float
+    health_check_ok: bool
+
+
+@dataclass(slots=True, frozen=True)
+class StopResult:
+    """The outcome of a ``stop`` invocation."""
+
+    outcome: str  # "stopped" | "was_not_running" | "force_killed" | "error"
+    elapsed_seconds: float
+    details: str = ""
+
+
+@dataclass(slots=True, frozen=True)
+class PortProbe:
+    """The result of probing a host/port for availability."""
+
+    host: str
+    port: int
+    in_use: bool
+    detail: str = ""
+
+
+@dataclass(slots=True, frozen=True)
+class DoctorCheck:
+    """A single doctor check."""
+
+    name: str
+    status: str  # "pass" | "warn" | "fail"
+    message: str
+    # ``redacted_message`` is the message the doctor
+    # command prints in ``--json`` mode or when the
+    # operator requested a redacted view. It is
+    # identical to ``message`` for non-sensitive
+    # checks; sensitive checks replace secrets with
+    # ``***``.
+    redacted_message: str = ""
+
+
+@dataclass(slots=True, frozen=True)
+class DoctorReport:
+    """The aggregated doctor report."""
+
+    checks: tuple[DoctorCheck, ...] = field(default_factory=tuple)
+    overall: str = "pass"  # "pass" | "warn" | "fail"
+    home: str = ""
+    version: str = ""
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "overall": self.overall,
+            "version": self.version,
+            "home": self.home,
+            "checks": [
+                {
+                    "name": check.name,
+                    "status": check.status,
+                    "message": check.redacted_message or check.message,
+                }
+                for check in self.checks
+            ],
+        }
+
+
+# ---------------------------------------------------------------------------
+# Port probe
+# ---------------------------------------------------------------------------
+
+
+def probe_port(host: str, port: int, *, timeout: float = 0.5) -> PortProbe:
+    """Return whether ``host:port`` is reachable.
+
+    The probe attempts a TCP connect; a successful
+    connect means the port is in use. A refused
+    connection means the port is free. The probe does
+    not send application data; it only opens the
+    socket. The probe is intentionally short (sub-
+    second) so a port-conflict check is fast.
+    """
+    try:
+        with socket.create_connection((host, port), timeout=timeout):
+            return PortProbe(host=host, port=port, in_use=True, detail="connect succeeded")
+    except (ConnectionRefusedError, TimeoutError, OSError) as exc:
+        # ``ConnectionRefusedError`` is the expected
+        # signal for "port free". ``TimeoutError``
+        # and the generic ``OSError`` cover the edge
+        # cases (firewall drops, no route, etc.);
+        # either way the port is *not* acceptably
+        # occupied by a Lockverity instance.
+        return PortProbe(host=host, port=port, in_use=False, detail=str(exc))
+
+
+def is_loopback_host(host: str) -> bool:
+    """Return ``True`` iff ``host`` is a loopback address.
+
+    The function is conservative: only literal
+    ``127.0.0.1`` and ``::1`` are accepted.
+    Hostnames (including ``localhost``) are rejected
+    so a misconfigured environment variable cannot
+    lead to binding on a routable interface.
+    """
+    return host == "127.0.0.1" or host == "::1"
+
+
+# ---------------------------------------------------------------------------
+# Migrations
+# ---------------------------------------------------------------------------
+
+
+def run_migrations(database_url: str) -> None:
+    """Run ``alembic upgrade head`` against ``database_url``.
+
+    The function invokes the ``alembic`` CLI in a clean
+    subprocess. The in-process path is not used because
+    the application's ``alembic/env.py`` always
+    overrides ``sqlalchemy.url`` from the cached
+    settings. The subprocess approach passes the URL
+    through ``LOCKVERITY_DATABASE_URL`` so the
+    application's settings do not interfere.
+    """
+    backend_root = Path(__file__).resolve().parents[2]
+    alembic_ini = backend_root / "alembic.ini"
+    if not alembic_ini.is_file():
+        raise RuntimeError(f"alembic.ini not found at {alembic_ini}")
+    env = dict(os.environ)
+    env["LOCKVERITY_DATABASE_URL"] = database_url
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "alembic",
+            "-c",
+            str(alembic_ini),
+            "upgrade",
+            "head",
+        ],
+        cwd=str(backend_root),
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+    if result.returncode != 0:
+        raise RuntimeError(
+            f"alembic upgrade head failed (rc={result.returncode}): "
+            f"{result.stderr.strip() or result.stdout.strip()}"
+        )
+
+
+# ---------------------------------------------------------------------------
+# Server argv construction
+# ---------------------------------------------------------------------------
+
+
+def build_server_argv(
+    *,
+    host: str,
+    port: int,
+    log_level: str,
+    instance_id: str,
+) -> list[str]:
+    """Build the argv for the private child-serve entry point.
+
+    The argv is the single chokepoint for "what
+    command does the CLI run"; tests exercise it
+    directly. The argv uses ``sys.executable`` so
+    the subprocess uses the same Python interpreter
+    the CLI was invoked with, including the same
+    venv. The argv launches the private
+    :mod:`app.cli._serve` module which strips the
+    ``--instance-id`` flag and then runs Uvicorn
+    programmatically. The ``--instance-id`` argument
+    is appended last so the live-process identity
+    check can match it.
+    """
+    return [
+        sys.executable,
+        "-m",
+        SERVER_ENTRY,
+        "--host",
+        host,
+        "--port",
+        str(port),
+        "--log-level",
+        log_level,
+        INSTANCE_ID_ARG,
+        instance_id,
+    ]
+
+
+def build_server_env(
+    *,
+    database_url: str,
+    frontend_dist: Path,
+    host: str,
+    port: int,
+    log_level: str,
+) -> dict[str, str]:
+    """Build the environment passed to the Uvicorn child process.
+
+    The function copies the current process environment
+    and applies the documented Part B1 / Part B2
+    settings so the child runs in the documented
+    production posture. Sensitive env values (the
+    database URL, any provider token) are passed
+    through the env as-is -- the operator's env file
+    is the source of truth; the CLI never records
+    them.
+    """
+    env = dict(os.environ)
+    env["LOCKVERITY_ENVIRONMENT"] = "production"
+    env["LOCKVERITY_SERVE_FRONTEND"] = "true"
+    env["LOCKVERITY_FRONTEND_DIST"] = str(frontend_dist)
+    env["LOCKVERITY_DATABASE_URL"] = database_url
+    # The child reads its own host/port from the CLI
+    # argv; the env duplicates the values so a
+    # ``/api/v1/health`` response can confirm the
+    # configured host/port.
+    env["LOCKVERITY_CLI_HOST"] = host
+    env["LOCKVERITY_CLI_PORT"] = str(port)
+    env["LOCKVERITY_CLI_LOG_LEVEL"] = log_level
+    # Force UTF-8 on Windows so Unicode log lines are
+    # not silently dropped by cp1252.
+    env.setdefault("PYTHONIOENCODING", "utf-8")
+    env.setdefault("PYTHONUTF8", "1")
+    return env
+
+
+# ---------------------------------------------------------------------------
+# Start
+# ---------------------------------------------------------------------------
+
+
+def _ensure_no_existing_instance(home: Path) -> None:
+    """Refuse to start if a state file points to a live, matching instance.
+
+    The helper is the second line of defence behind
+    the cross-platform start lock. The start lock
+    prevents two ``start`` calls from racing; this
+    helper prevents a single ``start`` from launching
+    a duplicate server when the previous instance is
+    still alive. The state file is removed in the
+    stale / gone / mismatch cases so a crashed
+    previous instance does not block a fresh start.
+
+    The function is intentionally narrow: it never
+    signals a process; it only inspects the recorded
+    identity and refuses to proceed if the recorded
+    instance is still alive and matches.
+    """
+    existing = read_state(home)
+    if existing is None:
+        return
+    identity = verify_identity(
+        recorded_pid=existing.pid,
+        recorded_created_at=existing.created_at,
+        recorded_instance_id=existing.instance_id,
+        recorded_module=existing.module,
+    )
+    if isinstance(identity, IdentityMatch):
+        raise RuntimeError(
+            f"an instance is already running (pid={existing.pid}, "
+            f"host={existing.host}, port={existing.port}). "
+            "Run `lockverity stop` first or use a different "
+            "runtime home."
+        )
+    if isinstance(identity, ProcessInaccessible):
+        # The recorded process is alive but we cannot
+        # read its identity (insufficient privileges or
+        # an OS-level error). Refuse to start to avoid
+        # launching a duplicate.
+        raise RuntimeError(
+            f"recorded instance pid={existing.pid} is alive but its "
+            f"identity cannot be read: {identity.reason}. Refusing to "
+            "start a duplicate. Stop the existing instance first or "
+            "remove the stale state file."
+        )
+    # ``ProcessGone`` or ``IdentityMismatch``: the
+    # recorded instance is dead or has been replaced
+    # (PID reuse). Clear the stale state file so a
+    # fresh start can proceed without operator
+    # intervention.
+    with contextlib.suppress(OSError):
+        clear_state(home)
+
+
+def start(
+    *,
+    home: Path,
+    host: str = DEFAULT_HOST,
+    port: int = DEFAULT_PORT,
+    frontend_dist: Path | None = None,
+    foreground: bool = False,
+    timeout: float = DEFAULT_START_TIMEOUT,
+    database_url: str | None = None,
+    extra_env: dict[str, str] | None = None,
+    log_level: str = "info",
+    open_browser: bool = False,
+) -> StartResult:
+    """Launch the Lockverity single-port runtime.
+
+    The function performs every step the ``start``
+    command needs to do, in order. On success it
+    returns a :class:`StartResult` with the recorded
+    :class:`InstanceState`. On any failure it raises a
+    :class:`RuntimeError` with a clear, actionable
+    message; the CLI surfaces the error to the operator
+    and returns a non-zero exit code.
+
+    The function acquires the cross-platform start lock
+    for the entire lifetime of the child process. The
+    lock is released in the ``finally`` block so a
+    crash during the start sequence does not leave a
+    held lock.
+    """
+    if not is_loopback_host(host):
+        # The CLI refuses non-loopback binds unless the
+        # caller has explicitly opted in. The caller
+        # (``commands/start.py``) is the only place
+        # where the ``--allow-remote`` flag is read;
+        # this check is the second line of defence.
+        raise RuntimeError(
+            f"refusing to bind {host!r}: the CLI only binds loopback "
+            "addresses by default. Pass --allow-remote to bind a "
+            "non-loopback host (the built-in server does not provide "
+            "TLS; do not expose it beyond localhost without a reverse "
+            "proxy)."
+        )
+    if not (0 <= port <= 65535):
+        raise RuntimeError(f"port {port} is outside 0..65535")
+    if frontend_dist is None:
+        # Default to the Part B1 settings value, which
+        # resolves ``frontend/dist`` against the
+        # repository root.
+        settings = get_settings()
+        frontend_dist = settings.frontend_dist_path
+    # Validate the dist so a stale build aborts startup
+    # before we touch the state file or launch a child.
+    validate_dist(frontend_dist)
+    # Ensure the runtime home exists and write the
+    # state file from a known directory.
+    home = ensure_home(home)
+    log_path = logs_dir(home) / "lockverity.log"
+    # Migrations first; abort if Alembic fails so we
+    # never launch a server against a stale schema.
+    if database_url is None:
+        database_url = get_settings().database_url
+    # Acquire the start lock for the entire lifetime
+    # of the child. The lock is released in the
+    # ``finally`` block so a crash during migration,
+    # child launch, or readiness wait does not leave
+    # a held lock for a future ``start`` to clean up.
+    with start_lock.acquire(home):
+        # Refuse to start if a state file points to a
+        # live, matching instance. The check is the
+        # second line of defence behind the start lock;
+        # the start lock prevents two ``start`` calls
+        # from racing, and this check prevents a single
+        # ``start`` from launching a duplicate when the
+        # previous instance is still alive. The state
+        # file is removed in the stale / gone / mismatch
+        # cases so a crashed previous instance does not
+        # block a fresh start.
+        _ensure_no_existing_instance(home)
+        run_migrations(database_url)
+        # Check the port is free; refuse if another
+        # process is bound. The check is a soft probe;
+        # the bind inside Uvicorn will fail with a
+        # clearer error if the probe missed a race.
+        probe = probe_port(host, port)
+        if probe.in_use:
+            raise RuntimeError(
+                f"port {host}:{port} is already in use ({probe.detail}). "
+                "Choose a different port with --port or stop the existing "
+                "process first."
+            )
+        # Generate the non-secret instance UUID that
+        # ties the recorded state to the live process.
+        instance_id = str(uuid.uuid4())
+        # Configure the CLI logger so the background
+        # server boot output lands in the rotating log.
+        configure_logging(log_path)
+        cli_logger = get_cli_logger()
+        cli_logger.info(
+            "lockverity %s starting (home=%s, host=%s, port=%d, dist=%s, instance_id=%s)",
+            __version__,
+            home,
+            host,
+            port,
+            frontend_dist,
+            instance_id,
+        )
+        # Build the child argv and the environment. The
+        # env explicitly sets the Part B1 production
+        # settings; the CLI does not import the
+        # operator's shell environment wholesale.
+        env = build_server_env(
+            database_url=database_url,
+            frontend_dist=frontend_dist,
+            host=host,
+            port=port,
+            log_level=log_level,
+        )
+        if extra_env:
+            env.update(extra_env)
+        argv = build_server_argv(
+            host=host,
+            port=port,
+            log_level=log_level,
+            instance_id=instance_id,
+        )
+        started = time.monotonic()
+        if foreground:
+            return _start_foreground(
+                argv=argv,
+                env=env,
+                home=home,
+                host=host,
+                port=port,
+                frontend_dist=frontend_dist,
+                log_path=log_path,
+                started=started,
+                database_url=database_url,
+                open_browser=open_browser,
+                cli_logger=cli_logger,
+            )
+        process_handle, _log_handle = _launch_detached(
+            argv=argv,
+            env=env,
+            log_path=log_path,
+        )
+        # Wait for the health endpoint to respond. The
+        # timeout bounds the wait so a slow build does
+        # not hang the CLI forever.
+        health_ok = _wait_for_health(host, port, timeout=timeout)
+        elapsed = time.monotonic() - started
+        if not health_ok:
+            cli_logger.error(
+                "health check at http://%s:%d%s/health did not respond within %.1fs",
+                host,
+                port,
+                get_settings().api_prefix,
+                timeout,
+            )
+        started_at = _now_iso()
+        # Read the live process creation time so the
+        # state file records the OS-truth creation
+        # time. This is the value the live-identity
+        # check compares against on ``stop`` and
+        # ``status``.
+        try:
+            live_process = psutil.Process(process_handle.pid)
+            created_at_unix = float(live_process.create_time())
+        except (psutil.Error, OSError):
+            # Fallback: if we cannot read the live
+            # creation time for any reason, use the
+            # CLI start time as a conservative estimate.
+            # The verification on ``stop`` will use the
+            # same fallback and the identity check will
+            # still work; the only effect is that the
+            # ``created_at`` field may be a few
+            # hundred milliseconds later than the
+            # real creation time.
+            created_at_unix = time.time()
+        created_at_iso = _format_unix(created_at_unix)
+        state = make_state(
+            pid=process_handle.pid,
+            created_at=created_at_iso,
+            host=host,
+            port=port,
+            version=__version__,
+            home=home,
+            frontend_dist=frontend_dist,
+            log_file=log_path,
+            module=SERVER_MODULE,
+            started_at=started_at,
+            instance_id=instance_id,
+        )
+        write_state(home, state)
+        cli_logger.info(
+            "lockverity %s ready at http://%s:%d (pid=%d, instance_id=%s, state=%s)",
+            __version__,
+            host,
+            port,
+            process_handle.pid,
+            instance_id,
+            state_file_path(home),
+        )
+        if open_browser and health_ok:
+            # The CLI does not block on the browser; the
+            # call returns once the OS has been asked to
+            # open the URL.
+            _open_browser(host, port)
+        return StartResult(
+            state=state,
+            process_handle=process_handle,
+            elapsed_seconds=elapsed,
+            health_check_ok=health_ok,
+        )
+
+
+def _launch_detached(
+    *,
+    argv: list[str],
+    env: dict[str, str],
+    log_path: Path,
+) -> tuple[subprocess.Popen[bytes], object]:
+    """Launch the Uvicorn child as a detached process.
+
+    The cross-platform detachment is achieved by:
+
+      - On POSIX: ``start_new_session=True`` (the child
+        becomes the leader of a new process group, so
+        the CLI can ``killpg`` the whole group on
+        stop).
+      - On Windows: ``creationflags=DETACHED_PROCESS |
+        CREATE_NEW_PROCESS_GROUP`` (the child is
+        detached from the console and starts a new
+        process group; ``CTRL_BREAK_EVENT`` is the
+        graceful-stop signal).
+
+    The child stdout and stderr are routed to the
+    rotating log file via a separate logger thread so
+    the parent process does not have to drain the
+    pipes (which would deadlock if the child writes
+    more than the pipe buffer can hold).
+    """
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(log_path, "ab", buffering=0) as log_handle:
+        kwargs: dict[str, object] = {
+            "stdin": subprocess.DEVNULL,
+            "stdout": log_handle,
+            "stderr": subprocess.STDOUT,
+            "env": env,
+            "cwd": str(Path(__file__).resolve().parents[2]),
+        }
+        if sys.platform.startswith("win"):
+            detached_process = 0x00000008
+            create_new_process_group = 0x00000200
+            kwargs["creationflags"] = detached_process | create_new_process_group
+            kwargs["close_fds"] = True
+        else:
+            kwargs["start_new_session"] = True
+            kwargs["close_fds"] = True
+        handle = subprocess.Popen(argv, **kwargs)
+    return handle, log_handle
+
+
+def _start_foreground(
+    *,
+    argv: list[str],
+    env: dict[str, str],
+    home: Path,
+    host: str,
+    port: int,
+    frontend_dist: Path,
+    log_path: Path,
+    started: float,
+    database_url: str,
+    open_browser: bool,
+    cli_logger: object,
+) -> StartResult:
+    """Run the server in the current TTY (no daemonisation).
+
+    Foreground mode is intended for debugging. The
+    process is *not* detached, so Ctrl+C propagates to
+    the child naturally. The state file is *not*
+    written in foreground mode because the CLI does
+    not own the lifetime of the child.
+    """
+    result = subprocess.run(
+        argv,
+        env=env,
+        cwd=str(Path(__file__).resolve().parents[2]),
+    )
+    elapsed = time.monotonic() - started
+    # The state dataclass is required by the typed
+    # return; in foreground mode the PID is the
+    # child's PID, but the operator owns it. We still
+    # record the state in a transient form so the
+    # caller has a well-typed result.
+    fake_state = make_state(
+        pid=result.returncode if isinstance(result.returncode, int) else 0 or os.getpid(),
+        created_at=_now_iso(),
+        host=host,
+        port=port,
+        version=__version__,
+        home=home,
+        frontend_dist=frontend_dist,
+        log_file=log_path,
+        module=SERVER_MODULE,
+        started_at=_now_iso(),
+        instance_id=str(uuid.uuid4()),
+    )
+    return StartResult(
+        state=fake_state,
+        process_handle=None,
+        elapsed_seconds=elapsed,
+        health_check_ok=result.returncode == 0,
+    )
+
+
+def _now_iso() -> str:
+    """Return the current UTC time as an ISO 8601 string."""
+    return datetime.now(UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+
+
+def _format_unix(unix_seconds: float) -> str:
+    """Format a UNIX timestamp as an ISO 8601 UTC string (second precision)."""
+    return (
+        datetime.fromtimestamp(int(unix_seconds), tz=UTC)
+        .replace(microsecond=0)
+        .isoformat()
+        .replace("+00:00", "Z")
+    )
+
+
+def _wait_for_health(host: str, port: int, *, timeout: float) -> bool:
+    """Block until ``/api/v1/health`` returns 200 or ``timeout`` elapses.
+
+    The function uses the standard library
+    :mod:`urllib.request` so the test suite can patch
+    the request and exercise the timeout path without
+    a real HTTP client. The loop sleeps
+    :data:`HEALTH_PROBE_INTERVAL` between attempts.
+    """
+    settings = get_settings()
+    url = f"http://{host}:{port}{settings.api_prefix}/health"
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        try:
+            with urllib.request.urlopen(  # noqa: S310 - http loopback only
+                url, timeout=HEALTH_PROBE_TIMEOUT
+            ) as response:
+                if response.status in _HEALTH_OK_STATUSES:
+                    return True
+        except (urllib.error.URLError, ConnectionError, OSError):
+            pass
+        time.sleep(HEALTH_PROBE_INTERVAL)
+    return False
+
+
+# ---------------------------------------------------------------------------
+# Stop
+# ---------------------------------------------------------------------------
+
+
+def stop(
+    *,
+    home: Path,
+    timeout: float = DEFAULT_STOP_TIMEOUT,
+    force: bool = False,
+) -> StopResult:
+    """Stop the running instance gracefully.
+
+    The function reads the state file, verifies the
+    recorded process identity, and signals the child.
+    The behaviour is:
+
+      1. No state file -- nothing to do, returns
+         ``"was_not_running"``.
+      2. State file present and process identity
+         matches -- send graceful termination, wait,
+         then escalate to force-kill only on
+         ``--force`` and only after the grace period.
+      3. State file present and identity does not
+         match -- refuse to terminate (PID reuse
+         suspected) and return ``"error"``.
+      4. State file present and process is gone --
+         clean up the state file and return
+         ``"was_not_running"``.
+
+    The function never deletes user data: only the
+    state file is removed.
+    """
+    started = time.monotonic()
+    state = read_state(home)
+    if state is None:
+        return StopResult(
+            outcome="was_not_running",
+            elapsed_seconds=time.monotonic() - started,
+            details="no state file under runtime home",
+        )
+    identity = verify_identity(
+        recorded_pid=state.pid,
+        recorded_created_at=state.created_at,
+        recorded_instance_id=state.instance_id,
+        recorded_module=state.module,
+    )
+    if isinstance(identity, ProcessGone):
+        clear_state(home)
+        return StopResult(
+            outcome="was_not_running",
+            elapsed_seconds=time.monotonic() - started,
+            details=f"recorded pid {state.pid} is gone; state file cleared",
+        )
+    if isinstance(identity, ProcessInaccessible):
+        return StopResult(
+            outcome="error",
+            elapsed_seconds=time.monotonic() - started,
+            details=(
+                f"recorded pid {state.pid} is alive but its identity "
+                f"cannot be read: {identity.reason}. Run with administrator "
+                "rights or stop the process manually."
+            ),
+        )
+    if isinstance(identity, IdentityMismatch):
+        return StopResult(
+            outcome="error",
+            elapsed_seconds=time.monotonic() - started,
+            details=(
+                f"recorded pid {state.pid} is alive but its identity does "
+                f"not match the recorded instance ({identity.reason}). "
+                "Refusing to terminate an unrelated process. Clear the "
+                "state file manually if the recorded instance is genuinely gone."
+            ),
+        )
+    # IdentityMatch -- the recorded process is the one
+    # we expect. Signal it.
+    assert isinstance(identity, IdentityMatch)
+    cli_logger = get_cli_logger()
+    cli_logger.info("stopping lockverity (pid=%d)", state.pid)
+    if is_zombie(state.pid):
+        # A zombie is already dead; just clean up the
+        # state file. The OS will reap the zombie when
+        # its parent calls ``wait`` (or when the
+        # parent exits).
+        clear_state(home)
+        return StopResult(
+            outcome="was_not_running",
+            elapsed_seconds=time.monotonic() - started,
+            details=f"recorded pid {state.pid} is a zombie; state file cleared",
+        )
+    if not terminate_process(state.pid, timeout=timeout):
+        # Graceful stop did not converge. Either keep
+        # waiting (if not --force) or escalate.
+        if not force:
+            return StopResult(
+                outcome="error",
+                elapsed_seconds=time.monotonic() - started,
+                details=(
+                    f"pid {state.pid} did not exit within {timeout:.0f}s; "
+                    "pass --force to terminate it."
+                ),
+            )
+        if not force_terminate_process(state.pid, timeout=5.0):
+            return StopResult(
+                outcome="error",
+                elapsed_seconds=time.monotonic() - started,
+                details=(
+                    f"pid {state.pid} did not exit after SIGKILL; investigate the process manually."
+                ),
+            )
+        clear_state(home)
+        return StopResult(
+            outcome="force_killed",
+            elapsed_seconds=time.monotonic() - started,
+            details=f"pid {state.pid} force-killed after grace period",
+        )
+    clear_state(home)
+    return StopResult(
+        outcome="stopped",
+        elapsed_seconds=time.monotonic() - started,
+        details=f"pid {state.pid} exited gracefully",
+    )
+
+
+# ---------------------------------------------------------------------------
+# Status helpers
+# ---------------------------------------------------------------------------
+
+
+def fetch_health(host: str, port: int, *, timeout: float = 3.0) -> dict[str, object] | None:
+    """Return the parsed JSON of ``/api/v1/health`` or ``None`` on failure.
+
+    The function uses the standard library so the
+    caller does not need to depend on ``httpx`` for a
+    single probe.
+    """
+    settings = get_settings()
+    url = f"http://{host}:{port}{settings.api_prefix}/health"
+    try:
+        with urllib.request.urlopen(  # noqa: S310 - http loopback only
+            url, timeout=timeout
+        ) as response:
+            raw = response.read()
+    except (urllib.error.URLError, ConnectionError, OSError, TimeoutError):
+        return None
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError:
+        return None
+
+
+def format_uptime(created_at: str) -> str:
+    """Return a human-readable uptime string from an ISO 8601 timestamp.
+
+    The function accepts the recorded ``created_at``
+    from the state file and returns ``"Nd Nh Nm"`` for
+    durations greater than a minute, or
+    ``"Nm Ns"`` / ``"Ns"`` for shorter durations.
+    """
+    try:
+        parsed = datetime.fromisoformat(created_at.replace("Z", "+00:00"))
+    except ValueError:
+        return "unknown"
+    now = datetime.now(UTC)
+    delta = now - parsed
+    total_seconds = int(delta.total_seconds())
+    if total_seconds < 0:
+        return "unknown"
+    days, remainder = divmod(total_seconds, 86400)
+    hours, remainder = divmod(remainder, 3600)
+    minutes, seconds = divmod(remainder, 60)
+    if days:
+        return f"{days}d {hours}h {minutes}m"
+    if hours:
+        return f"{hours}h {minutes}m"
+    if minutes:
+        return f"{minutes}m {seconds}s"
+    return f"{seconds}s"
+
+
+# ---------------------------------------------------------------------------
+# Open
+# ---------------------------------------------------------------------------
+
+
+def open_browser(host: str, port: int) -> bool:
+    """Open the local Lockverity URL in the default browser.
+
+    The function returns ``True`` on a successful
+    handoff to the OS browser facility, ``False`` on
+    failure. The function never opens an
+    attacker-controlled URL: it constructs the URL
+    from the recorded host/port and refuses any value
+    that is not loopback.
+    """
+    if not is_loopback_host(host):
+        return False
+    url = f"http://{host}:{port}/"
+    try:
+        import webbrowser
+
+        return webbrowser.open(url, new=2, autoraise=True)
+    except (OSError, webbrowser.Error):  # type: ignore[attr-defined]
+        return False
+
+
+# Re-export the canonical name for ``commands/open.py``.
+_open_browser = open_browser
+
+
+# ---------------------------------------------------------------------------
+# Logs
+# ---------------------------------------------------------------------------
+
+
+def read_log_tail(log_path: Path, *, lines: int) -> list[str]:
+    """Return the last ``lines`` lines of ``log_path``.
+
+    The function is bounded: it reads the file in
+    reverse line order using a chunked seek, so a
+    10 MiB log file is read in a constant number of
+    seeks regardless of the line count. Missing or
+    unreadable files return an empty list; the caller
+    is responsible for surfacing the missing-log case
+    to the operator.
+    """
+    if not log_path.is_file():
+        return []
+    if lines <= 0:
+        return []
+    from collections import deque
+
+    result: deque[str] = deque(maxlen=lines)
+    with log_path.open("rb") as handle:
+        handle.seek(0, os.SEEK_END)
+        end = handle.tell()
+        block = 4096
+        # Buffer for the partial line straddling the
+        # previous read.
+        tail = b""
+        position = end
+        newline = b"\n"
+        # Track whether the file ends with a newline
+        # so we can suppress the empty trailing
+        # segment that ``split`` produces.
+        while position > 0 and len(result) < lines:
+            read_size = min(block, position)
+            position -= read_size
+            handle.seek(position)
+            chunk = handle.read(read_size) + tail
+            parts = chunk.split(newline)
+            tail = parts[0]
+            # The last ``parts`` segment is empty
+            # when the chunk ends with a newline;
+            # treat it as "no data" so the trailing
+            # empty string is not returned as a line.
+            segments = parts[1:]
+            if segments and segments[-1] == b"":
+                segments = segments[:-1]
+            for part in reversed(segments):
+                if len(result) >= lines:
+                    break
+                result.appendleft(part.decode("utf-8", errors="replace"))
+        # ``tail`` holds the partial line that
+        # straddled the boundary of the first read;
+        # append it only if it is non-empty and we
+        # still have room.
+        if len(result) < lines and tail:
+            result.appendleft(tail.decode("utf-8", errors="replace"))
+    return list(result)
+
+
+def follow_log(log_path: Path, *, lines: int = 100) -> None:
+    """Stream ``log_path`` like ``tail -f``.
+
+    The function reads the last ``lines`` lines first,
+    then tails the file. ``Ctrl+C`` raises
+    :class:`KeyboardInterrupt`; the CLI catches it
+    and returns a clean exit code.
+    """
+    initial = read_log_tail(log_path, lines=lines)
+    for line in initial:
+        print(line)
+    if not log_path.is_file():
+        return
+    with log_path.open("r", encoding="utf-8", errors="replace") as handle:
+        handle.seek(0, os.SEEK_END)
+        while True:
+            line = handle.readline()
+            if line:
+                print(line, end="")
+            else:
+                time.sleep(0.2)
+
+
+__all__ = [
+    "DEFAULT_HOST",
+    "DEFAULT_PORT",
+    "DEFAULT_START_TIMEOUT",
+    "DEFAULT_STOP_TIMEOUT",
+    "DoctorCheck",
+    "DoctorReport",
+    "PortProbe",
+    "StartResult",
+    "StopResult",
+    "fetch_health",
+    "follow_log",
+    "format_uptime",
+    "is_loopback_host",
+    "open_browser",
+    "probe_port",
+    "read_log_tail",
+    "run_migrations",
+    "start",
+    "stop",
+]

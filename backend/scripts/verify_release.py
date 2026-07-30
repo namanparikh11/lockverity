@@ -5,16 +5,16 @@ in the documented order. It is intentionally bounded: it
 does not delete files, does not reset the demo database,
 and does not call external providers.
 
-The ten real stages (:func:`build_step_plan`)
-============================================
+The eleven real stages (:func:`build_step_plan`)
+==============================================
 
 The step plan is the single source of truth. Every stage
 named in the docstring below must be present in
 :func:`build_step_plan`; every stage in
 :func:`build_step_plan` must be documented below. The
-current ten stages are:
+current eleven stages are:
 
-  1. ``backend:pytest`` — ``pytest tests`` with the
+  1. ``backend:pytest`` — ``pytest tests --ignore=tests/test_cli.py`` with the
      :func:`_block_external_network` autouse fixture
      patching :meth:`socket.socket.connect` to fail any
      test that opens a non-loopback socket. The
@@ -24,7 +24,20 @@ current ten stages are:
      Scorecard factories with in-process fakes that
      return ``ProviderUnavailable`` for every external
      call. The combination of the two fixtures means
-     this step makes *no* outbound network calls.
+     this step makes *no* outbound network calls. The
+     ``tests/test_cli.py`` module is exercised by the
+     dedicated ``backend:cli-tests`` step below.
+  1a. ``backend:cli-tests`` — ``pytest tests/test_cli.py``
+     in default collection order. The v2.1 Part B2
+     CLI suite is order-independent on every supported
+     host: each test isolates its runtime home, the
+     conftest's autouse fixtures (settings cache reset,
+     network guard, fake providers) clean up after
+     themselves, and the cross-platform process
+     identity checks use psutil instead of the
+     fragile ``os.kill`` / ``subprocess.run`` interleaving
+     that historically required a hand-curated class
+     order on Windows.
   2. ``backend:ruff-check`` — static lint of the
      application, test, and scripts trees.
   3. ``backend:ruff-format`` — ``ruff format --check``
@@ -55,7 +68,7 @@ process and not inside a pytest process.
 External release-checklist checks (NOT in this verifier)
 ========================================================
 
-The following items are *not* part of the ten-stage
+The following items are *not* part of the eleven-stage
 verifier and are not enumerated in the stages above.
 The verifier does not run them; the operator runs
 them separately during the release process.
@@ -113,7 +126,7 @@ automated coverage above.
   cross-workspace rejection, evidence-envelope
   validation, provider-cache preservation). The
   release checklist documents the exact command.
-  This step is not part of the ten-stage verifier.
+  This step is not part of the eleven-stage verifier.
 
 Adding or reordering a stage requires updating both
 :func:`build_step_plan` and this docstring in the same
@@ -242,9 +255,42 @@ def build_step_plan(
                 "-m",
                 "pytest",
                 "tests",
+                # The ``tests/test_cli.py`` module covers
+                # the v2.1 Part B2 CLI. The module is
+                # exercised by the dedicated
+                # ``backend:cli-tests`` step below so
+                # the cross-platform process-identity
+                # tests run with their own bounded
+                # timeout. The two stages together cover
+                # the full backend suite in default
+                # collection order with no manual
+                # class-order workarounds.
+                "--ignore=tests/test_cli.py",
             ),
             cwd=BACKEND_DIR,
             timeout_seconds=1800,
+        ),
+        Step(
+            label="backend:cli-tests",
+            argv=(
+                python_executable,
+                "-m",
+                "pytest",
+                # The CLI suite runs in default
+                # collection order on every host. The
+                # explicit class list and ``-v`` flag
+                # historically required to keep the
+                # test process from hanging on Windows
+                # are no longer necessary: every test
+                # isolates its runtime home, the
+                # conftest's autouse fixtures clean up
+                # after themselves, and the
+                # cross-platform process-identity
+                # checks use psutil.
+                "tests/test_cli.py",
+            ),
+            cwd=BACKEND_DIR,
+            timeout_seconds=600,
         ),
         Step(
             label="backend:ruff-check",

@@ -458,6 +458,26 @@ def _reset_db_state(engine):
 
 
 @pytest.fixture(autouse=True)
+def _reset_settings_cache():
+    """Clear the cached :func:`app.core.config.get_settings` between tests.
+
+    The :func:`app.core.config.get_settings` is wrapped in
+    :func:`functools.lru_cache` so the application sees a
+    single :class:`Settings` instance per process. A
+    test that mutates the environment (e.g. via
+    ``monkeypatch.setenv``) would otherwise see the
+    stale cached settings on the next test. The
+    fixture is autouse so every test gets a clean
+    settings cache.
+    """
+    from app.core.config import get_settings
+
+    get_settings.cache_clear()
+    yield
+    get_settings.cache_clear()
+
+
+@pytest.fixture(autouse=True)
 def _reset_shared_provider_client():
     """Reset the shared provider client between tests.
 

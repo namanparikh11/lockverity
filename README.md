@@ -486,27 +486,81 @@ npm test -- --run src/__tests__/evidence_report_v1_0.test.tsx  # v1.0 evidence r
 
 ## Current milestone
 
-**v2.1.0 — Local runtime brand polish.** A
-focused, additive release that ships the v2.1
-Part A milestone: original brand assets, favicon
-closure, a concise About page, Findings filter
-alignment, and bounded visual polish. No backend
-behaviour change, no new provider, no new export
-standard, no new evidence contract, no
-migration. The mark is hand-authored SVG
-geometry (interlocking L and V) shipped under
-``frontend/public/brand/``; the favicon 404
-reported in the v2.0.6 manual sweep is closed;
-the long v2.0.6 About page is replaced by a
-hero, three trust principles, six feature
-cards, an expandable limitations section, and
-a resources footer; the Findings Sort control
-sits inside the v0.9 coherent responsive filter
-grid alongside Category, Severity, Confidence,
-and Status. 7 new frontend tests; the
-``version_about`` test is updated to assert the
-dynamic version rendering and the v2.1.0 About
-copy. Version bumped to ``2.1.0``.
+**v2.1.0 — Local runtime brand polish, single-port
+production runtime, and cross-platform local runtime
+CLI.** A focused, additive release that ships the
+v2.1 Part A milestone (original brand assets, favicon
+closure, concise About page, Findings filter
+alignment, and bounded visual polish), the v2.1
+Part B1 milestone (single-port production runtime
+with ``LOCKVERITY_SERVE_FRONTEND=true`` and
+``LOCKVERITY_ENVIRONMENT=production``), and the v2.1
+Part B2 milestone (cross-platform ``lockverity``
+CLI with ``start`` / ``stop`` / ``status`` / ``open``
+/ ``doctor`` / ``logs``). The Part B2 CLI is a
+process supervisor for source-based installations;
+it does not include system services, installers, or
+remote-deployment artefacts. Process identity is
+verified with ``psutil`` (PID + recorded creation
+time + ``--instance-id`` UUID + module); the
+state file stores no full command line, no database
+URL, and no provider tokens. 75 new backend tests
+(Part B1) + 77 new CLI tests (Part B2) + 7 new
+frontend tests (Part A); 1,283 total backend tests;
+version remains at ``2.1.0``.
+
+### Local runtime CLI quick start (v2.1 Part B2)
+
+The single-port production runtime is operated by
+the cross-platform ``lockverity`` CLI. The CLI is
+the supported way to start, stop, and inspect the
+local instance on Windows, macOS, and Linux. The
+CLI never shells out with ``shell=True``; the
+default bind is loopback only.
+
+```powershell
+# Build the production frontend bundle once
+cd frontend
+npm ci
+npm run build
+
+# Start the server (uses the local venv's Python)
+cd ..\backend
+$env:LOCKVERITY_FRONTEND_DIST = "..\frontend\dist"
+$env:LOCKVERITY_DATABASE_URL = "sqlite:///./var/lockverity-runtime.sqlite"
+.\.venv\Scripts\python.exe -m app.cli doctor
+.\.venv\Scripts\python.exe -m app.cli start --host 127.0.0.1 --port 8000
+.\.venv\Scripts\python.exe -m app.cli status --json
+.\.venv\Scripts\python.exe -m app.cli logs --lines 50
+.\.venv\Scripts\python.exe -m app.cli stop
+```
+
+**Default bind is ``127.0.0.1`` only.** The
+``--allow-remote`` flag is required to bind a
+non-loopback host; the built-in server does not
+terminate TLS, so remote exposure requires a
+reverse proxy. The ``stop`` command never deletes
+data, never removes the database, and never
+terminates a process whose identity fingerprint
+does not match the recorded instance. The state
+file is the durable record of a single running
+instance and contains no secrets; pass
+``--home`` or set ``LOCKVERITY_HOME`` to override
+the OS-appropriate default
+(``%LOCALAPPDATA%\Lockverity`` on Windows,
+``~/Library/Application Support/Lockverity`` on
+macOS, ``${XDG_DATA_HOME:-~/.local/share}/lockverity``
+on Linux).
+
+**Not yet included:** Windows services, systemd
+units, launchd agents, scheduled tasks, MSI / DMG /
+DEB / RPM packages, or any other packaging
+artefact. Those deliverables belong to Part B3 and
+beyond. The CLI is a process supervisor for
+source-based installations. Node is not required at
+runtime once ``frontend/dist/`` has been built;
+``psutil`` is the only new Python dependency in the
+v2.1 cycle (``psutil>=5.9.0,<7.0.0``).
 
 **v2.0.6 — Historical upload identification and
 clearer stage-outcome presentation.** A narrowly

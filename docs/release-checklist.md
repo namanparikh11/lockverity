@@ -123,6 +123,7 @@ operator's convenience.
 | Frontend (Vite) | `npm run dev` (with `VITE_API_PROXY_TARGET=http://127.0.0.1:8765`) |
 | Demo loader | `python scripts/load_demo.py --reset-demo-db` |
 | Release validation | `python scripts/verify_release.py` |
+| Local runtime CLI (v2.1 Part B2) | `lockverity start` / `lockverity stop` / `lockverity status` / `lockverity open` / `lockverity doctor` / `lockverity logs` |
 
 ## 4a. Single-port production runtime (v2.1 Part B1)
 
@@ -249,6 +250,189 @@ explicit step. The repository-controlled code path
 backend does not execute any code from the dist or the
 uploaded archives.
 
+## 4b. Local runtime CLI (v2.1 Part B2)
+
+The v2.1 Part B2 milestone adds the cross-platform
+``lockverity`` command, the supported operator path for
+the single-port production runtime. The CLI wraps the
+existing application factory and the Part B1 settings;
+it is the documented entry point for starting, stopping,
+and inspecting the local instance on Windows, macOS,
+and Linux. The two-port development workflow and the
+direct Uvicorn invocation documented in §4a remain
+supported; the CLI is additive.
+
+### Build before start
+
+The CLI does not execute ``npm`` or run the Vite
+build. Build preparation is the documented
+``scripts/prepare_frontend_dist.py`` step; the CLI
+requires a valid built dist at the configured path
+and aborts startup otherwise.
+
+### Single-port start command
+
+```powershell
+python scripts/prepare_frontend_dist.py
+$env:LOCKVERITY_ENVIRONMENT = "production"
+lockverity start
+```
+
+The CLI's default host is ``127.0.0.1`` and the default
+port is ``8000``. A non-loopback host requires the
+explicit ``--allow-remote`` flag; the built-in server
+does not terminate TLS, so the operator is responsible
+for a reverse proxy in front of any remote exposure.
+
+### Runtime home and state file
+
+The CLI persists state under an operator-controlled
+runtime home with the documented precedence:
+
+  1. ``--home <path>`` (global CLI option).
+  2. ``LOCKVERITY_HOME`` environment variable.
+  3. OS-appropriate default:
+     - Windows: ``%LOCALAPPDATA%\\Lockverity``.
+     - macOS: ``~/Library/Application Support/Lockverity``.
+     - Linux: ``${XDG_DATA_HOME:-~/.local/share}/lockverity``.
+
+The runtime home has four sub-directories
+(``data/``, ``logs/``, ``run/``, ``config/``) created
+with safe permissions. The instance state file
+``<home>/run/lockverity.state.json`` records the PID,
+process creation time, command line, module, bound
+host / port, and an instance UUID. The state file is
+written atomically (``tempfile + os.replace``) and
+intentionally contains no secrets.
+
+### Process identity and PID-reuse protection
+
+The CLI never terminates a process solely on the basis
+of a PID. The ``stop`` and ``status`` commands verify
+the recorded process identity (PID + creation time +
+``--instance-id`` token + module) against the live
+process before any signal is sent. The cross-platform
+identity read uses ``psutil``: the standard library
+alone cannot reliably identify a PID on Windows
+(``/proc`` is not available on macOS, the ``wmic``
+CLI is deprecated and may be missing on modern
+Windows, ``tasklist`` does not return creation time
+or the full command line). ``psutil`` ships as a
+wheel on Windows, macOS, and Linux and gives a
+uniform API for every dimension the identity check
+needs (PID existence, creation time, command line,
+module extraction, zombie detection, termination).
+The CLI never uses ``shell=True``, never shells out
+to ``wmic`` or ``tasklist`` for normal operation, and
+never assumes ``/proc`` is available.
+
+A PID that has been recycled for an unrelated process
+never matches the recorded identity; the runner
+refuses to terminate the unrelated process and
+returns the documented ``error`` outcome with a
+clear explanation.
+
+The state file stores only the non-secret
+``instance_id`` UUID, the recorded PID, the
+recorded creation time, the host / port, the
+module, and the runtime paths. The full command
+line, the database URL, and any provider tokens
+are never persisted; the live command line is
+*read* at verification time to confirm the
+``--instance-id <UUID>`` token is present, but the
+live command line is never written to disk.
+
+### Migrations and bounded log
+
+``lockverity start`` runs ``alembic upgrade head`` in a
+clean subprocess before launching Uvicorn. The CLI
+aborts startup if the migration fails, so a stale
+schema never reaches the running process. The runtime
+log uses ``logging.handlers.RotatingFileHandler`` with
+``maxBytes`` of 10 MiB and ``backupCount`` of 5
+(bounded total footprint ~50 MiB). The handler is
+UTF-8 and never logs provider tokens, request
+authorization headers, or other secrets.
+
+### Command reference
+
+| Command | Purpose |
+| --- | --- |
+| ``lockverity start`` | Run Alembic migrations, launch Uvicorn detached, wait for ``/api/v1/health`` to respond, write the state file. |
+| ``lockverity stop`` | Verify the recorded identity, send ``SIGTERM`` (POSIX) or ``CTRL_BREAK_EVENT`` (Windows), wait for the process to exit, clear the state file. |
+| ``lockverity status`` | Show the current instance state in human-readable text or in the documented ``--json`` schema. |
+| ``lockverity open`` | Open the local URL in the default browser via the platform ``webbrowser`` facility. |
+| ``lockverity doctor`` | Run a read-only diagnostic checklist and report each check as PASS / WARN / FAIL. |
+| ``lockverity logs`` | Show the rotating runtime log (bounded tail, optional ``--follow``). |
+
+### Exit codes
+
+| Exit | Meaning |
+| --- | --- |
+| 0 | Success. |
+| 1 | Generic error. |
+| 2 | ``--allow-remote`` guard / health timeout / blocking doctor failure. |
+| 64 | Command-line usage error. |
+
+The ``status`` subcommand follows a separate,
+documented contract:
+
+| Exit | Meaning |
+| --- | --- |
+| 0 | Running and healthy. |
+| 1 | Stopped (no state file or process gone). |
+| 2 | Unhealthy, stale, or misconfigured. |
+
+### Configuration precedence
+
+The CLI honours a deterministic precedence:
+
+  1. Explicit CLI option (``--host``, ``--port``,
+     ``--home``, ``--frontend-dist``, ``--allow-remote``,
+     ``--database-url``, ``--timeout``, ``--log-level``).
+  2. Environment variable (``LOCKVERITY_HOME``,
+     ``LOCKVERITY_DATABASE_URL``,
+     ``LOCKVERITY_FRONTEND_DIST``,
+     ``LOCKVERITY_ENVIRONMENT``,
+     ``LOCKVERITY_SERVE_FRONTEND``).
+  3. Existing Lockverity configuration mechanism
+     (the cached :class:`app.core.config.Settings`).
+  4. Platform default (loopback ``127.0.0.1``, port
+     ``8000``, OS-appropriate runtime home).
+
+### Boundary with the single-port runtime
+
+The CLI is additive to the Part B1 single-port
+runtime. The Part B1 settings and route order are
+unchanged; the CLI is a process supervisor that wires
+the Part B1 production posture (``serve_frontend=true``,
+``environment=production``, ``frontend_dist`` set,
+``database_url`` set, ``host`` / ``port`` / ``log_level``
+set) before launching Uvicorn. The CLI does not modify
+the application factory, the route order, the cache
+policy, the security headers, or the path-traversal
+protections.
+
+### What the CLI does not do
+
+The Part B2 CLI is a process supervisor for
+source-based installations. It does **not**:
+
+  - create Windows services, systemd units, launchd
+    agents, scheduled tasks, or any other OS-level
+    supervisor;
+  - produce MSI / EXE / DMG / PKG / AppImage / DEB /
+    RPM packages;
+  - perform backup / restore of user data;
+  - call external cloud providers;
+  - implement authentication;
+  - implement multi-tenant isolation;
+  - rewrite the source repository.
+
+Those deliverables are intentionally out of scope
+for Part B2 and belong to later milestones (Part B3
+and beyond).
+
 ## 5. Demo loader
 
 The demo loader is the only safe way to seed a fresh
@@ -273,18 +457,19 @@ cd backend
 .\.venv\Scripts\python.exe scripts\verify_release.py
 ```
 
-The script runs the documented 10-step plan in order:
+The script runs the documented 11-step plan in order:
 
-1. `backend:pytest` — `python -m pytest tests`
-2. `backend:ruff-check` — `python -m ruff check app tests scripts`
-3. `backend:ruff-format` — `python -m ruff format --check app tests scripts`
-4. `backend:pip-check` — `python -m pip check`
-5. `frontend:test` — `npm test -- --run`
-6. `frontend:typecheck` — `npm run typecheck`
-7. `frontend:lint` — `npm run lint`
-8. `frontend:build` — `npm run build`
-9. `frontend:audit-omit-dev` — `npm audit --omit=dev`
-10. `frontend:audit` — `npm audit`
+1. `backend:pytest` — `python -m pytest tests --ignore=tests/test_cli.py`
+2. `backend:cli-tests` — `python -m pytest tests/test_cli.py` in default collection order
+3. `backend:ruff-check` — `python -m ruff check app tests scripts`
+4. `backend:ruff-format` — `python -m ruff format --check app tests scripts`
+5. `backend:pip-check` — `python -m pip check`
+6. `frontend:test` — `npm test -- --run`
+7. `frontend:typecheck` — `npm run typecheck`
+8. `frontend:lint` — `npm run lint`
+9. `frontend:build` — `npm run build`
+10. `frontend:audit-omit-dev` — `npm audit --omit=dev`
+11. `frontend:audit` — `npm audit`
 
 The script **exits non-zero immediately on the first failed
 step** and prints a concise per-step summary at the end. It
@@ -293,9 +478,25 @@ dependencies, delete files, or mutate Git.
 
 The expected baseline is:
 
-- backend: at least **828 tests** (with new regression tests
-  for the v2.0 defect fixes);
-- frontend: at least **295 tests**;
+- backend: at least **1,283 tests** (1,206 baseline +
+  77 v2.1 Part B2 CLI tests; the exact total from the
+  most recent accepted verifier run). The test count
+  is reported by the verifier itself; the release
+  gate is "verifier fully green" rather than a
+  specific test count.
+- frontend: at least **349 tests**;
+- the ``backend:cli-tests`` step runs the
+  ``tests/test_cli.py`` module in default
+  collection order on every supported host.
+  Order independence is a design goal: every test
+  isolates its runtime home, the conftest's
+  autouse fixtures (settings cache reset, network
+  guard, fake providers) clean up after themselves,
+  and the cross-platform process-identity checks
+  use ``psutil`` instead of the fragile
+  ``os.kill`` / ``subprocess.run`` interleaving
+  that historically required a hand-curated class
+  order on Windows.
 - both `npm audit` runs: **0 vulnerabilities**.
 
 The exact step plan is defined in
@@ -305,15 +506,16 @@ script's test suite are updated in the same change.
 
 ## 7. External release-checklist commands
 
-The ten-stage verifier covers the automated regression
-suite and the lint / format / audit gates. Two
-operator-driven manual commands complement the
-verifier. They are not part of the ten-stage verifier
-(the verifier does not run them); the operator runs
-them as explicit release-checklist steps. Both are
-documented here by their exact command form so the
-release checklist names the scripts the verifier
-docstring references.
+The eleven-stage verifier covers the automated
+regression suite and the lint / format / audit
+gates. Two operator-driven manual commands
+complement the verifier. They are not part of the
+eleven-stage verifier (the verifier does not run
+them); the operator runs them as explicit
+release-checklist steps. Both are documented here
+by their exact command form so the release
+checklist names the scripts the verifier docstring
+references.
 
 ### 7.1 Operator-driven manual migration round-trip confirmation
 
@@ -345,9 +547,9 @@ to pass.
 
 ### 7.2 Smoke validation
 
-The smoke flow is not part of the ten-stage verifier.
-The operator runs the v0.5 integrated smoke
-explicitly:
+The smoke flow is not part of the eleven-stage
+verifier. The operator runs the v0.5 integrated
+smoke explicitly:
 
 ```powershell
 cd backend
@@ -437,7 +639,7 @@ step halts the release.
       `npm run typecheck`, `npm run lint` (with the existing
       max-warnings=0 policy), `npm run build`, and both
       `npm audit` runs are clean.
-- [ ] **Release script runs to completion.** The 10-step plan
+- [ ] **Release script runs to completion.** The 11-step plan
       exits 0.
 - [ ] **End-to-end local smoke passes.** Every primary route
       loads, the diagnostic summary returns 200, the
