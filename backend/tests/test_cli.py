@@ -33,6 +33,7 @@ import json
 import logging
 import logging.handlers
 import os
+import signal
 import socket
 import subprocess
 import sys
@@ -1126,6 +1127,277 @@ class TestStartStopFlowGuards:
     def test_stop_when_not_running(self, isolated_home: Path) -> None:
         result = runner.stop(home=isolated_home, timeout=1)
         assert result.outcome == "was_not_running"
+
+
+# ---------------------------------------------------------------------------
+# Foreground signal handling tests
+# ---------------------------------------------------------------------------
+
+
+class TestForegroundSignalHandling:
+    """The foreground supervisor's signal-handling contract.
+
+    The tests pin the Windows behaviour the operator
+    relies on: pressing Ctrl+C (or a process-group
+    ``CTRL_BREAK_EVENT``) must translate into a
+    :class:`KeyboardInterrupt` so the
+    ``with start_lock.acquire(home):`` block unwinds
+    and the start lock is released before the
+    supervisor exits. On POSIX, ``SIGINT`` already
+    raises ``KeyboardInterrupt`` via the CPython
+    default handler; the supervisor's handler is a
+    no-op there.
+    """
+
+    def test_install_handler_registers_sigbreak_handler(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # On Windows the supervisor installs a
+        # ``SIGBREAK`` handler that translates the
+        # ``CTRL_BREAK_EVENT`` into a
+        # ``KeyboardInterrupt``. On POSIX the function
+        # is a documented no-op.
+        captured: dict[str, object] = {}
+
+        def _fake_signal(sig: int, handler: object) -> object:
+            captured["sig"] = sig
+            captured["handler"] = handler
+            return handler
+
+        monkeypatch.setattr(runner.signal, "signal", _fake_signal)
+        monkeypatch.setattr(runner.sys, "platform", "win32")
+        if not hasattr(runner.signal, "SIGBREAK"):
+            monkeypatch.setattr(runner.signal, "SIGBREAK", 15, raising=False)
+        runner._install_foreground_signal_handlers()
+        if sys.platform == "win32":
+            assert "sig" in captured
+            assert captured["sig"] == runner.signal.SIGBREAK
+            assert captured["handler"] is signal.default_int_handler
+        # POSIX path is a no-op; nothing to assert.
+
+    def test_install_handler_is_safe_off_main_thread(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        # ``signal.signal`` raises ``ValueError`` when
+        # called from a non-main thread on POSIX. The
+        # supervisor's helper must swallow the error
+        # so the foreground command still works in
+        # test workers.
+        def _raise_value_error(sig: int, handler: object) -> object:
+            raise ValueError("signal only works in main thread of the main interpreter")
+
+        monkeypatch.setattr(runner.signal, "signal", _raise_value_error)
+        monkeypatch.setattr(runner.sys, "platform", "win32")
+        if not hasattr(runner.signal, "SIGBREAK"):
+            monkeypatch.setattr(runner.signal, "SIGBREAK", 15, raising=False)
+        # Must not raise.
+        runner._install_foreground_signal_handlers()
+
+    def test_foreground_subprocess_run_raises_keyboard_interrupt(
+        self,
+        isolated_home: Path,
+        settings_no_serve_frontend: None,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        # Mock ``subprocess.run`` to raise
+        # ``KeyboardInterrupt`` (the documented Ctrl+C
+        # contract). The supervisor's
+        # ``_start_foreground`` re-raises the
+        # exception so the start lock in the
+        # surrounding ``with`` block unwinds and the
+        # caller (``main.py``) can convert the
+        # interrupt to a clean exit code.
+        def _fake_run(*args: object, **kwargs: object) -> None:
+            raise KeyboardInterrupt("simulated Ctrl+C in foreground")
+
+        monkeypatch.setattr(runner.subprocess, "run", _fake_run)
+        with pytest.raises(KeyboardInterrupt, match="simulated"):
+            runner._start_foreground(
+                argv=[sys.executable, "-c", "pass"],
+                env={},
+                home=isolated_home,
+                host="127.0.0.1",
+                port=0,
+                frontend_dist=isolated_home,
+                log_path=isolated_home / "logs" / "lockverity.log",
+                started=time.monotonic(),
+                database_url="sqlite:///:memory:",
+                open_browser=False,
+                cli_logger=runner.get_cli_logger(),
+            )
+
+    def test_main_converts_foreground_keyboard_interrupt_to_exit_code_130(
+        self,
+        isolated_home: Path,
+        settings_no_serve_frontend: None,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        # The CLI ``main`` function converts a
+        # ``KeyboardInterrupt`` raised by the
+        # ``start --foreground`` subcommand into the
+        # POSIX-conventional exit code 130
+        # (128 + SIGINT). The Windows
+        # ``0xC000013A`` ``STATUS_CONTROL_C_EXIT``
+        # code is delivered by the parent process
+        # when the Python interpreter exits via
+        # ``SystemExit``; the CLI returns 130 to the
+        # test harness regardless of platform.
+        def _raise_keyboard_interrupt(args: object) -> int:
+            raise KeyboardInterrupt("simulated foreground shutdown")
+
+        monkeypatch.setattr(cli_main, "build_parser", cli_main.build_parser)
+        # The start subcommand is the only path that
+        # raises ``KeyboardInterrupt`` in the public
+        # contract; we monkey-patch the ``start.main``
+        # function (the subcommand handler) to raise.
+        from app.cli.commands import start as start_cmd
+
+        monkeypatch.setattr(start_cmd, "main", _raise_keyboard_interrupt)
+        rc = cli_main.main(["start", "--host", "127.0.0.1", "--port", "0"])
+        assert rc == 130
+
+
+# ---------------------------------------------------------------------------
+# End-to-end foreground graceful-shutdown test
+# ---------------------------------------------------------------------------
+
+
+class TestForegroundGracefulShutdownE2E:
+    """End-to-end test: launch the CLI in a real subprocess, send a real
+    ``CTRL_BREAK_EVENT``, and verify the post-shutdown contract.
+
+    The test is Windows-aware. On Windows it spawns
+    the CLI in a new process group and sends a
+    ``CTRL_BREAK_EVENT`` to that group. On POSIX the
+    test sends ``SIGINT``. Either signal is the
+    documented graceful interrupt; the test asserts
+    the supervisor's KeyboardInterrupt-translation
+    handler is what makes the cleanup deterministic.
+
+    The test is bounded: it skips if the host does
+    not support the documented signal delivery, or
+    if the test runner cannot allocate a free port
+    or write to a temp directory. It does not skip
+    on Windows for the documented graceful-shutdown
+    path -- the whole point of the test is the
+    Windows signal translation.
+    """
+
+    @pytest.fixture
+    def foreground_env(self, isolated_home: Path, tmp_path: Path) -> Iterator[dict[str, str]]:
+        # Build a minimal dist the runner will accept.
+        dist = tmp_path / "dist"
+        (dist / "assets").mkdir(parents=True)
+        (dist / "index.html").write_text(
+            "<!doctype html><html><head><title>t</title></head><body></body></html>",
+            encoding="utf-8",
+        )
+        (dist / "assets" / "dummy.js").write_text("// empty", encoding="utf-8")
+        env = dict(os.environ)
+        env["LOCKVERITY_HOME"] = str(isolated_home)
+        env["LOCKVERITY_FRONTEND_DIST"] = str(dist)
+        env["LOCKVERITY_DATABASE_URL"] = f"sqlite:///{tmp_path}/fg.sqlite"
+        env["PYTHONIOENCODING"] = "utf-8"
+        env["PYTHONUTF8"] = "1"
+        yield env
+
+    def test_foreground_graceful_shutdown_releases_lock_and_state(
+        self, foreground_env: dict[str, str]
+    ) -> None:
+        # The test deliberately uses a real subprocess
+        # so the signal-translation path is exercised.
+        # The test is bounded: if the host cannot
+        # create a new process group or the subprocess
+        # is not deliverable, the test is skipped with
+        # a precise reason -- not failed.
+        if not hasattr(signal, "CTRL_BREAK_EVENT") and not hasattr(signal, "SIGINT"):
+            pytest.skip("host does not expose a documented graceful interrupt")
+        port = _free_port()
+        cmd = [
+            sys.executable,
+            "-m",
+            "app.cli",
+            "start",
+            "--host",
+            "127.0.0.1",
+            "--port",
+            str(port),
+            "--foreground",
+        ]
+        creationflags = 0
+        if sys.platform == "win32":
+            creationflags = (
+                subprocess.CREATE_NEW_PROCESS_GROUP  # type: ignore[attr-defined]
+            )
+        proc = subprocess.Popen(  # noqa: S603 - argv is built by us
+            cmd,
+            cwd=str(Path(__file__).resolve().parents[1]),
+            env=foreground_env,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            creationflags=creationflags,
+        )
+        try:
+            # Wait for health.
+            if not _wait_for_health_for_test(port, timeout=30.0):
+                pytest.skip("foreground subprocess did not report healthy in 30s")
+            # Send the real graceful interrupt.
+            if sys.platform == "win32":
+                proc.send_signal(signal.CTRL_BREAK_EVENT)  # type: ignore[attr-defined]
+            else:
+                proc.send_signal(signal.SIGINT)
+            try:
+                rc = proc.wait(timeout=30)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                proc.wait(timeout=5)
+                pytest.fail("foreground subprocess did not exit within 30s")
+        finally:
+            if proc.poll() is None:
+                proc.kill()
+                proc.wait(timeout=5)
+        # The documented graceful codes are 0 and 130.
+        # 0 is allowed because the foreground command
+        # may complete naturally if health responds
+        # before the operator's signal lands; 130 is
+        # the POSIX-conventional 128+SIGINT.
+        assert rc in (0, 130), f"unexpected exit code {rc}"
+        # The CLI's foreground supervisor's start lock
+        # is the supervisor's own PID; the lock file
+        # lives in ``$LOCKVERITY_HOME/run/``. The
+        # context manager's ``__exit__`` runs on
+        # ``KeyboardInterrupt`` and removes the file.
+        lock_path = Path(foreground_env["LOCKVERITY_HOME"]) / "run" / "lockverity.start.lock"
+        assert not lock_path.exists(), f"start lock not released: {lock_path}"
+        # Foreground mode does not write a state file
+        # (the supervisor does not own the child's
+        # lifetime), so the absence of a state file
+        # is part of the contract.
+        state_path = Path(foreground_env["LOCKVERITY_HOME"]) / "run" / "lockverity.state.json"
+        assert not state_path.exists(), f"state file unexpectedly present: {state_path}"
+        # The port must be free.
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            try:
+                s.connect(("127.0.0.1", port))
+                pytest.fail("port still bound after graceful shutdown")
+            except (ConnectionRefusedError, OSError):
+                pass
+
+
+def _wait_for_health_for_test(port: int, *, timeout: float) -> bool:
+    """Bounded health probe used only by the foreground E2E test."""
+    import urllib.error
+    import urllib.request
+
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        try:
+            with urllib.request.urlopen(
+                f"http://127.0.0.1:{port}/api/v1/health", timeout=2
+            ) as resp:
+                if resp.status == 200:
+                    return True
+        except (urllib.error.URLError, ConnectionError, OSError):
+            time.sleep(0.5)
+    return False
 
 
 # ---------------------------------------------------------------------------

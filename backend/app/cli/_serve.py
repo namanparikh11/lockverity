@@ -25,7 +25,9 @@ documented runner is :mod:`app.cli.runner`.
 from __future__ import annotations
 
 import argparse
+import contextlib
 import logging
+import signal
 import sys
 from collections.abc import Sequence
 
@@ -141,6 +143,30 @@ def main(argv: Sequence[str] | None = None) -> int:
         parsed.host,
         parsed.port,
     )
+    # Windows ``CTRL_BREAK_EVENT`` (sent by the
+    # supervisor or by an external signal delivery)
+    # arrives as :data:`signal.SIGBREAK`, which the
+    # CPython default action terminates without
+    # raising :class:`KeyboardInterrupt`. The Uvicorn
+    # signal handler installed by ``uvicorn.run`` only
+    # translates ``SIGINT`` and ``SIGTERM``; ``SIGBREAK``
+    # is platform-specific and would silently bypass
+    # the documented graceful-shutdown path. The
+    # handler below maps ``SIGBREAK`` to ``SIGINT`` so
+    # the standard Uvicorn graceful shutdown runs and
+    # the lifespan, the application shutdown, the
+    # log flush, and the exit-code translation all
+    # behave consistently with the operator pressing
+    # Ctrl+C in a console.
+    if sys.platform == "win32" and hasattr(signal, "SIGBREAK"):
+        # ``SIGBREAK`` can only be installed by the
+        # main thread on Windows. ``ValueError`` covers
+        # a test worker thread; ``OSError`` covers a
+        # non-main context. Either way, the graceful
+        # path still works for ``SIGINT`` / ``SIGTERM``
+        # which Uvicorn already handles.
+        with contextlib.suppress(ValueError, OSError):
+            signal.signal(signal.SIGBREAK, signal.default_int_handler)  # type: ignore[attr-defined]
     # Defer the heavy import to the function body so
     # the import-time cost of uvicorn is not paid by
     # the supervisor or the unit tests.

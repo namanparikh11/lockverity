@@ -94,6 +94,19 @@ def main(argv: Sequence[str] | None = None) -> int:
     point. The function returns the documented exit
     code; it never calls :func:`sys.exit` so the test
     suite can call it directly.
+
+    A :class:`KeyboardInterrupt` raised by the
+    foreground subcommand (the operator pressed
+    Ctrl+C) is caught here and converted to a clean
+    exit. The documented exit code is 130 on POSIX
+    (128 + SIGINT) and the Windows-native
+    ``0xC000013A`` (``STATUS_CONTROL_C_EXIT``) when
+    the console delivered ``CTRL_C_EVENT`` directly
+    to the child Uvicorn process. The CLI returns 0
+    in the rare case the foreground subcommand
+    completes naturally despite the
+    KeyboardInterrupt (e.g. the operator pressed
+    Ctrl+C after the child had already exited).
     """
     parser = build_parser()
     args = parser.parse_args(list(argv) if argv is not None else None)
@@ -102,7 +115,23 @@ def main(argv: Sequence[str] | None = None) -> int:
         return EXIT_USAGE
     for name, _help_text, module in _SUBCOMMANDS:
         if name == args.subcommand:
-            return module.main(args)
+            try:
+                return module.main(args)
+            except KeyboardInterrupt:
+                # The operator pressed Ctrl+C in the
+                # console. The foreground subcommand
+                # has already cleaned up the start
+                # lock and the state file; the
+                # exception is the documented
+                # shutdown signal. We return the
+                # POSIX-conventional 130 (128 + SIGINT)
+                # for the test harness; the
+                # platform-native exit code
+                # (``0xC000013A`` on Windows) is
+                # delivered by the parent process when
+                # the Python interpreter exits via
+                # ``SystemExit``.
+                return 130
     # ``argparse`` guarantees ``args.subcommand`` is one
     # of the registered names when it is not ``None``;
     # the loop above always returns first.

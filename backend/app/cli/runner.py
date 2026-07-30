@@ -72,6 +72,7 @@ from __future__ import annotations
 import contextlib
 import json
 import os
+import signal
 import socket
 import subprocess
 import sys
@@ -721,6 +722,45 @@ def _launch_detached(
     return handle, log_handle
 
 
+def _install_foreground_signal_handlers() -> None:
+    """Install signal handlers that translate ``SIGBREAK`` to ``SIGINT``.
+
+    On Windows, the CPython default action for
+    :data:`signal.SIGBREAK` is to terminate the
+    process without raising
+    :class:`KeyboardInterrupt`. The supervisor is a
+    foreground TTY application; if the operator
+    presses Ctrl+C in the console the Windows console
+    delivers :data:`signal.CTRL_C_EVENT`, which CPython
+    already maps to ``KeyboardInterrupt``. The
+    :data:`signal.CTRL_BREAK_EVENT` variant arrives
+    only when the supervisor is launched in a new
+    process group (e.g. by an external test
+    harness or by ``START /B``). The handler below
+    maps ``SIGBREAK`` to the documented
+    :data:`signal.SIGINT` action so the
+    :class:`KeyboardInterrupt` unwind runs and the
+    ``with start_lock.acquire(home):`` block releases
+    the lock before the supervisor exits.
+
+    On POSIX the function is a no-op because
+    ``SIGINT`` already raises ``KeyboardInterrupt``
+    via the CPython default handler.
+    """
+    if sys.platform != "win32" or not hasattr(signal, "SIGBREAK"):
+        return
+    # ``default_int_handler`` is the CPython helper
+    # that raises ``KeyboardInterrupt``; installing
+    # it for ``SIGBREAK`` unifies the Windows
+    # Ctrl+C and Ctrl+Break behaviour with the
+    # POSIX SIGINT behaviour. ``SIGBREAK`` can only
+    # be installed by the main thread on Windows;
+    # ``ValueError`` covers a test worker thread
+    # and ``OSError`` covers a non-main context.
+    with contextlib.suppress(ValueError, OSError):
+        signal.signal(signal.SIGBREAK, signal.default_int_handler)  # type: ignore[attr-defined]
+
+
 def _start_foreground(
     *,
     argv: list[str],
@@ -738,24 +778,60 @@ def _start_foreground(
     """Run the server in the current TTY (no daemonisation).
 
     Foreground mode is intended for debugging. The
-    process is *not* detached, so Ctrl+C propagates to
-    the child naturally. The state file is *not*
+    process is *not* detached, so Ctrl+C propagates
+    to the child naturally. The state file is *not*
     written in foreground mode because the CLI does
     not own the lifetime of the child.
+
+    The supervisor installs a ``SIGBREAK`` handler
+    that translates the Windows ``CTRL_BREAK_EVENT``
+    into a :class:`KeyboardInterrupt`. The
+    interrupt unwinds the
+    ``with start_lock.acquire(home):`` block in the
+    caller so the start lock is released, the
+    child is reaped, the port is freed, and the
+    log file is flushed. A
+    :class:`KeyboardInterrupt` raised by the
+    foreground ``subprocess.run`` call is caught
+    here so the start lock and the state file are
+    cleaned up before the supervisor exits with the
+    documented exit code (130 = 128 + SIGINT on
+    POSIX, or 0xC000013A on Windows when the
+    console delivered ``CTRL_C_EVENT`` directly).
     """
-    result = subprocess.run(
-        argv,
-        env=env,
-        cwd=str(Path(__file__).resolve().parents[2]),
-    )
+    _install_foreground_signal_handlers()
+    result: subprocess.CompletedProcess[str] | None = None
+    try:
+        result = subprocess.run(
+            argv,
+            env=env,
+            cwd=str(Path(__file__).resolve().parents[2]),
+        )
+    except KeyboardInterrupt:
+        # The operator pressed Ctrl+C in the console.
+        # ``subprocess.run`` raised ``KeyboardInterrupt``
+        # because the child was killed by the same
+        # signal. The child has already exited; the
+        # lock and the state file are cleaned up by
+        # the surrounding ``with`` block in the
+        # caller. We re-raise so the documented
+        # KeyboardInterrupt exit code (130 on POSIX,
+        # ``0xC000013A`` on Windows) propagates to
+        # the operator. The caller (``start()``) does
+        # not catch this exception; it propagates up
+        # to the CLI main entry point which converts
+        # it to ``SystemExit(130)``.
+        cli_logger.info("foreground: KeyboardInterrupt received; cleaning up")
+        raise
     elapsed = time.monotonic() - started
     # The state dataclass is required by the typed
     # return; in foreground mode the PID is the
     # child's PID, but the operator owns it. We still
     # record the state in a transient form so the
     # caller has a well-typed result.
+    returncode = result.returncode if result is not None else 0
     fake_state = make_state(
-        pid=result.returncode if isinstance(result.returncode, int) else 0 or os.getpid(),
+        pid=returncode if isinstance(returncode, int) else 0 or os.getpid(),
         created_at=_now_iso(),
         host=host,
         port=port,
@@ -771,7 +847,7 @@ def _start_foreground(
         state=fake_state,
         process_handle=None,
         elapsed_seconds=elapsed,
-        health_check_ok=result.returncode == 0,
+        health_check_ok=returncode == 0,
     )
 
 
