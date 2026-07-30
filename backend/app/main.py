@@ -1,15 +1,26 @@
 """Lockverity FastAPI application entry point.
 
 Wires the structured error envelope, request-id middleware, CORS,
-and every API router under the configured prefix.
+and every API router under the configured prefix. When the
+``LOCKVERITY_SERVE_FRONTEND`` flag is enabled in a production
+environment, the same process also hosts the built React UI
+from the configured dist directory (single-port runtime).
 
-Run locally::
+Run locally (two-port dev workflow, unchanged)::
 
     uvicorn app.main:app --reload
 
+Run in single-port production mode::
+
+    LOCKVERITY_ENVIRONMENT=production \\
+    LOCKVERITY_SERVE_FRONTEND=true \\
+    python -m uvicorn app.main:app --host 127.0.0.1 --port 8000
+
 The app does not serve any user-uploaded content, does not expose
-the workspace root, and does not proxy to external providers in
-v0.1. The static frontend, when present, is hosted separately.
+the workspace root, and does not proxy to external providers.
+The static frontend, when hosted by this process, is a
+read-only mount of a pre-built Vite output; the backend never
+executes npm or runs the Vite build itself.
 """
 
 from __future__ import annotations
@@ -27,6 +38,7 @@ from app.api import api_router
 from app.core.config import get_settings
 from app.core.errors import register_exception_handlers
 from app.db import engine
+from app.static_frontend import FrontendDistError, mount_frontend
 from app.utils.datetime import isoformat_utc, utcnow
 
 logger = logging.getLogger("lockverity")
@@ -96,6 +108,25 @@ def create_app() -> FastAPI:
 
     register_exception_handlers(app)
     app.include_router(api_router, prefix=settings.api_prefix)
+
+    # Single-port production frontend serving. The flag is
+    # validated in :class:`Settings` to refuse the
+    # non-production environments. The dist validation is
+    # strict: a missing or stale build aborts startup so the
+    # operator notices immediately instead of serving a
+    # half-broken SPA.
+    if settings.serve_frontend:
+        dist_path = settings.frontend_dist_path
+        try:
+            mount_frontend(app, dist_path)
+        except FrontendDistError as exc:
+            logger.error("frontend dist validation failed: %s", exc)
+            raise
+        logger.info(
+            "serving built frontend from %s on the API host",
+            dist_path,
+        )
+
     return app
 
 

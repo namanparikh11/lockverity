@@ -8,6 +8,7 @@ strictly; development configuration has safe defaults.
 from __future__ import annotations
 
 from functools import lru_cache
+from pathlib import Path
 from typing import Literal
 
 from pydantic import Field, field_validator
@@ -105,6 +106,27 @@ class Settings(BaseSettings):
         default="Evidence-first software supply-chain assurance",
     )
 
+    # --- Single-port production frontend serving ---
+    # When ``serve_frontend`` is true, the FastAPI app hosts the
+    # built React UI from the same host and port as the API. The
+    # feature is opt-in: the default value is false so existing
+    # development and test workflows are unchanged. Operators
+    # enable the feature by setting ``LOCKVERITY_SERVE_FRONTEND=true``
+    # (or, in a non-default ``.env``, the same key with a true
+    # value) and by ensuring the Vite build output exists at the
+    # configured ``frontend_dist`` path before starting the
+    # application. The default path resolves to ``frontend/dist``
+    # relative to the repository root (not the current working
+    # directory) so the resolution is deterministic across
+    # process invocation paths.
+    serve_frontend: bool = Field(default=False)
+    # The default dist path is relative to the repository root.
+    # Operators may provide an absolute path to override the
+    # default. The path is validated at startup: a missing
+    # ``index.html`` or a non-existent directory is a fatal
+    # startup error so a stale build is never served silently.
+    frontend_dist: str = Field(default="frontend/dist")
+
     @field_validator("cors_origins", mode="before")
     @classmethod
     def _split_cors_origins(cls, value: object) -> object:
@@ -159,6 +181,48 @@ class Settings(BaseSettings):
             raise ValueError("github_token is unreasonably long.")
         return stripped
 
+    @field_validator("frontend_dist")
+    @classmethod
+    def _frontend_dist_must_not_contain_traversal(cls, value: str) -> str:
+        # The dist path is used as a static-file root. Path
+        # traversal segments or backslashes would let an
+        # attacker steer the resolver outside the intended
+        # directory. The check is conservative: reject any
+        # ``..`` segment (forward or backslash-separated) and
+        # any absolute path that resolves outside the
+        # repository layout. Absolute paths are still allowed
+        # for operator overrides; the resolver performs the
+        # containment check at startup.
+        if not value or not value.strip():
+            raise ValueError("frontend_dist must be a non-empty path.")
+        normalised = value.strip()
+        # Reject ``..`` traversal segments regardless of
+        # separator so a Windows-style ``..\\`` cannot bypass
+        # a forward-slash check.
+        if ".." in normalised.replace("\\", "/").split("/"):
+            raise ValueError("frontend_dist must not contain '..' traversal segments.")
+        return normalised
+
+    @field_validator("serve_frontend")
+    @classmethod
+    def _serve_frontend_production_only(cls, value: bool, info) -> bool:
+        # The single-port runtime is intended for production
+        # deployment. In development and test environments the
+        # Vite dev server is the supported workflow; the
+        # backend should never try to serve a Vite build
+        # output in those modes. This is defence in depth: an
+        # operator who sets the flag in development gets a
+        # clear startup error rather than a confusing
+        # partially-served UI.
+        env = info.data.get("environment", "development")
+        if value and env != "production":
+            raise ValueError(
+                "LOCKVERITY_SERVE_FRONTEND=true is only supported when "
+                "LOCKVERITY_ENVIRONMENT=production. Use the Vite dev "
+                "server in development and test."
+            )
+        return value
+
     @property
     def is_production(self) -> bool:
         return self.environment == "production"
@@ -166,6 +230,37 @@ class Settings(BaseSettings):
     @property
     def is_development(self) -> bool:
         return self.environment == "development"
+
+    @property
+    def repo_root(self) -> Path:
+        """Absolute path to the repository root.
+
+        The repository root is the parent of the ``backend``
+        package directory. The application always resolves
+        relative paths against this root so a frontend dist
+        at ``frontend/dist`` works the same way regardless of
+        the operator's current working directory.
+        """
+        # ``config.py`` lives at ``backend/app/core/config.py``;
+        # parents[0] is ``core/``, parents[1] is ``app/``,
+        # parents[2] is ``backend/``, parents[3] is the repo
+        # root.
+        return Path(__file__).resolve().parents[3]
+
+    @property
+    def frontend_dist_path(self) -> Path:
+        """Absolute path to the frontend dist directory.
+
+        Relative paths are resolved against the repository
+        root. Absolute paths are returned as-is. The result
+        is not validated for existence here; the
+        ``static_frontend`` module performs the startup
+        validation when serving is enabled.
+        """
+        candidate = Path(self.frontend_dist).expanduser()
+        if not candidate.is_absolute():
+            candidate = (self.repo_root / candidate).resolve()
+        return candidate
 
 
 @lru_cache(maxsize=1)

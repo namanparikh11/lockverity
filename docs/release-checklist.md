@@ -124,6 +124,131 @@ operator's convenience.
 | Demo loader | `python scripts/load_demo.py --reset-demo-db` |
 | Release validation | `python scripts/verify_release.py` |
 
+## 4a. Single-port production runtime (v2.1 Part B1)
+
+The v2.1 Part B1 milestone adds an opt-in single-port
+production runtime. The FastAPI app can host the built
+React UI from the same host and port as the API when
+``LOCKVERITY_SERVE_FRONTEND=true`` is set in a production
+environment. The two-port development workflow above is
+unchanged.
+
+### Build before start
+
+The backend never executes npm or runs the Vite build.
+The build is a separate, dependency-light Python step:
+
+```powershell
+python scripts/prepare_frontend_dist.py
+```
+
+The script verifies the Node.js toolchain
+(``node >= 22.22.0``), runs ``npm ci`` and ``npm run build``,
+and confirms the Vite output exists at
+``frontend/dist/index.html`` along with the approved favicon
+and brand assets. The ``--skip-install`` flag skips
+``npm ci`` for repeated local builds.
+
+### Single-port start command
+
+```powershell
+$env:LOCKVERITY_ENVIRONMENT = "production"
+$env:LOCKVERITY_SERVE_FRONTEND = "true"
+cd backend
+.\.venv\Scripts\python.exe -m uvicorn app.main:app --host 127.0.0.1 --port 8000
+```
+
+The configuration settings:
+
+| Setting | Default | Notes |
+| --- | --- | --- |
+| ``LOCKVERITY_SERVE_FRONTEND`` | ``false`` | Opt-in. Refused in development and test environments. |
+| ``LOCKVERITY_FRONTEND_DIST`` | ``frontend/dist`` | Relative to the repository root, not the CWD. Absolute paths are accepted. |
+
+### Route order
+
+The single-port runtime serves the following routes from
+the configured host and port:
+
+1. ``/openapi.json`` and ``/docs`` (FastAPI's built-in
+   docs, registered first so they take priority).
+2. ``/api/v1/*`` (every API route under the configured
+   prefix).
+3. Static assets: ``/assets/{file_path}``, ``/favicon.ico``,
+   the versioned favicon PNGs, ``/apple-touch-icon.png``,
+   and ``/brand/{file_path}``.
+4. The SPA fallback at ``/{full_path:path}`` serves
+   ``index.html`` for extension-less, non-API, non-dotfile
+   paths. File-like requests and API-like paths receive a
+   clean 404 instead of the React shell.
+
+### Cache and security headers
+
+Every response carries the documented defensive headers:
+
+- ``X-Content-Type-Options: nosniff``
+- ``Referrer-Policy: same-origin``
+- ``X-Frame-Options: DENY``
+- ``X-Request-Id`` (the existing correlation header)
+
+The cache policy:
+
+- ``index.html``: ``Cache-Control: no-cache, no-store,
+  must-revalidate`` (every navigation reloads the manifest).
+- Hashed Vite assets (``assets/<name>-<hash>.<ext>``):
+  ``Cache-Control: public, max-age=31536000, immutable``.
+- Favicon and brand PNGs: ``Cache-Control: public,
+  max-age=86400`` (the ``?v=3`` query in ``index.html``
+  busts the cache when the assets change).
+
+### Path-traversal protection
+
+The serving rejects:
+
+- ``..`` segments (forward-slash or backslash).
+- URL-encoded traversal (``%2e%2e``, ``%2e%2e%2f``,
+  ``%2e%2e%5c``).
+- Dotfile probes (``.env``, ``.git/HEAD``).
+- Any file outside the configured dist directory
+  (verified with ``Path.is_relative_to`` after
+  symlink resolution).
+
+The serving cannot expose workspace files. The
+``workspace_root`` setting is unrelated to the dist;
+the static-file root is the configured dist directory
+only.
+
+### HTTPS / TLS
+
+The single-port runtime does not terminate TLS.
+HTTPS/TLS must be provided by a reverse proxy or the
+packaged desktop boundary when the application is
+exposed beyond localhost. The reverse proxy must
+forward the original host and protocol to the backend
+(via ``X-Forwarded-Proto`` and ``X-Forwarded-Host``)
+so the application can apply the correct
+security-policy response headers.
+
+### Build-before-start requirement
+
+The backend refuses to start when
+``LOCKVERITY_SERVE_FRONTEND=true`` and the configured
+dist directory is missing or missing ``index.html``.
+A stale or partial build aborts startup so the operator
+notices immediately instead of serving a half-broken
+SPA. The error message references
+``scripts/prepare_frontend_dist.py``.
+
+### Repository-controlled code is never executed
+
+The serving is read-only. The backend never invokes
+``npm``, never runs the Vite build, and never writes to
+the dist directory. Build preparation is the operator's
+explicit step. The repository-controlled code path
+(executing analyzed repositories) is unchanged: the
+backend does not execute any code from the dist or the
+uploaded archives.
+
 ## 5. Demo loader
 
 The demo loader is the only safe way to seed a fresh

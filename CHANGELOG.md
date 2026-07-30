@@ -5,14 +5,106 @@ follow [Semantic Versioning](https://semver.org/). Lockverity is
 pre-1.0 in the sense that the public API may evolve; the
 underlying data model and Alembic migrations are stable.
 
-## v2.1.0 — Local runtime brand polish (current)
+## v2.1.0 — Local runtime brand polish and single-port production runtime (current)
 
 A focused, additive release that ships the v2.1 Part A
-milestone: original brand assets, favicon closure, a
+milestone (original brand assets, favicon closure,
 concise About page, Findings filter alignment, and
-bounded visual polish. No backend behaviour change, no
-new provider, no new export standard, no new evidence
-contract, no migration.
+bounded visual polish) and the v2.1 Part B1 milestone
+(single-port production runtime).
+
+### v2.1 Part B1: single-port production runtime
+
+The FastAPI app can now host the built React UI from the
+same host and port as the API when
+``LOCKVERITY_SERVE_FRONTEND=true`` is set in a production
+environment. The two-port development workflow (Vite on
+5173, FastAPI on 8000) is unchanged.
+
+- **New configuration settings.** ``LOCKVERITY_SERVE_FRONTEND``
+  (default ``false``, refused in development and test
+  environments) and ``LOCKVERITY_FRONTEND_DIST`` (default
+  ``frontend/dist``, relative to the repository root).
+  Absolute paths are accepted. The settings validator
+  rejects ``..`` traversal segments.
+- **Build preparation script.** ``scripts/prepare_frontend_dist.py``
+  is a dependency-light Python step that verifies the
+  Node.js toolchain (``node >= 22.22.0``), runs
+  ``npm ci`` and ``npm run build``, and confirms the
+  Vite output exists with the required artefacts. The
+  ``--skip-install`` flag skips ``npm ci`` for repeated
+  local builds. The backend never executes npm itself.
+- **Single-port routing.** The route order is: (1) existing
+  API and operational routes, (2) docs and OpenAPI,
+  (3) static assets (``/assets/``, ``/favicon.ico``,
+  versioned favicon PNGs, ``/apple-touch-icon.png``,
+  ``/brand/``), (4) SPA fallback that serves
+  ``index.html`` for extension-less, non-API, non-dotfile
+  paths. API, docs, health, and diagnostics routes are
+  never shadowed.
+- **Cache and security headers.** Every response carries
+  ``X-Content-Type-Options: nosniff``,
+  ``Referrer-Policy: same-origin``, ``X-Frame-Options: DENY``,
+  and the existing ``X-Request-Id`` correlation header.
+  ``index.html`` is served with
+  ``no-cache, no-store, must-revalidate`` so every
+  navigation reloads the manifest. Hashed Vite assets
+  use ``public, max-age=31536000, immutable``. Favicon
+  and brand PNGs use ``public, max-age=86400``.
+- **Path-traversal protection.** The serving rejects
+  ``..`` segments (forward-slash or backslash), URL-
+  encoded traversal, dotfile probes, and any file
+  outside the configured dist directory. The serving
+  cannot expose workspace files, databases, logs, or
+  arbitrary filesystem content. The resolver performs
+  a containment check with ``Path.is_relative_to`` after
+  symlink resolution.
+- **Build-before-start requirement.** The dist is
+  validated at startup. A missing or stale build aborts
+  the process with a clear error so the operator
+  notices immediately. The error message references
+  ``scripts/prepare_frontend_dist.py``.
+- **HTTPS / TLS boundary.** The runtime does not
+  terminate TLS. HTTPS/TLS must be provided by a reverse
+  proxy or the packaged desktop boundary when the
+  application is exposed beyond localhost.
+- **Repository-controlled code is never executed.** The
+  serving is read-only. The backend never invokes
+  ``npm``, never runs the Vite build, and never writes to
+  the dist directory. The repository-controlled code
+  path (executing analyzed repositories) is unchanged.
+- **75 new backend tests.** Every documented behaviour
+  is guarded: serving-disabled preserves API-only
+  behaviour, valid synthetic dist, ``/`` serves
+  ``index.html``, nested SPA route serves ``index.html``,
+  backend routes are not shadowed, docs and OpenAPI are
+  not shadowed, missing static asset returns 404,
+  unknown API-like route does not return HTML, favicon
+  and brand PNG assets are served, correct MIME types,
+  index cache policy, hashed-asset immutable caching,
+  path traversal rejection, encoded traversal rejection,
+  backslash traversal rejection, dotfile probing
+  rejection, missing dist startup failure, missing
+  index startup failure, absolute dist override, and
+  build-preparation output verification.
+- **Documentation update.** ``docs/release-checklist.md``
+  adds a "Single-port production runtime" section that
+  documents the build-before-start requirement, the
+  configuration settings, the default and override dist
+  paths, the route order, the cache and security
+  headers, the path-traversal protections, the
+  HTTPS/TLS boundary, the deep-link behaviour, the
+  missing-or-stale dist troubleshooting, the static-
+  serving cannot expose workspace files invariant, and
+  the repository-controlled code is never executed
+  invariant.
+
+### v2.1 Part A: original brand assets, favicon closure, concise About, Findings filter grid
+
+A focused, additive release that ships the v2.1 Part A
+milestone: original brand assets, favicon closure,
+concise About page, Findings filter alignment, and
+bounded visual polish.
 
 - **Original Lockverity mark.** v2.1 ships a hand-authored
   SVG brand mark in ``frontend/public/brand/``:
