@@ -106,13 +106,12 @@ SignedUninstaller=no
 AppMutex={#MyAppId},Global\{#MyAppId}
 
 ; Surface any install-time error instead of silently exiting
-; with a generic code. Note the capital L in ``Line`` — the
-; [Setup] directive is ``ShowCmdLineHelp`` (yes/no) and Inno
-; Setup directives are case-sensitive; the previously committed
-; ``ShowCmdlineHelp=yes`` was silently rejected by ISCC and the
-; default (yes) is what was actually in effect, so the only real
-; fix is the spelling.
-ShowCmdLineHelp=yes
+; with a generic code. (There is no ``ShowCmdLineHelp`` [Setup]
+; directive in Inno Setup 6.7.3 — that name is from an older
+; Inno Setup version and the compiler reports it as
+; ``Unrecognized [Setup] section directive``. The default
+; behavior in 6.7.3 already prints the /HELP /? summary when
+; Setup is run with no arguments, which is what we want.)
 ; Non-blocking error UI for the silent installer; the build
 ; script captures the install log separately.
 SetupLogging=yes

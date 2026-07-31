@@ -310,15 +310,17 @@ class TestInstallerSourceContract:
             "use SignedUninstaller=no and leave SignTool undeclared"
         )
 
-    def test_setup_section_directive_spelling(self) -> None:
-        # Regression: a stray ``ShowCmdlineHelp=yes`` (lowercase
-        # ``l``) was committed and the compiler reported
+    def test_no_nonexistent_showcmdlinehelp_directive(self) -> None:
+        # Regression: a stray ``ShowCmdlineHelp=yes`` was committed
+        # and the compiler reported
         # ``Unrecognized [Setup] section directive "ShowCmdlineHelp"``.
-        # Inno Setup directives are case-sensitive; the canonical
-        # name is ``ShowCmdLineHelp`` (capital ``L``). The default
-        # is already ``yes`` so the directive is cosmetic, but the
-        # spelling must be exact. Strip comment lines so explanatory
-        # prose does not trip the negative assertion.
+        # There is no ``ShowCmdLineHelp`` [Setup] directive in
+        # Inno Setup 6.7.3 at all — that name is a holdover from a
+        # different version. The default behavior in 6.7.3 already
+        # prints the /HELP /? summary when Setup is run with no
+        # arguments, so the directive is neither necessary nor
+        # accepted. Strip comment lines so explanatory prose does
+        # not trip the negative assertion.
         code_lines = [
             line
             for line in _iss_text().splitlines()
@@ -326,12 +328,14 @@ class TestInstallerSourceContract:
         ]
         code_text = "\n".join(code_lines)
         assert "ShowCmdlineHelp" not in code_text, (
-            "Installer source must use ``ShowCmdLineHelp`` (capital "
-            "``L``), not ``ShowCmdlineHelp``; the [Setup] directive "
-            "is case-sensitive"
+            "Installer source must not declare a ShowCmdlineHelp "
+            "directive — it does not exist in Inno Setup 6.7.3"
         )
-        assert "ShowCmdLineHelp" in code_text, (
-            "Installer source should declare ShowCmdLineHelp=yes with the canonical spelling"
+        assert "ShowCmdLineHelp" not in code_text, (
+            "Installer source must not declare a ShowCmdLineHelp "
+            "directive either — it does not exist in Inno Setup "
+            "6.7.3; the default behavior already prints the /HELP "
+            "summary when Setup is run with no arguments"
         )
 
     def test_no_python_or_node_required(self) -> None:
