@@ -315,17 +315,14 @@ def _build_installer(
     work_dir.mkdir(parents=True, exist_ok=True)
     # ``ISCC`` writes its build log to ``{app}\\`` by default.
     # The /OutputBaseFilename flag controls the final exe name.
+    # AppId and AppVersion are taken from the .iss source; they
+    # are NOT command-line flags (``/AppId`` and ``/AppVersion``
+    # are not valid ISCC options). The committed .iss is the
+    # single source of truth for both values.
     cmd: list[str] = [
         str(iscc),
         "/OutputBaseFilename=Lockverity-2.1.0-windows-x64-setup",
         f"/OutputDir={output_dir}",
-        f"/AppId={STABLE_APP_ID}",
-        f"/AppVersion={APP_VERSION}",
-        # The Inno Setup ``[#define MyAppVersion]`` is hard-coded
-        # in the committed ``.iss`` file. We pass it again as a
-        # defence in depth: if a maintainer forgets to update
-        # the .iss, ISCC will fail with a version-mismatch
-        # diagnostic.
         str(ISS_SOURCE),
     ]
     _log("iscc", f"running {iscc}")
