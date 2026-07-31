@@ -133,7 +133,16 @@ class TestFrozenMode:
         assert (path / "index.html").is_file()
 
     def test_alembic_paths_frozen(self, frozen_bundle: Path) -> None:
-        assert runtime_paths.alembic_config_path() == frozen_bundle / "alembic.ini"
+        # The frozen layout places ``alembic.ini`` at
+        # ``<frozen_root>/alembic/cfg/alembic.ini`` to
+        # avoid the PyInstaller prefix-collision
+        # between the ``alembic`` directory entry and
+        # an ``alembic.ini`` file entry. The test
+        # mirrors the documented v2.1 Part B3A
+        # layout.
+        assert (
+            runtime_paths.alembic_config_path() == frozen_bundle / "alembic" / "cfg" / "alembic.ini"
+        )
         assert runtime_paths.alembic_versions_dir() == frozen_bundle / "alembic" / "versions"
 
     def test_favicon_path_frozen(self, frozen_bundle: Path) -> None:

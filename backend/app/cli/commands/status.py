@@ -42,6 +42,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from pathlib import Path
 
 from app.cli import runner
 from app.cli.home import resolve_home
@@ -71,8 +72,16 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     )
 
 
-def _build_payload(state, identity, health) -> dict[str, object]:
-    """Return the JSON-serialisable status payload."""
+def _build_payload(state, identity, health, *, home: Path) -> dict[str, object]:
+    """Return the JSON-serialisable status payload.
+
+    The ``home`` argument is the resolved runtime
+    home the command was invoked with; the
+    ``state_file`` key is the on-disk path of the
+    state file under that home so the operator can
+    verify the home they passed matches the home the
+    process is using.
+    """
     status_value = _status_to_string(identity)
     payload: dict[str, object] = {
         "status": status_value,
@@ -88,13 +97,22 @@ def _build_payload(state, identity, health) -> dict[str, object]:
         "started_at": state.started_at if state is not None else None,
         "uptime": (runner.format_uptime(state.created_at) if state is not None else None),
         "health": health,
-        "state_file": str(state_file_path(_resolve_home_for_status())),
+        "state_file": str(state_file_path(home)),
     }
     return payload
 
 
 def _resolve_home_for_status():
-    """Return the home used for ``state_file`` path rendering."""
+    """Return the home used for ``state_file`` path rendering.
+
+    The function is retained for backward
+    compatibility with external scripts that import
+    it directly; the public ``main`` function now
+    passes the resolved ``home`` to
+    :func:`_build_payload` so the ``--home`` CLI
+    override and the ``LOCKVERITY_HOME`` env var are
+    honoured in the rendered ``state_file`` path.
+    """
     return resolve_home(cli_override=None)
 
 
@@ -126,7 +144,7 @@ def main(args: argparse.Namespace) -> int:
     home = resolve_home(cli_override=getattr(args, "home", None))
     state = read_state(home)
     if state is None:
-        payload = _build_payload(None, None, None)
+        payload = _build_payload(None, None, None, home=home)
         if args.json_output:
             print(json.dumps(payload, indent=2, sort_keys=True))
         else:
@@ -148,7 +166,7 @@ def main(args: argparse.Namespace) -> int:
                 "reachable": True,
                 "body": health_raw,
             }
-    payload = _build_payload(state, identity, health)
+    payload = _build_payload(state, identity, health, home=home)
     if args.json_output:
         print(json.dumps(payload, indent=2, sort_keys=True))
     else:

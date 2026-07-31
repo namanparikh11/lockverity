@@ -19,6 +19,7 @@ import argparse
 import sys
 from collections.abc import Sequence
 
+from app._version import __version__
 from app.cli import commands
 from app.cli.commands import doctor, logs, open_cmd, start, status, stop
 
@@ -75,6 +76,11 @@ def build_parser() -> argparse.ArgumentParser:
             "${XDG_DATA_HOME:-~/.local/share}/lockverity)."
         ),
     )
+    parser.add_argument(
+        "--version",
+        action="version",
+        version=f"lockverity {__version__}",
+    )
     subparsers = parser.add_subparsers(dest="subcommand", metavar="<command>")
     for name, help_text, module in _SUBCOMMANDS:
         subparser = subparsers.add_parser(
@@ -107,9 +113,32 @@ def main(argv: Sequence[str] | None = None) -> int:
     completes naturally despite the
     KeyboardInterrupt (e.g. the operator pressed
     Ctrl+C after the child had already exited).
+
+    The function also detects the documented
+    v2.1 Part B3A frozen-mode internal entry point:
+    when ``--internal-serve`` is the first argument,
+    the function delegates directly to
+    :func:`app.cli._serve.main` with the rest of the
+    argv. The frozen ``lockverity-cli.exe`` is the
+    only Python interpreter in the portable bundle,
+    so the start command cannot ``exec`` a separate
+    ``python -m app.cli._serve`` subprocess; the
+    dispatch lets the start command reuse the same
+    process to run the serve module's main loop.
     """
+    argv_list = list(argv) if argv is not None else list(sys.argv[1:])
+    if argv_list and argv_list[0] == "--internal-serve":
+        # The frozen-mode internal-serve dispatch.
+        # Import the module and call its ``main`` with
+        # the remainder of the argv. The module is
+        # always importable in frozen mode because the
+        # ``app.cli._serve`` module is in the
+        # static-import graph of the CLI entry point.
+        from app.cli import _serve
+
+        return _serve.main(tuple(argv_list[1:]))
     parser = build_parser()
-    args = parser.parse_args(list(argv) if argv is not None else None)
+    args = parser.parse_args(argv)
     if args.subcommand is None:
         parser.print_help(sys.stderr)
         return EXIT_USAGE

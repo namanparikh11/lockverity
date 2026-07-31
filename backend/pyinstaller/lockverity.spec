@@ -45,13 +45,41 @@ FROZEN_BUNDLE_DATA: list[tuple[str, str]] = [
     (str(REPO_ROOT / "frontend" / "dist"), "frontend/dist"),
     # The Alembic config and migration scripts. The
     # runtime resolver reads them under
-    # ``sys._MEIPASS/alembic.ini`` and
+    # ``sys._MEIPASS/alembic/alembic.ini`` and
     # ``sys._MEIPASS/alembic/versions``.
-    (str(BACKEND_ROOT / "alembic.ini"), "alembic.ini"),
+    #
+    # ``alembic.ini`` is bundled at
+    # ``<frozen_root>/alembic/alembic.ini`` because
+    # PyInstaller's ``datas`` processing conflicts
+    # between a directory entry and a file entry
+    # whose name shares a prefix (``alembic`` and
+    # ``alembic.ini``); bundling the file inside the
+    # directory removes the prefix collision and the
+    # runtime resolver reflects the layout.
+    # The Alembic config is **not** bundled through
+    # the ``datas`` tuple. PyInstaller's COLLECT
+    # nests the file's dest inside a same-named
+    # directory entry (a documented
+    # ``alembic.ini/alembic.ini`` quirk when
+    # ``alembic/`` is a sibling directory entry);
+    # the build script copies the file to the
+    # right place after PyInstaller has run.
     (str(BACKEND_ROOT / "alembic"), "alembic"),
-    # The approved application icon. The launcher
-    # loads it from the bundle root at launch.
+    # The approved application icon (16/32/48 ICO).
+    # The launcher exposes it under the bundle root
+    # at launch so the web UI can serve the brand
+    # favicon unchanged.
     (str(REPO_ROOT / "frontend" / "public" / "favicon.ico"), "favicon.ico"),
+    # The packaging-derivative ICO (16/32/48/256)
+    # is bundled alongside the approved ICO for
+    # future Windows shell integrations. It is a
+    # Lanczos downscale of the approved 1024x1024
+    # source PNG; the original brand assets are not
+    # modified. The PyInstaller ``icon=`` argument
+    # below uses this derivative so the executable
+    # resource has a 256x256 entry the Windows shell
+    # can render at high DPI.
+    (str(BACKEND_ROOT / "pyinstaller" / "favicon-exe.ico"), "favicon-exe.ico"),
     # The brand PNG assets used by the launcher and
     # bundled for downstream components that need them.
     (str(REPO_ROOT / "frontend" / "public" / "brand"), "brand"),
@@ -90,10 +118,46 @@ HIDDENIMPORTS: list[str] = [
     "psutil",
     "psutil._pswindows",
     "psutil._psutil_windows",
-    # ``app.cli.runner`` builds a ``RotatingFileHandler``
-    # from ``logging.handlers``; the standard library
-    # entry is scanned but the rare Win32-only
-    # ``NTEventLogHandler`` is not used here.
+    # ``alembic.config`` uses ``logging.config.fileConfig``
+    # at module import time; the static scan only sees
+    # the ``logging`` package import, not the
+    # ``logging.config`` submodule, so we add it
+    # explicitly. The in-process migration path uses
+    # ``alembic.command.upgrade`` which also pulls in
+    # the same module transitively.
+    "logging.config",
+    # The application configures the rotating file
+    # handler in ``app.cli.logging_setup``; the
+    # standard ``logging`` package is scanned, but
+    # ``logging.handlers`` (which contains the
+    # ``RotatingFileHandler`` and ``BaseRotatingHandler``
+    # we use) is loaded via a string lookup at runtime.
+    "logging.handlers",
+    # ``alembic/env.py`` imports ``app.models`` to
+    # bind ``Base.metadata``; the static scan only
+    # follows the entry-point import graph
+    # (``app.cli.main``), so the migration-time
+    # import of ``app.models`` is not seen. The
+    # hidden import ensures the metadata table is
+    # registered before the migration runs.
+    "app.models",
+    # ``app.models`` re-exports the SQLAlchemy
+    # ``Base`` and a number of domain tables; the
+    # static scan follows the re-export but misses
+    # the dynamic ``__getattr__`` style imports
+    # some Alembic revisions use. ``app.db.base`` is
+    # also referenced by ``alembic/env.py``; the
+    # hidden import here documents both.
+    "app.db.base",
+    # The launcher's child-serve dispatch
+    # (``--internal-serve``) imports ``app.cli._serve``
+    # which runs Uvicorn against ``app.main:app``;
+    # Uvicorn loads the ASGI module at runtime and
+    # the static scan only sees the entry-point
+    # import graph. The hidden import ensures the
+    # FastAPI factory and its dependency graph are
+    # bundled so the frozen server can serve HTTP.
+    "app.main",
 ]
 
 
@@ -146,8 +210,18 @@ exe = EXE(  # type: ignore[name-defined]  # noqa: F821
     # The approved application icon. The file is the
     # same ``favicon.ico`` the Part A brand board
     # shipped. PyInstaller embeds it as the Windows
-    # executable's icon resource.
-    icon=str(REPO_ROOT / "frontend" / "public" / "favicon.ico"),
+    # executable's icon resource. The derivative
+    # ``favicon-exe.ico`` (16/32/48/256) is the
+    # icon resource actually used here so the
+    # Windows shell can render the executable at
+    # high DPI; the approved web favicon (16/32/48)
+    # is bundled at the frozen root for the
+    # single-port UI to serve. The conversion is a
+    # documented mechanical Lanczos downscale of
+    # the approved 1024x1024 source PNG; see
+    # ``scripts/generate_exe_icon.py`` and
+    # ``tests/test_exe_icon.py``.
+    icon=str(BACKEND_ROOT / "pyinstaller" / "favicon-exe.ico"),
 )
 
 coll = COLLECT(  # type: ignore[name-defined]  # noqa: F821

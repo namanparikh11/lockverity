@@ -506,6 +506,7 @@ def _module_from_cmdline(cmdline: tuple[str, ...]) -> str:
       - ``python -m uvicorn app.main:app ...``
       - ``python -m uvicorn --app-dir <dir> app.main:app ...``
       - ``python -m app.cli._serve ...`` (the v2.1 Part B2 private wrapper)
+      - ``lockverity-cli.exe --internal-serve ...`` (the v2.1 Part B3A frozen wrapper)
 
     The module is the first non-flag token after
     ``uvicorn`` (or the first ``-m`` value when the
@@ -513,6 +514,15 @@ def _module_from_cmdline(cmdline: tuple[str, ...]) -> str:
     string is returned when the invocation form is
     not recognised.
     """
+    # Frozen-mode dispatch: the documented v2.1
+    # Part B3A ``--internal-serve`` launch token
+    # invokes the same private entry point as
+    # ``-m app.cli._serve``. The function returns
+    # the canonical recorded module so the
+    # identity check against the state file is
+    # consistent across source and frozen modes.
+    if "--internal-serve" in cmdline:
+        return "app.cli._serve"
     for index, token in enumerate(cmdline):
         if token == "-m" and index + 1 < len(cmdline):
             module_name = cmdline[index + 1]
@@ -558,10 +568,28 @@ def _module_matches(recorded_module: str, live_cmdline: tuple[str, ...]) -> bool
     is a soft check; the strong identity is the
     ``--instance-id`` token, which the
     :func:`verify_identity` function checks first.
+
+    The v2.1 Part B3A frozen-mode dispatch uses
+    ``--internal-serve`` as the launch token instead
+    of ``-m app.cli._serve``; the function recognises
+    the documented frozen-mode token as a valid
+    match for the recorded ``app.cli._serve`` module
+    so a frozen ``lockverity-cli.exe`` running the
+    serve module is not reported as identity-mismatch.
     """
     if not recorded_module:
         return True
-    return any(recorded_module in token for token in live_cmdline)
+    if any(recorded_module in token for token in live_cmdline):
+        return True
+    # Frozen-mode match: the v2.1 Part B3A
+    # ``--internal-serve`` dispatch token is the
+    # documented equivalent of ``-m app.cli._serve``
+    # for the frozen ``lockverity-cli.exe``. The
+    # check is gated on the recorded module being
+    # ``app.cli._serve`` so a different recorded
+    # module cannot accidentally match the
+    # ``--internal-serve`` token.
+    return recorded_module == "app.cli._serve" and "--internal-serve" in live_cmdline
 
 
 def _format_unix_iso(unix_seconds: float) -> str:

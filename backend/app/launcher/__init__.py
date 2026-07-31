@@ -38,7 +38,6 @@ import sys
 import time
 import urllib.error
 import urllib.request
-import uuid
 import webbrowser
 from pathlib import Path
 
@@ -47,14 +46,11 @@ from app.cli.home import ensure_home, resolve_home
 from app.cli.runner import (
     DEFAULT_HOST,
     DEFAULT_PORT,
-    build_server_argv,
-    build_server_env,
     is_loopback_host,
     probe_port,
-    run_migrations,
 )
 from app.cli.state import read_state
-from app.runtime_paths import application_root
+from app.runtime_paths import application_root, is_frozen
 
 logger = logging.getLogger("lockverity.launcher")
 
@@ -98,78 +94,96 @@ def _start_background(
 ) -> int:
     """Start a background Lockverity instance and return the child PID.
 
-    The function is the launcher-side wrapper around
-    ``runner.start``. It runs the migration, spawns the
-    child via the documented detached ``Popen`` (the
-    launcher's CLI subprocess exits after handing off
-    the child), and waits for the health endpoint. It
-    returns the child PID on success or raises an
-    exception on failure.
+    The function delegates to the documented
+    ``lockverity-cli.exe start`` subprocess so the
+    state file, the start lock, the migration, and
+    the health probe are all owned by the v2.1
+    Part B2 lifecycle code (the launcher never
+    re-implements the lifecycle). The
+    ``lockverity-cli start`` call is the documented
+    graphical-launcher-to-CLI bridge; it publishes
+    the runtime identity state, holds the start
+    lock for the child's lifetime, and runs the
+    migration before the server starts.
 
-    The function is intentionally narrow: it never
-    re-raises as a bare ``Exception``; each failure
-    path raises a specific subclass so the launcher
-    can show a precise error to the operator.
+    The function returns the recorded ``pid`` from
+    the CLI's start subprocess's published state
+    file. The launcher shows the same trusted local
+    URL in the default browser that ``open`` shows
+    from a second terminal.
     """
     home = ensure_home(home)
-    run_migrations(database_url)
     probe = probe_port(host, port)
     if probe.in_use:
         raise PortInUseError(f"port {host}:{port} is in use")
-    log_path = home / "logs" / "lockverity.log"
-    log_path.parent.mkdir(parents=True, exist_ok=True)
-    instance_id = uuid.uuid4().hex
-    env = build_server_env(
-        database_url=database_url,
-        frontend_dist=frontend_dist,
-        host=host,
-        port=port,
-        log_level=log_level,
-    )
-    argv = build_server_argv(
-        host=host,
-        port=port,
-        log_level=log_level,
-        instance_id=instance_id,
-    )
-    # Use the documented detached launch. The
-    # launcher's own process is short-lived; the child
-    # is detached so it survives the launcher's exit.
-    # The log handle is opened eagerly and explicitly
-    # closed in the ``finally`` block so the child
-    # inherits the file descriptor for the lifetime
-    # of the ``Popen`` call. A ``with`` block is not
-    # appropriate here because the file handle must
-    # outlive the ``Popen`` constructor.
-    log_handle = open(log_path, "ab", buffering=0)  # noqa: SIM115 - fd must outlive Popen
-    try:
-        import subprocess as _subprocess
+    import subprocess as _subprocess
 
-        if sys.platform == "win32":
-            flags = 0x00000008 | 0x00000200  # DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP
-            kwargs: dict[str, object] = {
-                "stdin": _subprocess.DEVNULL,
-                "stdout": log_handle,
-                "stderr": _subprocess.STDOUT,
-                "env": env,
-                "cwd": str(application_root()),
-                "close_fds": True,
-                "creationflags": flags,
-            }
-        else:
-            kwargs = {
-                "stdin": _subprocess.DEVNULL,
-                "stdout": log_handle,
-                "stderr": _subprocess.STDOUT,
-                "env": env,
-                "cwd": str(application_root()),
-                "close_fds": True,
-                "start_new_session": True,
-            }
-        handle = _subprocess.Popen(argv, **kwargs)  # noqa: S603 - argv is built by us
-    finally:
-        log_handle.close()
-    return handle.pid
+    # The launcher's frozen ``sys.executable`` is
+    # ``Lockverity.exe`` (the windowless launcher),
+    # not ``lockverity-cli.exe``. The CLI exe is the
+    # sibling at ``<portable_root>/lockverity-cli.exe``
+    # and is the supported entry point for the
+    # documented lifecycle. In source mode the
+    # launcher's own ``sys.executable`` is the
+    # Python interpreter and the launcher's argv is
+    # ``python -m app.cli``.
+    if is_frozen():
+        cli_exe = Path(sys.executable).with_name("lockverity-cli.exe")
+        if not cli_exe.is_file():
+            raise RuntimeError(f"lockverity-cli.exe not found at {cli_exe}")
+        argv = [str(cli_exe), "start", "--port", str(port)]
+    else:
+        argv = [
+            sys.executable,
+            "-m",
+            "app.cli",
+            "start",
+            "--port",
+            str(port),
+        ]
+    # The launcher's own process is short-lived; the
+    # detached ``lockverity-cli start`` subprocess is
+    # short-lived too (it exits after handing off the
+    # serve child). The serve child survives the
+    # launcher's exit because the CLI spawns it as a
+    # detached ``Popen``.
+    if sys.platform == "win32":
+        flags = 0x00000008 | 0x00000200  # DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP
+        kwargs: dict[str, object] = {
+            "stdin": _subprocess.DEVNULL,
+            "stdout": _subprocess.DEVNULL,
+            "stderr": _subprocess.DEVNULL,
+            "close_fds": True,
+            "creationflags": flags,
+        }
+    else:
+        kwargs = {
+            "stdin": _subprocess.DEVNULL,
+            "stdout": _subprocess.DEVNULL,
+            "stderr": _subprocess.DEVNULL,
+            "close_fds": True,
+            "start_new_session": True,
+        }
+    handle = _subprocess.Popen(argv, **kwargs)  # noqa: S603 - argv is built by us
+    handle.wait()
+    if handle.returncode != 0:
+        raise RuntimeError(
+            f"lockverity-cli start returned non-zero exit code "
+            f"{handle.returncode}; the runtime log is at "
+            f"{home / 'logs' / 'lockverity.log'}"
+        )
+    # The CLI's start subprocess wrote the state
+    # file before exiting. Read it back so the
+    # launcher can show the trusted URL in the
+    # default browser.
+    from app.cli.state import read_state
+
+    state = read_state(home)
+    if state is None:
+        raise RuntimeError(
+            f"lockverity-cli start did not publish a state file under {home / 'run'}"
+        )
+    return state.pid
 
 
 def _wait_for_health(host: str, port: int, timeout: float) -> bool:

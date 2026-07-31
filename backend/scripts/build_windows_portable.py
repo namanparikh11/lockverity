@@ -81,8 +81,21 @@ PORTABLE_BUNDLE_LAYOUT: list[tuple[str, str]] = [
     # (source path relative to ``application_root()``,
     # destination path inside the portable root)
     ("frontend/dist", "frontend/dist"),
-    ("backend/alembic.ini", "alembic.ini"),
+    # The Alembic config and the ``alembic/`` directory
+    # are bundled at the same path level. The order is
+    # significant: the directory copy runs first and
+    # the file copy runs second so the file is placed
+    # alongside (not wiped by) the directory. Both
+    # copies live at ``<frozen_root>/alembic/...`` to
+    # avoid the PyInstaller ``datas`` prefix-collision
+    # between the ``alembic/`` directory entry and an
+    # ``alembic.ini`` file entry. The portable root
+    # copy mirrors the frozen layout for operator
+    # inspection and so any tooling that walks the
+    # portable root sees the same structure as the
+    # frozen bundle.
     ("backend/alembic", "alembic"),
+    ("backend/alembic.ini", "alembic/cfg/alembic.ini"),
     ("frontend/public/favicon.ico", "favicon.ico"),
     ("frontend/public/brand", "brand"),
     ("LICENSE", "LICENSE"),
@@ -132,7 +145,12 @@ def _verify_build_dependencies() -> dict[str, str]:
     versions: dict[str, str] = {}
     for module_name, dist_name in (
         ("PyInstaller", "pyinstaller"),
-        ("pip_licenses", "pip-licenses"),
+        # ``pip-licenses`` ships its module as the
+        # single-word ``piplicenses`` (the hyphen is
+        # only in the distribution / console-script
+        # name). The import is the module name, not
+        # the distribution name.
+        ("piplicenses", "pip-licenses"),
     ):
         try:
             module = __import__(module_name)
@@ -161,6 +179,45 @@ def _verify_frontend_dist() -> None:
             f"ERROR: frontend dist is missing at {dist}. "
             "Run ``python scripts/prepare_frontend_dist.py`` to build it."
         )
+
+
+def _regenerate_exe_icon() -> Path:
+    """Regenerate the packaging-derivative ICO from the approved sources.
+
+    The PyInstaller specs reference
+    ``backend/pyinstaller/favicon-exe.ico`` for the
+    executable icon resource. The file is a
+    mechanical re-packaging of the approved web
+    favicon's 16/32/48 entries plus a Lanczos
+    downscale of the approved 1024x1024 source PNG
+    to 256x256. The brand assets themselves are not
+    modified; the conversion is the documented
+    v2.1 Part B3A packaging technical correction.
+    The function delegates to the dedicated
+    ``scripts/generate_exe_icon.py`` so the
+    derivation logic is exercised by
+    ``tests/test_exe_icon.py`` and is not
+    duplicated.
+
+    The function loads the derivation module via
+    :mod:`importlib.util` rather than the regular
+    import machinery because the build script may be
+    invoked from any directory; relying on
+    ``PYTHONPATH`` plus a bare ``from scripts``
+    import would couple the loader to the
+    caller's current working directory.
+    """
+    import importlib.util
+
+    script_path = BACKEND_ROOT / "scripts" / "generate_exe_icon.py"
+    spec = importlib.util.spec_from_file_location("lockverity_build_generate_exe_icon", script_path)
+    if spec is None or spec.loader is None:
+        raise SystemExit(f"ERROR: could not load {script_path}")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    derivative = BACKEND_ROOT / "pyinstaller" / "favicon-exe.ico"
+    module.build_exe_icon(derivative_ico=derivative)
+    return derivative
 
 
 def _build_frontend() -> None:
@@ -234,6 +291,35 @@ def _pyinstaller_build(spec: Path, work_dir: Path, dist_dir: Path) -> None:
         )
 
 
+def _pyinstaller_collect_name(spec: Path) -> str:
+    """Return the ``COLLECT(name=...)`` value for ``spec``.
+
+    PyInstaller writes each spec's onedir output to
+    ``<distpath>/<COLLECT name>/``. The function
+    reads the spec as text and extracts the
+    ``name="..."`` argument of the trailing
+    ``COLLECT(...)`` call. The launcher spec uses
+    ``name="Lockverity"`` and the CLI spec uses
+    ``name="lockverity-cli"``; the spec filenames
+    themselves are ``lockverity.spec`` and
+    ``cli.spec``.
+    """
+    import re
+
+    text = spec.read_text(encoding="utf-8")
+    # Find the last ``COLLECT(`` block; the value of
+    # its ``name=`` argument is the onedir directory
+    # name.
+    last_collect_start = text.rfind("COLLECT(")
+    if last_collect_start < 0:
+        raise SystemExit(f"ERROR: no COLLECT(...) block found in {spec}")
+    block = text[last_collect_start:]
+    match = re.search(r'name\s*=\s*["\']([^"\']+)["\']', block)
+    if not match:
+        raise SystemExit(f"ERROR: COLLECT(...) in {spec} has no name=... argument")
+    return match.group(1)
+
+
 def _assemble_portable(source_layout: Path, target_root: Path, build_specs: list[Path]) -> None:
     """Assemble the user-facing portable root from the PyInstaller outputs.
 
@@ -263,10 +349,20 @@ def _assemble_portable(source_layout: Path, target_root: Path, build_specs: list
     """
     target_root.mkdir(parents=True, exist_ok=True)
     for spec in build_specs:
-        # Each spec produces ``<dist_dir>/<spec.stem>/``
-        onedir_path = source_layout / spec.stem
+        # Each spec produces ``<dist_dir>/<COLLECT name>/``
+        # (the ``COLLECT(name=...)`` argument in the
+        # spec, NOT the spec filename). The launcher
+        # spec uses ``name="Lockverity"`` and the CLI
+        # spec uses ``name="lockverity-cli"``; the spec
+        # files themselves are ``lockverity.spec`` and
+        # ``cli.spec``.
+        onedir_name = _pyinstaller_collect_name(spec)
+        onedir_path = source_layout / onedir_name
         if not onedir_path.is_dir():
-            raise SystemExit(f"ERROR: PyInstaller output not found at {onedir_path}")
+            raise SystemExit(
+                f"ERROR: PyInstaller output not found at {onedir_path} "
+                f"(spec={spec.name}, collect name={onedir_name})"
+            )
         # Move the exe to the portable root.
         for src in onedir_path.iterdir():
             if src.name.lower().endswith(".exe"):
@@ -280,11 +376,32 @@ def _assemble_portable(source_layout: Path, target_root: Path, build_specs: list
                 # the first occurrence.
                 _merge_dir(src, target_root / "_internal")
 
+    # Copy ``alembic.ini`` to the merged
+    # ``_internal/alembic/cfg/alembic.ini``. The
+    # file is not bundled through the PyInstaller
+    # ``datas`` tuple because of a documented
+    # ``alembic.ini/alembic.ini`` COLLECT nesting
+    # quirk (PyInstaller's COLLECT nests a file
+    # dest inside a sibling directory entry that
+    # shares the same prefix). The post-PyInstaller
+    # copy is the documented v2.1 Part B3A
+    # workaround; the runtime reads the file via
+    # :func:`app.runtime_paths.alembic_config_path`.
+    alembic_ini_src = BACKEND_ROOT / "alembic.ini"
+    alembic_ini_dst = target_root / "_internal" / "alembic" / "cfg" / "alembic.ini"
+    if not alembic_ini_src.is_file():
+        raise SystemExit(f"ERROR: alembic.ini missing at {alembic_ini_src}")
+    alembic_ini_dst.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(alembic_ini_src, alembic_ini_dst)
+
     # Layer the documented user-facing layout on top
     # of the merged onedir. Each entry in
     # PORTABLE_BUNDLE_LAYOUT is relative to the repo
     # root; we copy the source tree item into the
     # portable root at the destination path.
+    # ``__pycache__`` directories are excluded from
+    # the source copy so the portable bundle does
+    # not carry build-host bytecode caches.
     for src_rel, dst_rel in PORTABLE_BUNDLE_LAYOUT:
         src = REPO_ROOT / src_rel
         dst = target_root / dst_rel
@@ -294,15 +411,39 @@ def _assemble_portable(source_layout: Path, target_root: Path, build_specs: list
             dst.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(src, dst)
         else:
-            if dst.exists():
-                shutil.rmtree(dst)
-            shutil.copytree(src, dst)
+            _copy_tree_excluding_pycache(src, dst)
+
+
+def _copy_tree_excluding_pycache(src: Path, dst: Path) -> None:
+    """Copy ``src`` to ``dst`` while skipping ``__pycache__`` directories.
+
+    The function is a thin wrapper around
+    :func:`shutil.copytree` that excludes
+    ``__pycache__`` directories from the copy. The
+    portable bundle must not carry Python bytecode
+    caches from the build host; the cached ``.pyc``
+    files are regenerated on first import in the
+    frozen interpreter and would only inflate the
+    artefact with build-host paths.
+    """
+    if dst.exists():
+        shutil.rmtree(dst)
+    shutil.copytree(src, dst, ignore=shutil.ignore_patterns("__pycache__"))
 
 
 def _merge_dir(src: Path, dst: Path) -> None:
-    """Recursively merge ``src`` into ``dst`` without overwriting."""
+    """Recursively merge ``src`` into ``dst`` without overwriting.
+
+    ``__pycache__`` directories are skipped so the
+    portable bundle does not carry build-host
+    bytecode caches.
+    """
     dst.mkdir(parents=True, exist_ok=True)
     for item in src.iterdir():
+        if item.is_dir() and item.name == "__pycache__":
+            # The cached ``.pyc`` files are regenerated
+            # on first import; skip them.
+            continue
         target = dst / item.name
         if item.is_dir():
             _merge_dir(item, target)
@@ -563,18 +704,25 @@ def _zip_portable(source: Path, zip_path: Path) -> str:
     the artefact is small and the operator's antivirus
     can scan it. The zip is placed at
     ``dist/windows/Lockverity-2.1.0-windows-x64-portable.zip``
-    by default. The function returns the SHA-256 of
-    the final zip.
+    by default. The arcname preserves the
+    portable-root directory so a fresh extraction
+    yields a single
+    ``Lockverity-2.1.0-windows-x64-portable/``
+    directory rather than a flat list of files; the
+    packaged smoke expects this layout. The function
+    returns the SHA-256 of the final zip.
     """
     zip_path.parent.mkdir(parents=True, exist_ok=True)
     if zip_path.exists():
         zip_path.unlink()
+    prefix = source.name
     with zipfile.ZipFile(
         zip_path, mode="w", compression=zipfile.ZIP_DEFLATED, compresslevel=6
     ) as archive:
         for path in sorted(source.rglob("*")):
             if path.is_file():
-                archive.write(path, arcname=str(path.relative_to(source)))
+                relative = path.relative_to(source)
+                archive.write(path, arcname=str(prefix / relative))
     return _sha256_of(zip_path)
 
 
@@ -709,6 +857,15 @@ def main(argv: list[str] | None = None) -> int:
             _build_frontend()
         _verify_frontend_dist()
         _log("frontend", "frontend dist verified")
+        # Regenerate the packaging-derivative ICO
+        # from the approved brand assets. The brand
+        # source files are not modified; the
+        # derivative is the only place a 256x256
+        # entry is introduced, and the conversion is
+        # a mechanical Lanczos downscale documented
+        # in ``scripts/generate_exe_icon.py``.
+        derivative = _regenerate_exe_icon()
+        _log("icon", f"derivative ICO ready at {derivative}")
         # Run both PyInstaller builds.
         launcher_spec = PYINSTALLER_DIR / "lockverity.spec"
         cli_spec = PYINSTALLER_DIR / "cli.spec"

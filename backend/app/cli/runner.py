@@ -287,20 +287,72 @@ def is_loopback_host(host: str) -> bool:
 def run_migrations(database_url: str) -> None:
     """Run ``alembic upgrade head`` against ``database_url``.
 
-    The function invokes the ``alembic`` CLI in a clean
-    subprocess. The in-process path is not used because
-    the application's ``alembic/env.py`` always
-    overrides ``sqlalchemy.url`` from the cached
-    settings. The subprocess approach passes the URL
-    through ``LOCKVERITY_DATABASE_URL`` so the
-    application's settings do not interfere.
+    The function invokes the ``alembic`` CLI in source
+    mode (the standard ``alembic upgrade head``
+    subprocess pattern) and uses the in-process
+    ``alembic.command.upgrade`` API in frozen mode.
+
+    The in-process path is used in frozen mode because
+    the frozen ``sys.executable`` is the
+    ``lockverity-cli.exe`` itself, not a Python
+    interpreter; ``python -m alembic`` would invoke
+    the CLI's argparse and fail. The in-process call
+    goes through the bundled ``alembic.env`` module
+    and the bundled migration scripts under
+    ``sys._MEIPASS/alembic/versions``.
+
+    The function uses
+    :func:`app.runtime_paths.alembic_config_path` to
+    locate the ``alembic.ini`` file so the same path
+    resolution rule applies in source and frozen
+    modes. The path is documented to live at
+    ``<repo_root>/backend/alembic.ini`` in source
+    mode and ``<frozen_root>/alembic/cfg/alembic.ini``
+    in frozen mode (the ``alembic/cfg/`` subdirectory
+    prefix is the v2.1 Part B3A PyInstaller
+    prefix-collision workaround).
     """
-    backend_root = Path(__file__).resolve().parents[2]
-    alembic_ini = backend_root / "alembic.ini"
+    from app.runtime_paths import alembic_config_path, is_frozen
+
+    alembic_ini = alembic_config_path()
     if not alembic_ini.is_file():
         raise RuntimeError(f"alembic.ini not found at {alembic_ini}")
+    backend_root = alembic_ini.parent
     env = dict(os.environ)
     env["LOCKVERITY_DATABASE_URL"] = database_url
+    if is_frozen():
+        # In-process upgrade: import the alembic
+        # command and run ``upgrade head`` against
+        # the configured ``alembic.ini``. The
+        # ``Config`` object is loaded from the
+        # absolute path so PyInstaller's
+        # ``sys._MEIPASS`` resolution does not
+        # interfere. ``script_location`` is
+        # overridden to the bundled ``alembic/``
+        # directory (the parent of ``cfg/``).
+        from alembic import command as alembic_command  # type: ignore[import-not-found]
+        from alembic.config import Config as AlembicConfig  # type: ignore[import-not-found]
+
+        config = AlembicConfig(str(alembic_ini))
+        # ``alembic.ini`` uses ``script_location =
+        # alembic`` which is interpreted relative
+        # to the ``alembic.ini`` directory. The
+        # frozen layout places the config at
+        # ``<frozen_root>/alembic/cfg/alembic.ini``
+        # and the scripts at
+        # ``<frozen_root>/alembic/``. The config
+        # file uses the relative path; we
+        # override the absolute path so the
+        # bundled ``versions/`` directory is
+        # found.
+        config.set_main_option("script_location", str(alembic_ini.parent.parent))
+        # The application settings override the
+        # ``sqlalchemy.url`` from
+        # ``alembic/env.py``; setting it here
+        # avoids the env-script round-trip.
+        config.set_main_option("sqlalchemy.url", database_url)
+        alembic_command.upgrade(config, "head")
+        return
     result = subprocess.run(
         [
             sys.executable,
@@ -343,13 +395,39 @@ def build_server_argv(
     directly. The argv uses ``sys.executable`` so
     the subprocess uses the same Python interpreter
     the CLI was invoked with, including the same
-    venv. The argv launches the private
-    :mod:`app.cli._serve` module which strips the
-    ``--instance-id`` flag and then runs Uvicorn
-    programmatically. The ``--instance-id`` argument
-    is appended last so the live-process identity
-    check can match it.
+    venv.
+
+    In source mode the argv launches the private
+    :mod:`app.cli._serve` module with ``python -m
+    app.cli._serve`` so a separate Python process
+    runs the Uvicorn server.
+
+    In frozen mode the frozen ``lockverity-cli.exe``
+    is the only interpreter in the portable bundle.
+    The argv dispatches through the documented
+    ``--internal-serve`` flag in
+    :func:`app.cli.main.main` so the same frozen
+    process re-enters as the private serve entry
+    point without going through the CLI's argparse.
+    The ``app.cli._serve`` module's ``main`` is
+    imported and called with the same argument
+    vector.
     """
+    from app.runtime_paths import is_frozen
+
+    if is_frozen():
+        return [
+            sys.executable,
+            "--internal-serve",
+            "--host",
+            host,
+            "--port",
+            str(port),
+            "--log-level",
+            log_level,
+            INSTANCE_ID_ARG,
+            instance_id,
+        ]
     return [
         sys.executable,
         "-m",

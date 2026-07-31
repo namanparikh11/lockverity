@@ -22,9 +22,20 @@ REPO_ROOT = BACKEND_ROOT.parent
 
 FROZEN_BUNDLE_DATA: list[tuple[str, str]] = [
     (str(REPO_ROOT / "frontend" / "dist"), "frontend/dist"),
-    (str(BACKEND_ROOT / "alembic.ini"), "alembic.ini"),
+    # See ``lockverity.spec`` for the rationale of
+    # bundling ``alembic.ini`` at
+    # ``<frozen_root>/alembic/alembic.ini`` (the
+    # PyInstaller prefix-collision workaround).
+    # See ``lockverity.spec`` for the rationale of
+    # not bundling ``alembic.ini`` through the
+    # ``datas`` tuple.
     (str(BACKEND_ROOT / "alembic"), "alembic"),
     (str(REPO_ROOT / "frontend" / "public" / "favicon.ico"), "favicon.ico"),
+    # The packaging-derivative ICO (16/32/48/256)
+    # is bundled alongside the approved ICO for
+    # future Windows shell integrations. See
+    # ``lockverity.spec`` for the rationale.
+    (str(BACKEND_ROOT / "pyinstaller" / "favicon-exe.ico"), "favicon-exe.ico"),
     (str(REPO_ROOT / "frontend" / "public" / "brand"), "brand"),
     (str(REPO_ROOT / "LICENSE"), "LICENSE"),
     (str(REPO_ROOT / "docs" / "windows-portable.md"), "README-PORTABLE.txt"),
@@ -36,6 +47,28 @@ HIDDENIMPORTS: list[str] = [
     "psutil",
     "psutil._pswindows",
     "psutil._psutil_windows",
+    # See ``lockverity.spec`` for the rationale;
+    # ``alembic.config`` and the rotating log handler
+    # both pull these in dynamically.
+    "logging.config",
+    "logging.handlers",
+    # The CLI is the migration entry point in
+    # frozen mode (via the in-process
+    # ``alembic.command.upgrade`` path); the
+    # ``app.models`` and ``app.db.base`` modules
+    # register the SQLAlchemy metadata that the
+    # migration targets.
+    "app.models",
+    "app.db.base",
+    # The private serve entry point
+    # (``app.cli._serve``) launches Uvicorn with
+    # ``app.main:app`` as the ASGI module string;
+    # Uvicorn imports the module at runtime and the
+    # static scan only sees the CLI's import graph.
+    # The hidden import ensures the FastAPI factory
+    # and its dependency graph (routers, middleware,
+    # settings, providers) are bundled.
+    "app.main",
 ]
 
 
@@ -73,7 +106,12 @@ exe = EXE(  # type: ignore[name-defined]  # noqa: F821
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    icon=str(REPO_ROOT / "frontend" / "public" / "favicon.ico"),
+    # The packaging-derivative ICO is the icon
+    # resource; see ``lockverity.spec`` for the
+    # rationale. The approved 16/32/48 ICO is
+    # bundled at the frozen root for the web UI to
+    # serve unchanged.
+    icon=str(BACKEND_ROOT / "pyinstaller" / "favicon-exe.ico"),
 )
 
 coll = COLLECT(  # type: ignore[name-defined]  # noqa: F821

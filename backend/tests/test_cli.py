@@ -719,6 +719,49 @@ class TestProcessIdentity:
         # Empty recorded module is a non-check.
         assert process_module._module_matches("", ("any", "cmdline"))
 
+    def test_module_matches_frozen_internal_serve(self) -> None:
+        """The frozen ``--internal-serve`` dispatch matches ``app.cli._serve``.
+
+        The v2.1 Part B3A frozen ``lockverity-cli.exe``
+        does not carry the ``-m app.cli._serve`` token
+        in its command line; it carries the documented
+        ``--internal-serve`` dispatch token. The
+        soft module check accepts the frozen-mode
+        token as a valid match for the recorded
+        ``app.cli._serve`` module so a frozen
+        instance is not reported as identity-mismatch.
+        """
+        # Source-mode matches via substring.
+        assert process_module._module_matches(
+            "app.cli._serve",
+            ("python", "-m", "app.cli._serve", "--host", "127.0.0.1"),
+        )
+        # Frozen-mode matches via ``--internal-serve``.
+        assert process_module._module_matches(
+            "app.cli._serve",
+            (
+                "lockverity-cli.exe",
+                "--internal-serve",
+                "--host",
+                "127.0.0.1",
+                "--port",
+                "8000",
+                "--instance-id",
+                "abc-123",
+            ),
+        )
+        # A different recorded module must not match
+        # the ``--internal-serve`` token.
+        assert not process_module._module_matches(
+            "app.main:app",
+            (
+                "lockverity-cli.exe",
+                "--internal-serve",
+                "--host",
+                "127.0.0.1",
+            ),
+        )
+
 
 # ---------------------------------------------------------------------------
 # Logging setup tests
@@ -1564,6 +1607,51 @@ class TestCliParser:
         with pytest.raises(SystemExit) as exc:
             parser.parse_args(["--help"])
         assert exc.value.code == 0
+
+    def test_top_level_version(self, parser: argparse.ArgumentParser) -> None:
+        """``lockverity --version`` prints the application version.
+
+        The flag is the documented v2.1 Part B3A
+        portable-package operator contract; the
+        packaged smoke check exercises it against the
+        frozen ``lockverity-cli.exe``.
+        """
+        with pytest.raises(SystemExit) as exc:
+            parser.parse_args(["--version"])
+        assert exc.value.code == 0
+
+    def test_internal_serve_dispatch(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """``--internal-serve`` dispatches to the private serve entry point.
+
+        The v2.1 Part B3A frozen ``lockverity-cli.exe``
+        is the only Python interpreter in the portable
+        bundle, so the start command cannot ``exec``
+        a separate ``python -m app.cli._serve``; the
+        documented workaround is to dispatch through
+        ``--internal-serve``, which is detected by
+        :func:`app.cli.main.main` and routed to
+        ``app.cli._serve.main`` without going through
+        the public CLI argparse.
+        """
+        from app.cli import _serve
+        from app.cli import main as cli_main
+
+        # The dispatch calls ``_serve.main`` with the
+        # post-flag argument vector. The serve entry
+        # point would normally launch Uvicorn; the
+        # test asserts the dispatch happens by
+        # patching ``_serve.main`` to record the
+        # call and raise to short-circuit Uvicorn.
+        captured: dict[str, object] = {}
+
+        def _fake_serve_main(argv: tuple[str, ...]) -> int:
+            captured["argv"] = argv
+            return 42
+
+        monkeypatch.setattr(_serve, "main", _fake_serve_main)
+        rc = cli_main.main(["--internal-serve", "--host", "127.0.0.1"])
+        assert rc == 42
+        assert captured["argv"] == ("--host", "127.0.0.1")
 
     def test_unknown_command(self, parser: argparse.ArgumentParser) -> None:
         with pytest.raises(SystemExit) as exc:

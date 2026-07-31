@@ -178,14 +178,25 @@ def alembic_config_path() -> Path:
     In source mode the config is at
     ``<repo_root>/backend/alembic.ini``. In frozen
     mode the config is bundled at
-    ``<frozen_root>/alembic.ini``. The Alembic env
-    script (``alembic/env.py``) reads the URL from the
-    application settings at runtime; the config file
-    is the script-location and prepend-sys-path
-    metadata.
+    ``<frozen_root>/alembic/cfg/alembic.ini`` (the
+    ``alembic/cfg/`` directory prefix is the
+    documented v2.1 Part B3A PyInstaller
+    prefix-collision workaround: bundling a single
+    file at the dest ``alembic.ini`` or
+    ``alembic/alembic.ini`` would be interpreted as
+    a directory of the same name by PyInstaller's
+    ``datas`` processing when a sibling directory
+    entry shares the ``alembic`` prefix; placing
+    the file in the ``cfg/`` subdirectory removes
+    the collision).
+
+    The Alembic env script (``alembic/env.py``)
+    reads the URL from the application settings at
+    runtime; the config file is the script-location
+    and prepend-sys-path metadata.
     """
     if is_frozen():
-        return frozen_root() / "alembic.ini"
+        return frozen_root() / "alembic" / "cfg" / "alembic.ini"
     return source_root() / "backend" / "alembic.ini"
 
 
