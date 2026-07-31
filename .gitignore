@@ -127,6 +127,35 @@ backend/htmlcov/
 # CI-generated noise
 .ci-cache/
 
+# v2.1 Part B3A Windows portable packaging artefacts
+# The dedicated packaging work directory and the
+# generated portable bundle must never be committed.
+# The ``build/`` and ``dist/`` entries higher up cover
+# the broad case; the explicit entries below document
+# the B3A layout and ensure the generated portable
+# root, the SHA-256 / manifest / notices outputs, and
+# the final ZIP remain untracked even if a future
+# maintainer narrows the broad entries.
+build/packaging/
+backend/build/packaging/
+backend/dist/windows/
+# Generated portable root, the final ZIP, and the
+# build manifest / SHA-256 / notices outputs are
+# only ever produced by ``scripts/build_windows_portable.py``
+# and live under the packaging output directory.
+**/build/packaging/**/*.windows-x64-portable/
+**/build/packaging/*.windows-x64-portable.zip
+**/build/packaging/**/THIRD_PARTY_NOTICES.txt
+**/build/packaging/**/BUILD-MANIFEST.json
+**/build/packaging/**/SHA256SUMS.txt
+**/build/packaging/**/Lockverity.exe
+**/build/packaging/**/lockverity-cli.exe
+# PyInstaller per-spec scratch (the build script
+# always passes an explicit ``workpath`` so this is
+# normally empty; the entry documents the
+# contract).
+**/build/packaging/**/_internal/
+
 
 # Local databases and temporary artifacts
 *.sqlite

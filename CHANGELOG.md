@@ -367,6 +367,130 @@ bounded visual polish.
   updated to assert the dynamic version rendering and
   the v2.1.0 About copy.
 
+### v2.1 Part B3A: Windows portable package
+
+The v2.1 Part B3A milestone adds a reproducible
+Windows x64 portable distribution of the Lockverity
+local runtime. The portable is a self-contained
+single-folder artefact that bundles the FastAPI
+backend, the cross-platform ``lockverity-cli``
+command, the React frontend, the Alembic migrations,
+and the approved Part A brand assets into a ZIP
+that an operator can extract to any user-controlled
+directory and run without a separately installed
+Python or Node.js runtime, without administrator
+rights, and without a Windows service or scheduled
+task.
+
+- **PyInstaller 6.10.0 one-folder build.** A new
+  ``[project.optional-dependencies].build`` group in
+  ``backend/pyproject.toml`` pins ``pyinstaller`` and
+  ``pip-licenses`` as build-only dependencies. The
+  pinned versions are not part of the runtime
+  dependency set; an operator who installs only the
+  runtime extras never pulls in PyInstaller.
+- **Two committed PyInstaller specs.** The graphical
+  launcher is built from the new
+  ``backend/pyinstaller/lockverity.spec`` (windowless
+  ``console=False``) and the console CLI from
+  ``backend/pyinstaller/cli.spec`` (``console=True``).
+  Both specs are committed in source form, are the
+  canonical inputs for the build, and are reviewed
+  for hidden imports, datas, and excludes. UPX is
+  forbidden; ``shell=True`` is never used.
+- **Frozen-resource resolver.** A new
+  ``backend/app/runtime_paths`` module is the single
+  chokepoint for "where do I find resource X?" in
+  both source and frozen modes. The resolver routes
+  ``frontend/dist``, ``alembic.ini``,
+  ``alembic/versions``, the approved ``favicon.ico``
+  and brand PNGs, the ``LICENSE``, and the bundled
+  ``README-PORTABLE.txt`` to the right path in each
+  mode. The resolver raises ``RuntimeError`` on
+  wrong-mode calls so a future maintainer cannot
+  silently regress the contract.
+- **Graphical launcher.** A new
+  ``backend/app/launcher`` module hosts
+  ``Lockverity.exe``. The launcher is a windowless
+  Windows application that uses the approved Part A
+  ``favicon.ico`` as its executable icon, calls the
+  accepted Part B2 ``status`` logic to discover a
+  running instance, starts a background instance via
+  the accepted Part B2 ``start`` logic when none is
+  running, and opens the trusted local URL in the
+  default browser. A second double-click reuses the
+  same running instance and does not start a second
+  server. Failures show a native Windows message box
+  with the log path and a ``lockverity-cli.exe
+  doctor`` recommendation; secrets and tracebacks
+  are never displayed to ordinary users.
+- **Console CLI executable.** ``lockverity-cli.exe``
+  wraps the existing ``app.cli.main:main`` entry
+  point and exposes the documented Part B2
+  subcommands (``start``, ``stop``, ``status``,
+  ``open``, ``doctor``, ``logs``) plus ``--help``
+  and ``--version``. The contract is identical to
+  the source-based ``lockverity`` command.
+- **Frozen-mode Alembic path resolution.** A new
+  ``BACKEND_ROOT = frozen_root()`` branch in
+  ``backend/alembic/env.py`` lets Alembic find the
+  ``alembic.ini`` and ``alembic/versions`` bundle
+  under ``sys._MEIPASS`` in frozen mode. The
+  source-mode branch is unchanged.
+- **Single canonical build command.** A new
+  ``backend/scripts/build_windows_portable.py``
+  script is the single source of truth for the
+  portable. It verifies Windows x64 + Python 3.12,
+  verifies the build dependencies, optionally runs
+  ``scripts/prepare_frontend_dist.py``, runs both
+  PyInstaller builds from the committed specs,
+  assembles the portable directory, generates
+  ``THIRD_PARTY_NOTICES.txt`` (via ``pip-licenses``),
+  ``BUILD-MANIFEST.json`` (source commit, build
+  timestamp UTC, Python/PyInstaller/Node/npm
+  versions, Alembic head, approved brand-asset
+  hashes, dependency inventory location), and
+  ``SHA256SUMS.txt``, and zips the artefact to
+  ``dist/windows/Lockverity-2.1.0-windows-x64-portable.zip``.
+  Useful options: ``--clean``,
+  ``--skip-frontend-build``, ``--skip-smoke``,
+  ``--output-dir``, ``--keep-work``, ``--json-report``.
+- **No installer, no service, no auto-update.** The
+  Part B3A portable is a "drop anywhere" artefact.
+  It is not yet a Windows installer (no MSI, no
+  NSIS, no Squirrel), does not install a Windows
+  service, scheduled task, registry autorun, or
+  firewall rule, and does not include an automatic
+  update mechanism. There is no telemetry; the
+  runtime only makes network calls the operator
+  explicitly configured. Code signing is not
+  included; SmartScreen and antivirus false-positive
+  guidance are in ``docs/windows-portable.md``.
+- **27 new backend tests.** 18 in the new
+  ``backend/tests/test_runtime_paths.py`` (7
+  source-mode + 10 frozen-mode + 1 ``frozen_exe_dir``)
+  and 9 in the new ``backend/tests/test_launcher.py``
+  (runtime-home resolution, healthy-instance reuse,
+  stopped-instance start, port-in-use, missing
+  dist, duplicate double-click, health timeout,
+  non-Windows message-box no-op, no-secrets /
+  ``shell=True`` greps).
+- **Operator reference.** A new
+  ``docs/windows-portable.md`` documents the layout,
+  the default runtime home, the graphical launcher
+  contract, the CLI executable, the first-launch
+  migration behaviour, troubleshooting,
+  SmartScreen and antivirus guidance, the "not yet
+  an installer" statement, the clean-uninstall
+  procedure, and the build instructions for
+  maintainers.
+- **Not in Part B3A.** Windows installer, code
+  signing, automatic update, Linux/macOS/Docker
+  packaging, system service integration, backup /
+  restore, cloud sync, and telemetry are explicit
+  future work and are not included in this
+  milestone.
+
 ## v2.0.6 — Historical upload identification and clearer stage-outcome presentation
 
 A narrowly scoped, field-testing-driven patch that ships

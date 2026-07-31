@@ -17,8 +17,34 @@ from alembic import context
 from sqlalchemy import engine_from_config, pool
 
 # Make the ``app`` package importable. The script location is
-# ``backend/alembic/env.py``, so the project root is one level up.
-BACKEND_ROOT = Path(__file__).resolve().parent.parent
+# ``backend/alembic/env.py`` in source mode, so the project
+# root is one level up. In frozen mode the script location
+# is ``<frozen_root>/alembic/env.py`` and the project root
+# is the frozen root; the application package is unpacked
+# by PyInstaller under ``sys._MEIPASS`` and is on
+# ``sys.path`` automatically. The ``app.runtime_paths``
+# helper resolves the script's parent directory in a
+# mode-aware way so the same env script works in both
+# build flavours without an operator-set env var.
+try:
+    from app.runtime_paths import is_frozen, frozen_root, source_root
+except ImportError:  # pragma: no cover - source-only fallback
+    is_frozen = lambda: False  # type: ignore[assignment]
+    frozen_root = lambda: Path(__file__).resolve().parents[1]  # type: ignore[assignment]
+    source_root = lambda: Path(__file__).resolve().parents[1]  # type: ignore[assignment]
+
+if is_frozen():
+    # In frozen mode the ``app`` package is unpacked by
+    # PyInstaller under ``sys._MEIPASS`` and the frozen
+    # bundle already contains ``alembic/versions/``.
+    # The application package import works because
+    # PyInstaller adds ``sys._MEIPASS`` to ``sys.path``.
+    BACKEND_ROOT = frozen_root()
+else:
+    # Source mode: the script location is
+    # ``backend/alembic/env.py`` so the project root is
+    # one level up.
+    BACKEND_ROOT = source_root()
 if str(BACKEND_ROOT) not in sys.path:
     sys.path.insert(0, str(BACKEND_ROOT))
 

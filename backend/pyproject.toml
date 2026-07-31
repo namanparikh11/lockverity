@@ -90,6 +90,27 @@ dev = [
     "httpx2>=0.0.1",
 ]
 
+# v2.1 Part B3A: build-time dependencies for the Windows
+# portable package. PyInstaller is **not** a runtime
+# dependency: the frozen executable is self-contained and
+# does not require PyInstaller at runtime. The group is
+# optional and only installed on a maintainer machine that
+# runs ``python scripts/build_windows_portable.py``.
+build = [
+    # Pinned to the exact patch that produced the
+    # committed ``lockverity.spec`` and ``cli.spec``.
+    # PyInstaller's spec format is stable within a
+    # minor series; a major bump requires a spec
+    # review and rebuild of the frozen artefacts.
+    "pyinstaller==6.10.0",
+    # ``pip-licenses`` is the bounded third-party-licence
+    # inventory source. It inspects the resolved
+    # distribution metadata and writes the
+    # ``THIRD_PARTY_NOTICES.txt`` artefact the portable
+    # root ships.
+    "pip-licenses==5.0.0",
+]
+
 [project.urls]
 Homepage = "https://github.com/lockverity/lockverity"
 Documentation = "https://github.com/lockverity/lockverity/tree/main/docs"

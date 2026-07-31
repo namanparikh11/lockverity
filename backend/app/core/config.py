@@ -7,6 +7,7 @@ strictly; development configuration has safe defaults.
 
 from __future__ import annotations
 
+import sys
 from functools import lru_cache
 from pathlib import Path
 from typing import Literal
@@ -251,12 +252,40 @@ class Settings(BaseSettings):
     def frontend_dist_path(self) -> Path:
         """Absolute path to the frontend dist directory.
 
-        Relative paths are resolved against the repository
-        root. Absolute paths are returned as-is. The result
-        is not validated for existence here; the
-        ``static_frontend`` module performs the startup
-        validation when serving is enabled.
+        In source mode (no ``sys._MEIPASS``) the
+        configured ``frontend_dist`` is resolved
+        deterministically against the repository
+        root. The ``LOCKVERITY_FRONTEND_DIST`` env var
+        is honoured so an operator can point at an
+        alternate dist without editing the source.
+
+        In frozen mode the bundled dist under
+        ``sys._MEIPASS/frontend/dist`` always wins
+        regardless of the configured ``frontend_dist``.
+        The portable package ships a single, versioned
+        dist and the operator cannot accidentally
+        redirect to a stale source checkout. The
+        frozen-mode behaviour is the documented
+        v2.1 Part B3A single-port portable contract.
+
+        The result is not validated for existence
+        here; the :mod:`app.static_frontend` module
+        performs the startup validation when serving
+        is enabled.
         """
+        # Frozen mode wins unconditionally: the
+        # portable package ships a single bundled dist
+        # under ``sys._MEIPASS/frontend/dist`` and the
+        # operator cannot redirect it. The check is
+        # the single source of truth for "is the
+        # runtime a frozen artefact?"; every other
+        # path in the application funnels through
+        # :func:`app.runtime_paths.is_frozen` so a
+        # future build flavour lands in one place.
+        if getattr(sys, "frozen", False) and getattr(sys, "_MEIPASS", None):
+            return Path(sys._MEIPASS) / "frontend" / "dist"
+        # Source mode: honour an absolute override;
+        # otherwise resolve relative to the repo root.
         candidate = Path(self.frontend_dist).expanduser()
         if not candidate.is_absolute():
             candidate = (self.repo_root / candidate).resolve()

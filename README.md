@@ -233,6 +233,47 @@ makes no provider calls during the demo. See
 `docs/demo-walkthrough.md` for the step-by-step reviewer guide
 and `docs/screenshots.md` for the screenshot checklist.
 
+## Windows portable quick start (v2.1 Part B3A)
+
+The v2.1 Part B3A milestone ships a self-contained
+Windows x64 portable ZIP. The portable bundles the
+FastAPI backend, the cross-platform `lockverity-cli`
+command, the React frontend, the Alembic migrations,
+and the approved Part A brand assets. No separately
+installed Python or Node.js is required; no
+administrator rights; no Windows service, scheduled
+task, or registry autorun.
+
+1. Download `Lockverity-2.1.0-windows-x64-portable.zip`.
+2. Extract it to any directory the operator
+   controls (for example `C:\Tools\Lockverity` or
+   `C:\Users\<you>\Lockverity`).
+3. Double-click `Lockverity.exe` to start the
+   runtime and open the trusted local URL in the
+   default browser. The runtime home defaults to
+   `%LOCALAPPDATA%\Lockverity` and is created on
+   first launch.
+4. From a second terminal, use `lockverity-cli.exe`
+   for the documented `start`, `stop`, `status`,
+   `open`, `doctor` and `logs` subcommands.
+   `lockverity-cli.exe doctor --json` prints a
+   structured diagnostic report.
+
+The portable is unsigned; Windows SmartScreen may
+show the standard "Windows protected your PC"
+prompt on first launch. Verify integrity against
+the bundled `SHA256SUMS.txt` and `BUILD-MANIFEST.json`,
+then click "More info" → "Run anyway". A future
+release track may introduce code signing; this is
+not in Part B3A.
+
+The full operator reference, including the
+"not yet a Windows installer" note, the clean
+uninstall procedure, the build instructions for
+maintainers, and the SmartScreen / antivirus
+false-positive guidance, is in
+[`docs/windows-portable.md`](docs/windows-portable.md).
+
 ## Run the demo
 
 The v2.0.6 demo is the fastest way to see every Lockverity

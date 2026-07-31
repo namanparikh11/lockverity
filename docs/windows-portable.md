@@ -1,0 +1,358 @@
+# Lockverity Windows portable package (v2.1 Part B3A)
+
+The Lockverity Windows portable package is a
+self-contained, single-folder, no-installer distribution
+of the Lockverity local runtime for Windows x64. It
+bundles the FastAPI backend, the cross-platform
+``lockverity-cli`` command, the React frontend, the
+Alembic migrations, the approved brand assets, and the
+``LICENSE`` into a single ZIP that an operator can
+extract to any user-controlled directory and run without
+administrator rights and without a separately installed
+Python or Node.js runtime.
+
+This document describes the artefact shipped by the
+``v2.1.0`` Part B3A milestone. It is the operator
+reference for the portable package and the maintainer
+reference for the build pipeline.
+
+## TL;DR
+
+1. Download ``Lockverity-2.1.0-windows-x64-portable.zip``.
+2. Extract it to any directory the user controls
+   (for example ``C:\Tools\Lockverity`` or
+   ``C:\Users\<you>\Lockverity``).
+3. Double-click ``Lockverity.exe`` to start the
+   runtime and open the trusted local URL in the
+   default browser.
+4. From a second terminal, use ``lockverity-cli.exe``
+   for the documented ``start``, ``stop``, ``status``,
+   ``open``, ``doctor`` and ``logs`` subcommands.
+
+No administrator rights are required at any point.
+No system service, scheduled task, registry autorun, or
+firewall rule is installed by the portable package.
+
+## Directory layout
+
+The portable root contains the user-facing entry points
+plus a single ``_internal`` support directory that
+PyInstaller generates. The exact internal layout of
+``_internal`` is opaque; the user-facing root is
+stable.
+
+```
+Lockverity-2.1.0-windows-x64-portable\
+  Lockverity.exe                  (windowless graphical launcher)
+  lockverity-cli.exe               (console CLI; same commands as source-based lockverity)
+  _internal\                       (PyInstaller support files; do not edit)
+  frontend\dist\                   (bundled React build; read-only)
+    index.html
+    assets\
+    favicon.ico, favicon-*.png
+    brand\
+      lockverity-symbol.png
+      lockverity-horizontal-logo.png
+  alembic\                         (frozen Alembic scripts; read-only)
+    versions\
+  alembic.ini                      (frozen config; read-only)
+  favicon.ico                      (approved Part A icon)
+  brand\                           (approved Part A PNGs)
+  LICENSE                          (MIT)
+  README-PORTABLE.txt              (this file, bundled at the frozen root)
+  THIRD_PARTY_NOTICES.txt          (Python + frontend dependency licences)
+  BUILD-MANIFEST.json              (build provenance)
+  SHA256SUMS.txt                   (SHA-256 of every user-facing file)
+```
+
+The frozen directory is treated as read-only application
+content. The portable never writes databases, logs,
+state files, or user data beside the executable.
+Deleting the extracted folder does not affect any
+runtime state.
+
+## Default runtime home
+
+The runtime stores databases, logs, the state file,
+the start lock, and any operator overrides in the
+**runtime home** under the user's local AppData:
+
+```
+%LOCALAPPDATA%\Lockverity\
+  data\        (SQLite databases)
+  logs\        (rotating lockverity.log)
+  run\         (state file and start lock)
+  config\      (operator overrides, if any)
+```
+
+The runtime home is created on first start. An
+operator can override the path with the
+``LOCKVERITY_HOME`` environment variable; the
+override is honoured by both the graphical launcher
+and the CLI.
+
+## Graphical launcher (``Lockverity.exe``)
+
+The launcher is a windowless Windows application that
+uses the approved Part A ``favicon.ico`` as its
+executable icon. It does not open a persistent console
+window; the operator does not see a terminal flash.
+
+On invocation, the launcher:
+
+1. Resolves the runtime home (default
+   ``%LOCALAPPDATA%\Lockverity``).
+2. Calls the documented Part B2 ``status`` logic to
+   determine whether a healthy instance is already
+   running.
+3. If a healthy instance exists, opens the trusted
+   local URL in the default browser and exits.
+4. If no instance is running, starts a new background
+   instance via the documented Part B2 ``start``
+   logic, waits for the health endpoint, then opens
+   the browser.
+5. On a stale or unhealthy instance, runs bounded
+   recovery and refuses to terminate unrelated
+   processes. If automatic safe recovery is
+   impossible, shows a native message box with the
+   log path and a recommendation to run
+   ``lockverity-cli.exe doctor``.
+
+A second double-click reuses the same running instance
+without starting a second server. The launcher never
+requires administrator rights.
+
+The launcher exit codes are documented in
+``backend/app/launcher/__init__.py`` so a future
+installer can match them:
+
+| Code | Meaning                                                   |
+| ---- | --------------------------------------------------------- |
+| 0    | Success (browser opened or already-open instance reused). |
+| 20   | Generic launcher error.                                   |
+| 21   | Port already in use by an unrelated process.              |
+| 22   | Database migration failure.                               |
+| 23   | Health endpoint did not report ready in time.             |
+| 24   | Bundled frontend dist is missing or invalid.              |
+
+## Console CLI (``lockverity-cli.exe``)
+
+The console CLI exposes the documented v2.1 Part B2
+subcommands. The contract is identical to the
+source-based ``lockverity`` command; an operator who
+switches between the two should not see a difference
+beyond the file extension.
+
+The CLI exit codes are:
+
+| Code | Meaning                                                      |
+| ---- | ------------------------------------------------------------ |
+| 0    | Success.                                                     |
+| 1    | Generic error.                                               |
+| 2    | Health or allow-remote guard violation.                      |
+| 64   | Command-line usage error.                                    |
+| 130  | SIGINT / ``CTRL_BREAK_EVENT`` (foreground mode interrupted). |
+
+The full command reference is in
+``docs/release-checklist.md``.
+
+## First-launch behaviour
+
+The first time a portable extraction is launched:
+
+1. The runtime home is created under
+   ``%LOCALAPPDATA%\Lockverity``.
+2. The bundled Alembic migrations run against a fresh
+   SQLite database. Existing databases are preserved
+   verbatim; only missing migrations are applied.
+3. The server starts on ``127.0.0.1:8000`` unless
+   overridden.
+4. The browser opens the trusted local URL.
+
+The first-launch migration can take a few seconds on
+older hardware. The launcher shows the log path in a
+native message box if the migration or the health
+probe does not complete in time.
+
+## Troubleshooting
+
+If the launcher shows a native message box, the box
+contains the runtime log path. Run the diagnostic:
+
+```
+lockverity-cli.exe doctor --json
+```
+
+The ``doctor`` command inspects the runtime
+environment (Python interpreter is frozen so the
+check is informational only; SQLite, Alembic, the
+frontend dist, the start lock, the port, the brand
+assets, the licence, and the live process identity)
+and prints a structured JSON report.
+
+For background output, inspect the rotating log at
+``%LOCALAPPDATA%\Lockverity\logs\lockverity.log`` or
+use the documented ``lockverity-cli.exe logs``
+subcommand.
+
+If the port is in use by an unrelated process, the
+launcher refuses to terminate the process and shows a
+message box that names the conflicting port. The
+operator can either stop the conflicting process or
+launch with a different port.
+
+## Unsigned-build / SmartScreen warning
+
+The portable package is not code-signed. On first
+launch Windows SmartScreen may show a "Windows
+protected your PC" prompt. This is the expected
+behaviour for any unsigned executable. The operator
+can verify the package integrity using the
+``SHA256SUMS.txt`` file and the documented
+``BUILD-MANIFEST.json`` and then click "More info"
+followed by "Run anyway" to proceed. A future Part
+B3B/C/D milestone may introduce code signing; until
+then the SmartScreen prompt is the operator-visible
+contract.
+
+## Antivirus false-positive reporting
+
+Some antivirus products flag PyInstaller-built
+executables as suspicious. The portable package uses
+the standard PyInstaller onedir layout without UPX or
+any other compression, and the ``SHA256SUMS.txt``
+plus the published Git source make a false positive
+reportable. The recommended course for an operator is
+to submit the false positive to the antivirus vendor
+and reference the ``SHA256SUMS.txt`` plus the
+``BUILD-MANIFEST.json``; the source commit SHA is
+verifiable on the public GitHub repository.
+
+## Not yet a Windows installer
+
+The Part B3A portable is a "drop anywhere" artefact.
+It is not yet a Windows installer (no MSI, no NSIS,
+no Squirrel). Installing the portable into
+``Program Files`` is supported but not recommended
+because the runtime home continues to live under
+``%LOCALAPPDATA%\Lockverity`` and the user
+preference is to keep the portable directory
+self-contained.
+
+## No service, no auto-update, no telemetry
+
+The portable package does not install a Windows
+service, a scheduled task, a registry autorun, or a
+firewall rule. It does not include an automatic
+update mechanism. It does not collect, transmit, or
+phone home any telemetry. The runtime only makes
+network calls the operator explicitly configured
+(provider integrations, outbound webhook, etc.);
+without those configurations the runtime binds to
+``127.0.0.1`` and never opens a network socket.
+
+## Clean uninstall
+
+To uninstall the portable:
+
+1. Stop the running instance with
+   ``lockverity-cli.exe stop`` (or close the launcher
+   if no instance is running).
+2. Delete the extracted folder.
+3. Optionally delete the runtime home at
+   ``%LOCALAPPDATA%\Lockverity`` to remove all
+   databases, logs, and state.
+
+Step 3 is independent of step 2: deleting the
+extracted folder does not affect the runtime home, and
+deleting the runtime home does not affect the extracted
+folder. The two are intentionally separate so an
+operator can wipe state without losing the application
+or vice versa.
+
+## Build instructions for maintainers
+
+The portable package is built by the committed
+``backend/scripts/build_windows_portable.py``
+script. The script is the single source of truth for
+how the artefact is produced.
+
+Prerequisites on the build host:
+
+* Windows x64
+* Python 3.12.x in the project venv
+* Node.js 22.22.0 or newer on PATH
+* The ``build`` optional-dependency group installed:
+  ``pip install -e '.[build]'``
+* The approved Part A brand assets under
+  ``frontend/public/favicon.ico`` and
+  ``frontend/public/brand\`` (committed; do not
+  regenerate)
+
+Build command:
+
+```
+python backend\scripts\build_windows_portable.py
+```
+
+Useful options:
+
+* ``--clean`` removes the dedicated packaging work
+  directory before starting.
+* ``--skip-frontend-build`` skips the
+  ``prepare_frontend_dist.py`` step (assumes a fresh
+  ``frontend/dist`` is already in place).
+* ``--skip-smoke`` skips the packaged smoke checks
+  (faster; do not use for a release).
+* ``--output-dir <path>`` writes the artefact under
+  ``<path>\windows\`` instead of the default
+  ``dist\windows\``.
+* ``--keep-work`` retains the dedicated packaging
+  work directory for inspection.
+* ``--json-report <path>`` writes a structured JSON
+  report of the build to ``<path>``.
+
+The build script writes the SHA-256 of every
+user-facing file to ``SHA256SUMS.txt`` and a structured
+``BUILD-MANIFEST.json`` containing the source commit
+SHA, the build timestamp in UTC, the Python and
+PyInstaller versions, the Node and npm versions, the
+Alembic head, and the SHA-256 of every approved brand
+asset.
+
+The committed ``backend/pyinstaller/lockverity.spec``
+and ``backend/pyinstaller/cli.spec`` files are the
+canonical PyInstaller inputs. Do not commit
+auto-generated mutable spec output; the committed
+specs are reviewed and pinned.
+
+## What is not in Part B3A
+
+The following items are explicit future work and are
+**not** included in Part B3A:
+
+* Windows installer (MSI / NSIS / Squirrel).
+* Code signing and SmartScreen reputation building.
+* Automatic update mechanism.
+* Linux or macOS packaging.
+* Docker packaging.
+* A system service, scheduled task, or
+  ``launchd``/``systemd`` integration.
+* Backup / restore tooling.
+* Cloud sync, multi-user, or authentication.
+* Telemetry, crash reporting, or outbound analytics.
+
+Part B3B and later will address these on a separate
+release track.
+
+## Verifying the artefact
+
+The SHA-256 hashes of every user-facing file are in
+``SHA256SUMS.txt``. The source commit, the build
+timestamp, the Python and PyInstaller versions, the
+Node and npm versions, the Alembic head, and the
+approved brand-asset hashes are in
+``BUILD-MANIFEST.json``. The dependency inventory
+(including declared licences) is in
+``THIRD_PARTY_NOTICES.txt``. The build command above
+reproduces the artefact from the recorded inputs.
