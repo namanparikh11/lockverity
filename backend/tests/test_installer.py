@@ -310,6 +310,30 @@ class TestInstallerSourceContract:
             "use SignedUninstaller=no and leave SignTool undeclared"
         )
 
+    def test_setup_section_directive_spelling(self) -> None:
+        # Regression: a stray ``ShowCmdlineHelp=yes`` (lowercase
+        # ``l``) was committed and the compiler reported
+        # ``Unrecognized [Setup] section directive "ShowCmdlineHelp"``.
+        # Inno Setup directives are case-sensitive; the canonical
+        # name is ``ShowCmdLineHelp`` (capital ``L``). The default
+        # is already ``yes`` so the directive is cosmetic, but the
+        # spelling must be exact. Strip comment lines so explanatory
+        # prose does not trip the negative assertion.
+        code_lines = [
+            line
+            for line in _iss_text().splitlines()
+            if line.strip() and not line.lstrip().startswith(";")
+        ]
+        code_text = "\n".join(code_lines)
+        assert "ShowCmdlineHelp" not in code_text, (
+            "Installer source must use ``ShowCmdLineHelp`` (capital "
+            "``L``), not ``ShowCmdlineHelp``; the [Setup] directive "
+            "is case-sensitive"
+        )
+        assert "ShowCmdLineHelp" in code_text, (
+            "Installer source should declare ShowCmdLineHelp=yes with the canonical spelling"
+        )
+
     def test_no_python_or_node_required(self) -> None:
         text = _iss_text()
         # The installer source must not bundle or invoke a

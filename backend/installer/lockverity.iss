@@ -106,8 +106,13 @@ SignedUninstaller=no
 AppMutex={#MyAppId},Global\{#MyAppId}
 
 ; Surface any install-time error instead of silently exiting
-; with a generic code.
-ShowCmdlineHelp=yes
+; with a generic code. Note the capital L in ``Line`` — the
+; [Setup] directive is ``ShowCmdLineHelp`` (yes/no) and Inno
+; Setup directives are case-sensitive; the previously committed
+; ``ShowCmdlineHelp=yes`` was silently rejected by ISCC and the
+; default (yes) is what was actually in effect, so the only real
+; fix is the spelling.
+ShowCmdLineHelp=yes
 ; Non-blocking error UI for the silent installer; the build
 ; script captures the install log separately.
 SetupLogging=yes
