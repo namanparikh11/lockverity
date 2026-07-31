@@ -279,6 +279,37 @@ class TestInstallerSourceContract:
             "Installer source must mark the uninstaller as unsigned"
         )
 
+    def test_no_invalid_signtool_directive(self) -> None:
+        # Regression: ``SignTool=Skip`` is not valid ISCC syntax and
+        # causes the compiler to fail with
+        # ``Value of [Setup] section directive "SignTool" is invalid.``
+        # The right way to mark the installer as unsigned is
+        # ``SignedUninstaller=no`` (and to omit any ``SignTool=``
+        # directive entirely, since it is only meaningful for the
+        # compiler's *runtime* signing pipeline which we do not use).
+        # Strip comment lines (starting with ``;``) so explanatory
+        # prose in the .iss does not trip the assertion.
+        import re
+
+        code_lines = [
+            line
+            for line in _iss_text().splitlines()
+            if line.strip() and not line.lstrip().startswith(";")
+        ]
+        code_text = "\n".join(code_lines)
+        assert "SignTool=Skip" not in code_text, (
+            "Installer source must not contain the invalid "
+            "``SignTool=Skip`` directive; use SignedUninstaller=no "
+            "and omit SignTool entirely"
+        )
+        # Any SignTool= directive is also forbidden because we have
+        # no signing tool configured. The regex is case-insensitive on
+        # the directive name to catch any future regression variant.
+        assert not re.search(r"^\s*SignTool\s*=", code_text, re.MULTILINE | re.IGNORECASE), (
+            "Installer source must not declare any SignTool= directive; "
+            "use SignedUninstaller=no and leave SignTool undeclared"
+        )
+
     def test_no_python_or_node_required(self) -> None:
         text = _iss_text()
         # The installer source must not bundle or invoke a

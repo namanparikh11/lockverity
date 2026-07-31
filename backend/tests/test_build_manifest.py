@@ -129,10 +129,15 @@ def test_packaged_manifest_matches_git_head() -> None:
     The test reads the on-disk
     ``BUILD-MANIFEST.json`` (only present after a
     build run) and asserts the ``source_commit``
-    matches the current ``git rev-parse HEAD``. A
-    mismatch indicates the manifest was built from a
-    different commit than the one in the working tree
-    and the artefact must be rebuilt.
+    is the full 40-character SHA-1 of a commit on
+    the current branch (it may be an ancestor of
+    HEAD — the v2.1 Part B3A payload is intentionally
+    frozen once accepted, and the v2.1 Part B3B
+    installer commits sit on top of it). A recorded
+    SHA that is neither equal to HEAD nor reachable
+    from HEAD indicates the manifest was built from
+    a different branch and the artefact must be
+    rejected.
     """
     payload = json.loads(DEFAULT_MANIFEST_PATH.read_text(encoding="utf-8"))
     recorded = str(payload["source_commit"])
@@ -140,7 +145,15 @@ def test_packaged_manifest_matches_git_head() -> None:
         f"packaged manifest source_commit is not a 40-char SHA: {recorded!r}"
     )
     expected = _git_head_full()
-    assert recorded == expected, (
-        f"packaged manifest source_commit {recorded!r} does not match "
-        f"current git HEAD {expected!r}; rebuild the portable"
+    if recorded == expected:
+        # Fresh build: portable was produced from the current HEAD.
+        return
+    # Otherwise: portable is the accepted v2.1 Part B3A payload,
+    # frozen on the current branch history. Verify ``recorded`` is
+    # reachable from HEAD using ``git merge-base --is-ancestor``.
+    ancestor = _git(["merge-base", "--is-ancestor", recorded, expected])
+    assert ancestor.returncode == 0, (
+        f"packaged manifest source_commit {recorded!r} is not HEAD "
+        f"{expected!r} nor an ancestor of HEAD; the portable was "
+        f"built from a different branch and must be rejected"
     )

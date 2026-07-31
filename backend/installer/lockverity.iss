@@ -91,9 +91,13 @@ SetupIconFile=..\pyinstaller\favicon-exe.ico
 UninstallDisplayIcon={app}\{#MyAppExeName}
 
 ; We sign nothing. The build script records the unsigned status in
-; the external ``INSTALLER-MANIFEST.json``.
+; the external ``INSTALLER-MANIFEST.json``. The canonical Inno Setup
+; declaration is ``SignedUninstaller=no``; the previous ``SignTool=Skip``
+; line was invalid ISCC syntax (it is not a recognized directive value
+; and the ``SignTool`` directive is only meaningful for the compiler's
+; *runtime* signing pipeline, which we do not use). Leaving it out
+; entirely is the correct, supported way to say "do not sign".
 SignedUninstaller=no
-SignTool=Skip
 
 ; Application mutex: the running launcher and CLI both share a
 ; named mutex keyed on this AppId so the installer can detect
