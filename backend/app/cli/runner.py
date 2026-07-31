@@ -692,12 +692,43 @@ def start(
         health_ok = _wait_for_health(host, port, timeout=timeout)
         elapsed = time.monotonic() - started
         if not health_ok:
+            # The server is not healthy. Do NOT publish a
+            # state file: a stale state file with a dead
+            # pid would mislead the launcher, ``status``,
+            # ``open`` and ``stop`` from a second terminal.
+            # The log file is the canonical diagnostic
+            # surface; we surface the failure there and
+            # the CLI's exit code (3) signals the warning
+            # to the caller. We also defensively remove
+            # any stale state file left from a previous
+            # run so a future ``status`` does not see a
+            # ghost record.
             cli_logger.error(
-                "health check at http://%s:%d%s/health did not respond within %.1fs",
+                "health check at http://%s:%d%s/health did not respond within %.1fs; "
+                "refusing to publish a state file (the child exited or is not bound)",
                 host,
                 port,
                 get_settings().api_prefix,
                 timeout,
+            )
+            clear_state(home)
+            return StartResult(
+                state=make_state(
+                    pid=process_handle.pid,
+                    created_at=_now_iso(),
+                    host=host,
+                    port=port,
+                    version=__version__,
+                    home=home,
+                    frontend_dist=frontend_dist,
+                    log_file=log_path,
+                    module=SERVER_MODULE,
+                    started_at=_now_iso(),
+                    instance_id=instance_id,
+                ),
+                process_handle=process_handle,
+                elapsed_seconds=elapsed,
+                health_check_ok=False,
             )
         started_at = _now_iso()
         # Read the live process creation time so the
