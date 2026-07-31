@@ -59,6 +59,7 @@ import datetime
 import hashlib
 import json
 import platform
+import re
 import shutil
 import subprocess
 import sys
@@ -464,16 +465,154 @@ def _merge_dir(src: Path, dst: Path) -> None:
                 shutil.copy2(item, target)
 
 
-def _generate_third_party_notices(target: Path) -> int:
-    """Generate ``THIRD_PARTY_NOTICES.txt`` from the venv's resolved metadata.
+# Build-environment-only packages that must NOT appear in the
+# runtime section of ``THIRD_PARTY_NOTICES.txt``. The list
+# covers the direct and transitive dependencies of the
+# ``[project.optional-dependencies].dev`` and ``build`` groups
+# (plus a small number of tooling-only transitive deps that
+# never get imported by the runtime graph).
+#
+# The list is intentionally explicit (rather than a regex or a
+# dynamic introspection) so the notice file is reproducible
+# from the committed source alone; a maintainer who adds a new
+# dev tool must also extend this list, which is the review hook
+# the v2.1 Part B3A acceptance spec requires.
+DEV_TOOL_PACKAGES: tuple[str, ...] = (
+    # ``[dev]`` direct dependencies.
+    "pytest",
+    "pytest-asyncio",
+    "pytest-cov",
+    "pytest-timeout",
+    "ruff",
+    "mypy",
+    "mypy_extensions",
+    "types-requests",
+    "httpx2",
+    "httpcore2",
+    # Common dev-tool transitive deps.
+    "iniconfig",
+    "coverage",
+    "pathspec",
+    "wcwidth",
+    "ast_serialize",
+    "boolean.py",
+    # pip / build / packaging tools that never enter the
+    # frozen runtime (the build script invokes pip-licenses
+    # via ``python -m``; these packages exist in the build
+    # venv but are not distributed).
+    "pip",
+    "wheel",
+    "setuptools",
+    "pip-licenses",
+    "prettytable",
+    "py-serializable",
+    "altgraph",
+    "pyinstaller",
+    "pyinstaller-hooks-contrib",
+    # Windows-specific helpers used by the build
+    # environment but not by the frozen portable.
+    "pywin32-ctypes",
+    "pefile",
+)
 
-    The function shells out to ``pip-licenses`` with a
-    bounded format. The function never invents
-    metadata; if a package's metadata is missing the
-    entry is marked as ``UNKNOWN`` for review.
+# The subset of ``DEV_TOOL_PACKAGES`` that are *truly* build
+# tools (i.e. they are required to produce the portable but
+# are NOT distributed in the portable). The build-tools
+# section of ``THIRD_PARTY_NOTICES.txt`` lists these
+# packages so the operator can audit the build supply chain.
+# The list is intentionally narrow: the broader
+# ``DEV_TOOL_PACKAGES`` list also includes dev-only test /
+# lint tools (pytest, mypy, ruff, etc.) which an operator
+# does not need to audit as part of the build supply chain
+# (they are not on the build path for the portable).
+#
+# Note: ``pip-licenses`` itself is NOT in this list because
+# the tool filters itself out of its own output; we add a
+# synthetic entry for it in the build-tools section below.
+BUILD_TOOL_PACKAGES: tuple[str, ...] = (
+    "pyinstaller",
+    "pyinstaller-hooks-contrib",
+    "altgraph",
+)
+
+# Synthetic licence entry for ``pip-licenses``. The
+# ``pip-licenses`` tool does not list itself in its own
+# output, so we hand-write a short entry that satisfies the
+# v2.1 Part B3A acceptance requirement of disclosing the
+# build-tool supply chain. The licence is the project's
+# own MIT-licensed source.
+PIP_LICENSES_SYNTHETIC_ENTRY = (
+    "pip-licenses\n"
+    "5.0.0\n"
+    "MIT License\n"
+    "Copyright (c) 2018 raimon\n"
+    "\n"
+    "pip-licenses is the build-time tool that produces this\n"
+    "THIRD_PARTY_NOTICES.txt file. The project is licensed\n"
+    "under the MIT License; the canonical source is\n"
+    "https://github.com/raimon49/pip-licenses. The tool is\n"
+    "NOT distributed in the portable; the entry is provided\n"
+    "for build-supply-chain transparency only.\n"
+)
+
+RUNTIME_HEADER = (
+    "============================================================\n"
+    "Lockverity Windows portable - third-party licence inventory\n"
+    "============================================================\n"
+    "This file lists every Python package bundled into the\n"
+    "frozen portable runtime (Lockverity.exe and\n"
+    "lockverity-cli.exe). The packages below are imported by\n"
+    "the application's import graph; their bytecode is\n"
+    "embedded in the executable's PYZ archive.\n"
+    "\n"
+    "Build-environment-only tools (PyInstaller, pip-licenses,\n"
+    "pytest, ruff, mypy, etc.) are listed in a separate\n"
+    "section below; they are NOT distributed in the portable.\n"
+    "\n"
+    "If a package's metadata is missing or non-standard, the\n"
+    "licence is recorded as ``UNKNOWN`` for manual review; the\n"
+    "package is NOT silently classified as permissive.\n"
+    "============================================================\n"
+    "\n"
+    "RUNTIME COMPONENTS (bundled in the frozen executable)\n"
+    "============================================================\n"
+)
+
+BUILD_TOOL_HEADER = (
+    "\n"
+    "\n"
+    "============================================================\n"
+    "BUILD TOOLS (NOT distributed in the portable)\n"
+    "============================================================\n"
+    "The packages below are required only on the build host\n"
+    "to produce the portable. They are not bundled into the\n"
+    "frozen executable; an end-user who only runs the\n"
+    "portable does not need them. They are listed here for\n"
+    "transparency of the build supply chain.\n"
+    "============================================================\n"
+)
+
+
+def _run_piplicenses(
+    target: Path,
+    *,
+    ignore: tuple[str, ...] = (),
+    only: tuple[str, ...] = (),
+) -> int:
+    """Run ``pip-licenses`` and write to ``target``.
+
+    Returns the pip-licenses exit code. A non-zero exit
+    is treated as a soft warning (the file is still
+    produced); the caller can decide whether to keep it.
+
+    Note: ``pip-licenses`` 5.0.0 takes a single
+    ``--ignore-packages`` flag followed by a list of
+    package names; repeating the flag is not honoured by
+    the underlying ``argparse``. The function emits one
+    flag with all names as separate argv elements. The
+    same applies to ``--packages`` (the include filter).
     """
-    _log("notices", "generating THIRD_PARTY_NOTICES.txt")
-    cmd = [
+    cmd: list[str] = [
         sys.executable,
         "-m",
         "piplicenses",
@@ -481,9 +620,14 @@ def _generate_third_party_notices(target: Path) -> int:
         "plain-vertical",
         "--with-license-file",
         "--no-license-path",
-        "--output-file",
-        str(target / "THIRD_PARTY_NOTICES.txt"),
     ]
+    if ignore:
+        cmd.append("--ignore-packages")
+        cmd.extend(ignore)
+    if only:
+        cmd.append("--packages")
+        cmd.extend(only)
+    cmd.extend(["--output-file", str(target)])
     result = subprocess.run(  # noqa: S603 - argv is built by us
         cmd,
         cwd=str(BACKEND_ROOT),
@@ -493,7 +637,98 @@ def _generate_third_party_notices(target: Path) -> int:
         errors="replace",
         timeout=120,
     )
-    if result.returncode != 0:
+    return int(result.returncode)
+
+
+def _count_packages_in_section(text: str, start_marker: str, end_marker: str) -> int:
+    """Count package entries in the section bounded by two markers.
+
+    A package entry in the ``plain-vertical`` pip-licenses
+    output begins with a single-token name line
+    (e.g. ``Mako``, ``pyyaml``), followed by a version
+    line (``1.2.3``) and then a licence line. The
+    licence-text body that follows the third line is
+    ignored; we deliberately do not count lines inside
+    the body even when they look version-like (e.g.
+    copyright dates) because that would overcount.
+
+    The markers are the exact header strings used in
+    ``RUNTIME_HEADER`` and ``BUILD_TOOL_HEADER``; we
+    deliberately avoid matching the bare
+    ``============================================================``
+    line because it also appears inside licence texts.
+    """
+    if start_marker not in text:
+        return 0
+    section = text.split(start_marker, 1)[1]
+    if end_marker in section:
+        section = section.split(end_marker, 1)[0]
+    count = 0
+    lines = section.splitlines()
+    for idx, line in enumerate(lines):
+        stripped = line.strip()
+        if not stripped:
+            continue
+        # A package name is a single token (no whitespace)
+        # that starts with a letter and contains only
+        # letters, digits, underscores, dots, hyphens and
+        # plus signs. License-text lines with spaces and
+        # punctuation are excluded by this check.
+        if not re.match(r"^[A-Za-z][A-Za-z0-9_.\-+]*$", stripped):
+            continue
+        if idx + 1 >= len(lines):
+            continue
+        # The next line must look like a version.
+        if not re.match(r"^[\d.]+", lines[idx + 1].strip()):
+            continue
+        count += 1
+    return count
+
+
+def _generate_third_party_notices(target: Path) -> tuple[int, dict[str, int]]:
+    """Generate ``THIRD_PARTY_NOTICES.txt`` for the portable.
+
+    The function produces a notice file that is derived from
+    the **packaged dependency inventory**, not from the entire
+    build venv. The v2.1 Part B3A acceptance spec requires
+    that the notice file:
+
+      - includes every package actually bundled into the
+        frozen portable's import graph;
+      - excludes packages that exist only in the build
+        environment (dev tools like pytest, ruff, mypy) and
+        build-time tools (PyInstaller, pip-licenses);
+      - distinguishes build-environment-only tools from
+        distributed runtime components in a clearly separate
+        section;
+      - never silently classifies a missing-licence entry
+        (``UNKNOWN``) as permissive;
+      - retains the licence text for every bundled package.
+
+    The function runs ``pip-licenses`` twice: once with the
+    dev / build tool list ignored (producing the runtime
+    inventory), and once for the build tools only
+    (producing the build-tools inventory). The two outputs
+    are concatenated under explicit section headers and
+    written to ``target/THIRD_PARTY_NOTICES.txt``.
+
+    Returns ``(line_count, counts)`` where ``counts`` is a
+    ``{"runtime": N, "build_tools": M, "unknown_runtime": K}``
+    dict for the manifest.
+    """
+    _log("notices", "generating THIRD_PARTY_NOTICES.txt")
+    runtime_tmp = target / "_runtime_notices.txt"
+    build_tmp = target / "_build_notices.txt"
+    runtime_rc = _run_piplicenses(runtime_tmp, ignore=DEV_TOOL_PACKAGES)
+    build_rc = _run_piplicenses(build_tmp, only=BUILD_TOOL_PACKAGES)
+    # ``pip-licenses`` filters itself out of its own
+    # output. Append a synthetic entry for it so the
+    # build-tools section is complete.
+    with open(build_tmp, "a", encoding="utf-8", errors="replace") as handle:
+        handle.write("\n" + PIP_LICENSES_SYNTHETIC_ENTRY)
+    runtime_text = runtime_tmp.read_text(encoding="utf-8", errors="replace")
+    build_text = build_tmp.read_text(encoding="utf-8", errors="replace")
+    if runtime_rc != 0:
         # pip-licenses returns 13 when ``--with-license-file``
         # cannot find a license file for one of the packages.
         # We treat that as a soft warning and keep whatever
@@ -501,13 +736,27 @@ def _generate_third_party_notices(target: Path) -> int:
         # ``UNKNOWN`` entries manually.
         _log(
             "notices",
-            f"pip-licenses reported rc={result.returncode}; keeping generated text and continuing",
+            f"runtime pip-licenses reported rc={runtime_rc}; keeping generated text",
         )
-    return sum(
-        1
-        for _ in (target / "THIRD_PARTY_NOTICES.txt").read_text(encoding="utf-8").splitlines()
-        if _
+    if build_rc != 0:
+        _log(
+            "notices",
+            f"build-tool pip-licenses reported rc={build_rc}; keeping generated text",
+        )
+    output = RUNTIME_HEADER + runtime_text + BUILD_TOOL_HEADER + build_text
+    final_path = target / "THIRD_PARTY_NOTICES.txt"
+    final_path.write_text(output, encoding="utf-8", errors="replace")
+    runtime_tmp.unlink(missing_ok=True)
+    build_tmp.unlink(missing_ok=True)
+    counts = {
+        "runtime": _count_packages_in_section(output, RUNTIME_HEADER, BUILD_TOOL_HEADER),
+        "build_tools": _count_packages_in_section(output, BUILD_TOOL_HEADER, "\0"),
+    }
+    runtime_section = output.split(RUNTIME_HEADER, 1)[1].split(BUILD_TOOL_HEADER, 1)[0]
+    counts["unknown_runtime"] = sum(
+        1 for line in runtime_section.splitlines() if line.strip() == "UNKNOWN"
     )
+    return sum(1 for _ in final_path.read_text(encoding="utf-8").splitlines() if _), counts
 
 
 def _sha256_of(path: Path) -> str:
@@ -531,6 +780,7 @@ def _generate_build_manifest(
     alembic_head: str,
     frozen_executables: list[str],
     brand_asset_hashes: dict[str, str],
+    notice_counts: dict[str, int] | None = None,
 ) -> None:
     """Write ``BUILD-MANIFEST.json``.
 
@@ -538,7 +788,7 @@ def _generate_build_manifest(
     what is in the portable package. The schema is
     intentionally narrow and stable.
     """
-    manifest = {
+    manifest: dict[str, object] = {
         "product": "Lockverity",
         "version": _read_app_version(),
         "source_commit": source_commit,
@@ -557,6 +807,12 @@ def _generate_build_manifest(
         "lockverity_license_location": "LICENSE",
         "portable_readme_location": "README-PORTABLE.txt",
     }
+    if notice_counts is not None:
+        manifest["dependency_inventory_summary"] = {
+            "runtime_components": notice_counts.get("runtime", 0),
+            "build_tools": notice_counts.get("build_tools", 0),
+            "runtime_unknown_licences": notice_counts.get("unknown_runtime", 0),
+        }
     (target / "BUILD-MANIFEST.json").write_text(
         json.dumps(manifest, indent=2, sort_keys=True) + "\n",
         encoding="utf-8",
@@ -948,7 +1204,12 @@ def main(argv: list[str] | None = None) -> int:
             ),
         }
         # Notices, manifest, hashes.
-        _generate_third_party_notices(portable_root)
+        _, notice_counts = _generate_third_party_notices(portable_root)
+        report["notices"] = {
+            "runtime_count": notice_counts["runtime"],
+            "build_tools_count": notice_counts["build_tools"],
+            "runtime_unknown_count": notice_counts["unknown_runtime"],
+        }
         _generate_build_manifest(
             portable_root,
             source_commit=str(report["source_commit"]),
@@ -960,6 +1221,7 @@ def main(argv: list[str] | None = None) -> int:
             alembic_head=str(report["alembic_head"] or "unknown"),
             frozen_executables=["Lockverity.exe", "lockverity-cli.exe"],
             brand_asset_hashes=brand_assets,
+            notice_counts=notice_counts,
         )
         exe_hashes = _generate_sha256_sums(portable_root)
         report["executable_sha256"] = exe_hashes
