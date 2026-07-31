@@ -162,6 +162,21 @@ backend/dist/windows/
 # duplicate the approved source; the build script
 # is the documented chokepoint.
 backend/pyinstaller/favicon-exe.ico
+# The build script's per-spec PyInstaller logs are
+# written under ``build/packaging/logs/`` so the
+# operator can inspect a failed build without
+# re-running the pipeline. The logs are build
+# artefacts and must not be committed.
+build/packaging/logs/
+**/build/packaging/logs/
+# The build script's redirected stdout / stderr /
+# exit-code capture files in ``backend/`` are
+# transient invocation output and must not be
+# committed.
+backend/build-stdout.txt
+backend/build-stderr.txt
+backend/build-exit.txt
+backend/test-build.txt
 
 
 # Local databases and temporary artifacts

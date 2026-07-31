@@ -250,7 +250,7 @@ def _build_frontend() -> None:
         )
 
 
-def _pyinstaller_build(spec: Path, work_dir: Path, dist_dir: Path) -> None:
+def _pyinstaller_build(spec: Path, work_dir: Path, dist_dir: Path, log_path: Path) -> None:
     """Run PyInstaller against the given spec.
 
     The function invokes PyInstaller with ``--workpath``
@@ -260,6 +260,17 @@ def _pyinstaller_build(spec: Path, work_dir: Path, dist_dir: Path) -> None:
     ``build/`` directory. PyInstaller's automatic
     spec-name ``build/`` is overridden by passing
     ``--workpath`` explicitly.
+
+    The function streams the PyInstaller output to a
+    log file rather than capturing it in memory. The
+    previous implementation used
+    ``subprocess.run(..., capture_output=True)`` which
+    buffered the entire PyInstaller output in a
+    subprocess pipe; a large build (the lockverity
+    bundle has 1326 entries) fills the buffer and the
+    subprocess blocks indefinitely. Streaming to a
+    log file avoids the pipe-buffer deadlock and gives
+    the operator a build log to inspect on failure.
     """
     cmd = [
         sys.executable,
@@ -273,21 +284,22 @@ def _pyinstaller_build(spec: Path, work_dir: Path, dist_dir: Path) -> None:
         "--clean",
         str(spec),
     ]
-    _log("pyinstaller", f"running {spec.name}")
-    result = subprocess.run(  # noqa: S603 - argv is built by us
-        cmd,
-        cwd=str(BACKEND_ROOT),
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-        timeout=1800,
-    )
+    _log("pyinstaller", f"running {spec.name} (log: {log_path})")
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(log_path, "w", encoding="utf-8", errors="replace") as log_handle:
+        result = subprocess.run(  # noqa: S603 - argv is built by us
+            cmd,
+            cwd=str(BACKEND_ROOT),
+            stdout=log_handle,
+            stderr=subprocess.STDOUT,
+            timeout=1800,
+        )
     if result.returncode != 0:
+        # The log file is left on disk so the operator
+        # can read the full PyInstaller output without
+        # the build script re-buffering it.
         raise SystemExit(
-            f"ERROR: PyInstaller failed (rc={result.returncode}) for "
-            f"{spec.name}:\n  stdout: {result.stdout[-2000:]}\n"
-            f"  stderr: {result.stderr[-2000:]}\n"
+            f"ERROR: PyInstaller failed (rc={result.returncode}) for {spec.name}; see {log_path}"
         )
 
 
@@ -575,11 +587,34 @@ def _read_app_version() -> str:
     return result.stdout.strip()
 
 
-def _git_head_short() -> str:
-    """Return the short git HEAD commit SHA, or ``unknown``."""
-    cmd = ["git", "rev-parse", "--short", "HEAD"]
+def _git_head_full() -> str:
+    """Return the full 40-character git HEAD commit SHA, or ``unknown``.
+
+    The function uses ``git rev-parse HEAD`` (not
+    ``--short``) so the manifest records the complete
+    SHA-1 the released artefact was built from. A
+    seven-character abbreviation is not enough for
+    release provenance; the v2.1 Part B3A acceptance
+    spec requires exactly 40 lowercase hexadecimal
+    characters and equality with ``git rev-parse HEAD``.
+
+    The function also detects a dirty working tree. A
+    release build must be from a clean committed HEAD;
+    the manifest records ``unknown-dirty-<N>`` so the
+    build still produces a manifest but a downstream
+    test can refuse the artefact.
+
+    The function uses :func:`shutil.which` to resolve
+    the ``git`` executable to an absolute path so the
+    ``S607`` partial-path warning is not triggered.
+    """
+    import shutil
+
+    git_exe = shutil.which("git")
+    if git_exe is None:
+        return "unknown"
     result = subprocess.run(  # noqa: S603 - argv is built by us
-        cmd,
+        [git_exe, "rev-parse", "HEAD"],
         cwd=str(REPO_ROOT),
         capture_output=True,
         text=True,
@@ -589,7 +624,27 @@ def _git_head_short() -> str:
     )
     if result.returncode != 0:
         return "unknown"
-    return result.stdout.strip()
+    full_sha = result.stdout.strip()
+    # Detect a dirty tracked tree. The check uses
+    # ``--untracked-files=no`` so the regenerated
+    # packaging artefacts (e.g. the
+    # ``backend/pyinstaller/favicon-exe.ico``
+    # derivative, the ``build/`` work directory) do
+    # not trigger a refusal. Only tracked + staged
+    # changes count as a dirty release build.
+    dirty_result = subprocess.run(  # noqa: S603 - argv is built by us
+        [git_exe, "status", "--porcelain", "--untracked-files=no"],
+        cwd=str(REPO_ROOT),
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        timeout=10,
+    )
+    if dirty_result.returncode == 0 and dirty_result.stdout.strip():
+        dirty_token = "dirty-" + str(len(dirty_result.stdout.strip().splitlines()))
+        return f"unknown-{dirty_token}"
+    return full_sha
 
 
 def _node_versions() -> tuple[str, str]:
@@ -823,7 +878,7 @@ def main(argv: list[str] | None = None) -> int:
         "node_version": None,
         "npm_version": None,
         "alembic_head": None,
-        "source_commit": _git_head_short(),
+        "source_commit": _git_head_full(),
         "app_version": _read_app_version(),
         "output_dir": str(args.output_dir),
         "portable_root": None,
@@ -853,6 +908,7 @@ def main(argv: list[str] | None = None) -> int:
         work_dir = args.output_dir / "work"
         pyinstaller_out = args.output_dir / "pyinstaller_out"
         portable_root = args.output_dir / DEFAULT_PORTABLE_NAME
+        logs_dir = args.output_dir / "logs"
         if not args.skip_frontend_build:
             _build_frontend()
         _verify_frontend_dist()
@@ -869,8 +925,10 @@ def main(argv: list[str] | None = None) -> int:
         # Run both PyInstaller builds.
         launcher_spec = PYINSTALLER_DIR / "lockverity.spec"
         cli_spec = PYINSTALLER_DIR / "cli.spec"
-        _pyinstaller_build(launcher_spec, work_dir, pyinstaller_out)
-        _pyinstaller_build(cli_spec, work_dir, pyinstaller_out)
+        _pyinstaller_build(
+            launcher_spec, work_dir, pyinstaller_out, logs_dir / "pyinstaller-lockverity.log"
+        )
+        _pyinstaller_build(cli_spec, work_dir, pyinstaller_out, logs_dir / "pyinstaller-cli.log")
         # Assemble the user-facing layout.
         _assemble_portable(
             source_layout=pyinstaller_out,
