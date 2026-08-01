@@ -737,6 +737,34 @@ class TestBuildScriptContract:
             "filename in one go)"
         )
 
+    def test_build_script_copies_iss_into_staging(self) -> None:
+        # Regression: the .iss uses *relative* ``Source:`` paths
+        # (``payload\*``, ``root_extra\*``, ``..\\pyinstaller\\...``)
+        # that ISCC resolves against the directory containing
+        # the .iss, not the current working directory. Since the
+        # committed .iss lives under ``backend/installer/`` and
+        # the staged payload lives under ``build/installer/staging/``,
+        # the build script must copy the .iss into the staging
+        # directory before invoking ISCC, and must invoke ISCC
+        # against the staged copy — not against the committed
+        # source. The staged copy is a transient build artefact
+        # and is not committed.
+        text = _build_text()
+        assert "shutil.copy2" in text, (
+            "Build script must copy the .iss into the staging "
+            "directory so the relative Source: paths resolve "
+            "correctly under ISCC"
+        )
+        # The staged copy must be used as the .iss argument, not
+        # the committed source.
+        assert re.search(r"str\(staged_iss\)", text), (
+            "Build script must invoke ISCC against the staged copy of the .iss"
+        )
+        # The committed source must still be the source of the copy.
+        assert re.search(r"shutil\.copy2\(\s*ISS_SOURCE\s*,\s*staged_iss", text), (
+            "Build script must copy the committed ISS_SOURCE into the staging dir as staged_iss"
+        )
+
 
 # ---------------------------------------------------------------------
 # Approved icon and payload

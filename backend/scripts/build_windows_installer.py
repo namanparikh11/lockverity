@@ -313,6 +313,20 @@ def _build_installer(
     if not keep_work and work_dir.exists():
         shutil.rmtree(work_dir)
     work_dir.mkdir(parents=True, exist_ok=True)
+    # The committed .iss references the staged payload and
+    # root-extra files via *relative* ``Source:`` paths
+    # (``payload\*`` and ``root_extra\*``). ISCC resolves those
+    # paths against the directory containing the .iss, not the
+    # current working directory. Since the .iss is committed
+    # under ``backend/installer/`` and the staged payload lives
+    # under ``build/installer/staging/``, the only way to make
+    # the relative paths resolve to the staged tree is to run
+    # ISCC against a *copy* of the .iss placed inside the
+    # staging directory. (The committed source is the single
+    # source of truth; the copy is a transient build artefact
+    # and is not committed.)
+    staged_iss = staging_dir / "lockverity.iss"
+    shutil.copy2(ISS_SOURCE, staged_iss)
     # ``ISCC`` writes its build log to ``{app}\\`` by default.
     # The /O<full-path> flag sets the final installer EXE path
     # (directory + filename). The /F<base-name> flag is *not*
@@ -332,7 +346,7 @@ def _build_installer(
     cmd: list[str] = [
         str(iscc),
         f"/O{installer_full_path}",
-        str(ISS_SOURCE),
+        str(staged_iss),
     ]
     _log("iscc", f"running {iscc}")
     log_path = output_dir / "logs" / "iscc.log"
