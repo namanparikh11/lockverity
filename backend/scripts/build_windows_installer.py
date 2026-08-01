@@ -327,20 +327,36 @@ def _build_installer(
     # and is not committed.)
     staged_iss = staging_dir / "lockverity.iss"
     shutil.copy2(ISS_SOURCE, staged_iss)
-    # The .iss's ``SetupIconFile`` directive also uses a
-    # *relative* path (``..\pyinstaller\favicon-exe.ico``) that
-    # ISCC resolves against the directory containing the .iss.
-    # That path was written when the .iss lived in
+    # The .iss's ``SetupIconFile`` directive uses a *relative*
+    # path (``..\pyinstaller\favicon-exe.ico``) that ISCC
+    # resolves against the directory containing the .iss. The
+    # path was written when the .iss lived in
     # ``backend/installer/`` and the icon in
-    # ``backend/pyinstaller/``; after the .iss is copied into
-    # the staging dir, the path needs the same layout. Mirror
-    # the icon at ``staging/pyinstaller/favicon-exe.ico`` so the
-    # relative path resolves correctly.
+    # ``backend/pyinstaller/``; the ``..`` segment goes from
+    # the .iss's directory up to ``backend\``, then back into
+    # ``pyinstaller\``. After the .iss is copied into the
+    # staging dir, ``..`` from the .iss would go up to
+    # ``build/installer/`` (the staging dir's parent), not to
+    # the directory containing the icon, so the path would not
+    # resolve. Rewrite the staged copy's icon path to a
+    # staging-relative form and mirror the icon at the matching
+    # location inside the staging dir.
     pyinstaller_subdir = staging_dir / "pyinstaller"
     pyinstaller_subdir.mkdir(parents=True, exist_ok=True)
     icon_source = BACKEND_ROOT / "pyinstaller" / "favicon-exe.ico"
     if icon_source.is_file():
-        shutil.copy2(icon_source, pyinstaller_subdir / "favicon-exe.ico")
+        staged_icon = pyinstaller_subdir / "favicon-exe.ico"
+        shutil.copy2(icon_source, staged_icon)
+        # Rewrite ``..\pyinstaller\favicon-exe.ico`` (committed,
+        # backend-relative) to ``pyinstaller\favicon-exe.ico``
+        # (staging-relative) in the staged copy only. The
+        # committed source is unchanged.
+        staged_iss_text = staged_iss.read_text(encoding="utf-8")
+        staged_iss_text = staged_iss_text.replace(
+            "SetupIconFile=..\\pyinstaller\\favicon-exe.ico",
+            "SetupIconFile=pyinstaller\\favicon-exe.ico",
+        )
+        staged_iss.write_text(staged_iss_text, encoding="utf-8")
     # ``ISCC`` writes its build log to ``{app}\\`` by default.
     # The /O<full-path> flag sets the final installer EXE path
     # (directory + filename). The /F<base-name> flag is *not*
