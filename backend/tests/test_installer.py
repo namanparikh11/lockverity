@@ -788,19 +788,21 @@ class TestBuildScriptContract:
             "relative ``SetupIconFile`` path resolves after the "
             ".iss is copied into the staging dir"
         )
-        # The staged copy's ``SetupIconFile`` must be rewritten
-        # from the committed ``..\\pyinstaller\\favicon-exe.ico``
-        # to the staging-relative form. The committed source
-        # itself is unchanged. The Python source carries
-        # escaped backslashes (each ``\\`` in the source is one
-        # literal backslash in the string), so we search for
-        # the *source-escaped* form.
-        assert "SetupIconFile=..\\\\pyinstaller\\\\favicon-exe.ico" in text, (
+        # The staged copy's ``SetupIconFile`` (and the matching
+        # ``Source:`` line in the [Files] section) must be
+        # rewritten from the committed
+        # ``..\\pyinstaller\\favicon-exe.ico`` (backend-relative)
+        # to the staging-relative ``pyinstaller\\favicon-exe.ico``
+        # form. The committed source is unchanged. The Python
+        # source carries escaped backslashes (each ``\\`` in the
+        # source is one literal backslash in the string), so we
+        # search for the *source-escaped* form.
+        assert "..\\\\pyinstaller\\\\favicon-exe.ico" in text, (
             "Build script must rewrite the staged copy's "
-            "``SetupIconFile`` path from the committed "
+            "icon references from the committed "
             "``..\\pyinstaller\\favicon-exe.ico`` to a "
-            "staging-relative path so the relative path "
-            "resolves correctly under ISCC"
+            "staging-relative path so the relative paths "
+            "resolve correctly under ISCC"
         )
 
 
