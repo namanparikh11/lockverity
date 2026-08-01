@@ -98,9 +98,33 @@ class TestInstallerSourceContract:
     def test_default_install_path_uses_localappdata(self) -> None:
         text = _iss_text()
         assert re.search(
-            r"DefaultDirName=\{autolocalappdata\}\\Programs\\\{#MyAppName\}",
+            r"DefaultDirName=\{localappdata\}\\Programs\\\{#MyAppName\}",
             text,
         ), "Default install path must be {localappdata}\\Programs\\<AppName>"
+
+    def test_no_autolocalappdata_constant(self) -> None:
+        # Regression: the installer source carried
+        # ``DefaultDirName={autolocalappdata}\Programs\{#MyAppName}``
+        # but the ``{autolocalappdata}`` constant does not exist
+        # in Inno Setup 6.7.3 — the correct constant is
+        # ``{localappdata}`` (the ``auto`` prefix in Inno Setup
+        # constants is reserved for system-vs-user profile
+        # resolution such as ``{autopf}`` / ``{autoprograms}`` /
+        # ``{autostartmenu}``, and ``{localappdata}`` is already
+        # inherently per-user). The compiler reported
+        # ``Unknown constant "autolocalappdata"``. Strip comment
+        # lines so explanatory prose does not trip the assertion.
+        code_lines = [
+            line
+            for line in _iss_text().splitlines()
+            if line.strip() and not line.lstrip().startswith(";")
+        ]
+        code_text = "\n".join(code_lines)
+        assert "autolocalappdata" not in code_text, (
+            "Installer source must not reference "
+            "``{autolocalappdata}`` — that constant does not "
+            "exist in Inno Setup 6.7.3; use ``{localappdata}``"
+        )
 
     def test_does_not_install_to_program_files(self) -> None:
         text = _iss_text()

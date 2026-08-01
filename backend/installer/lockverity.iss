@@ -61,8 +61,13 @@ ArchitecturesInstallIn64BitMode=x64compatible
 ; Per-user install path. ``{localappdata}\Programs\<AppName>`` is
 ; the Windows-recommended location for per-user programs and is
 ; outside ``Program Files`` (which requires elevation). Paths with
-; spaces and Unicode are supported.
-DefaultDirName={autolocalappdata}\Programs\{#MyAppName}
+; spaces and Unicode are supported. (Note: the constant is
+; ``{localappdata}`` — there is no ``{autolocalappdata}``. The
+; ``auto`` prefix in Inno Setup constants is reserved for the
+; system-vs-user profile resolution (``{autopf}``,
+; ``{autoprograms}``, ``{autostartmenu}``, etc.) and
+; ``{localappdata}`` is already inherently per-user.)
+DefaultDirName={localappdata}\Programs\{#MyAppName}
 DisableProgramGroupPage=yes
 AllowNoIcons=yes
 DisableDirPage=auto
