@@ -327,6 +327,20 @@ def _build_installer(
     # and is not committed.)
     staged_iss = staging_dir / "lockverity.iss"
     shutil.copy2(ISS_SOURCE, staged_iss)
+    # The .iss's ``SetupIconFile`` directive also uses a
+    # *relative* path (``..\pyinstaller\favicon-exe.ico``) that
+    # ISCC resolves against the directory containing the .iss.
+    # That path was written when the .iss lived in
+    # ``backend/installer/`` and the icon in
+    # ``backend/pyinstaller/``; after the .iss is copied into
+    # the staging dir, the path needs the same layout. Mirror
+    # the icon at ``staging/pyinstaller/favicon-exe.ico`` so the
+    # relative path resolves correctly.
+    pyinstaller_subdir = staging_dir / "pyinstaller"
+    pyinstaller_subdir.mkdir(parents=True, exist_ok=True)
+    icon_source = BACKEND_ROOT / "pyinstaller" / "favicon-exe.ico"
+    if icon_source.is_file():
+        shutil.copy2(icon_source, pyinstaller_subdir / "favicon-exe.ico")
     # ``ISCC`` writes its build log to ``{app}\\`` by default.
     # The /O<full-path> flag sets the final installer EXE path
     # (directory + filename). The /F<base-name> flag is *not*

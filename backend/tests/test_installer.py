@@ -765,6 +765,26 @@ class TestBuildScriptContract:
             "Build script must copy the committed ISS_SOURCE into the staging dir as staged_iss"
         )
 
+    def test_build_script_stages_exe_icon_in_staging(self) -> None:
+        # Regression: the .iss's ``SetupIconFile`` directive uses
+        # the *relative* path ``..\\pyinstaller\\favicon-exe.ico``
+        # (written when the .iss lived in ``backend/installer/``
+        # and the icon in ``backend/pyinstaller/``). After the
+        # .iss is copied into the staging dir, that relative path
+        # needs the icon to also live at the matching relative
+        # location inside the staging dir; otherwise ISCC
+        # reports ``The system cannot find the path specified``
+        # for the icon. The build script must mirror the icon at
+        # ``staging/pyinstaller/favicon-exe.ico`` so the
+        # relative path resolves.
+        text = _build_text()
+        assert re.search(r"pyinstaller\s*/\s*favicon-exe\.ico", text), (
+            "Build script must stage the EXE icon at "
+            "``staging/pyinstaller/favicon-exe.ico`` so the .iss's "
+            "relative ``SetupIconFile=..\\pyinstaller\\favicon-exe.ico`` "
+            "path resolves after the .iss is copied into the staging dir"
+        )
+
 
 # ---------------------------------------------------------------------
 # Approved icon and payload
