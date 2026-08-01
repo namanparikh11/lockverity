@@ -338,6 +338,42 @@ class TestInstallerSourceContract:
             "``CurProgress`` parameter is ``Integer``"
         )
 
+    def test_no_undefined_check_function_references(self) -> None:
+        # Regression: the [Files] section's icon-copy entry
+        # declared ``Check: "IconSourceExists()"`` but the
+        # function was never defined in the [Code] section, and
+        # the compiler reported
+        # ``Required function or procedure 'IconSourceExists'
+        # not found``. The ``Check:`` parameter must only
+        # reference functions that are actually defined in the
+        # [Code] section. Strip comment lines so the
+        # explanatory prose does not trip the negative
+        # assertion.
+        import re
+
+        text = _iss_text()
+        # Collect ``Check: "<name>(...)"`` references.
+        check_refs = re.findall(r"Check:\s*[\"']([A-Za-z][A-Za-z0-9_]*)", text)
+        # Collect ``function`` and ``procedure`` declarations
+        # in the [Code] section.
+        code_lines = [
+            line for line in text.splitlines() if line.strip() and not line.lstrip().startswith(";")
+        ]
+        code_text = "\n".join(code_lines)
+        declared = set(
+            re.findall(
+                r"^\s*(?:function|procedure)\s+([A-Za-z][A-Za-z0-9_]*)",
+                code_text,
+                re.MULTILINE,
+            )
+        )
+        for ref in check_refs:
+            assert ref in declared, (
+                f"Installer source references undefined Check "
+                f"function ``{ref}``; the function must be "
+                f"declared in the [Code] section"
+            )
+
     def test_launch_after_install_can_be_skipped_in_silent(self) -> None:
         text = _iss_text()
         # The Pascal ``ShouldRunPostInstall`` function honours

@@ -164,9 +164,11 @@ Source: "root_extra\*"; DestDir: "{app}"; Flags: "ignoreversion recursesubdirs"
 
 ; The approved 256x256 ICO for the Start Menu and desktop
 ; shortcut. Same ICO used as the installer's SetupIconFile.
+; ``ignoreversion`` skips the version-stamp comparison so the
+; ICO is always copied verbatim; the source file is staged by
+; the build script so a runtime check is unnecessary.
 Source: "..\pyinstaller\favicon-exe.ico"; DestDir: "{app}"; \
-    Flags: "ignoreversion onlyifdestfileexists"; \
-    Check: "IconSourceExists()"
+    Flags: "ignoreversion"
 
 [Icons]
 ; Start Menu shortcut under a dedicated Lockverity folder. The
