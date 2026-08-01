@@ -84,8 +84,14 @@ LZMAUseSeparateProcess=yes
 
 ; Output filename (the final filename is determined by the build
 ; script via the ``/OutputBaseFilename`` flag).
+; The output *directory* is also passed by the build script as
+; the ``/OutputDir=<absolute-path>`` command-line flag, so no
+; ``OutputDir`` directive is needed in this .iss. Declaring
+; ``OutputDir=dist`` here used to be paired with the
+; ``DiskDirectory`` legacy directive (both predate Inno Setup
+; 5.5) but is no longer required: leaving it out lets the
+; ``/OutputDir`` command-line flag take effect cleanly.
 OutputBaseFilename=Lockverity-{#MyAppVersion}-windows-x64-setup
-OutputDir=dist
 
 ; Approved Lockverity icon, used for the installer EXE, the
 ; uninstaller, and the installed application shortcuts. The

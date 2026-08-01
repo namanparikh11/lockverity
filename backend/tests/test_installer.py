@@ -126,6 +126,31 @@ class TestInstallerSourceContract:
             "exist in Inno Setup 6.7.3; use ``{localappdata}``"
         )
 
+    def test_no_outputdir_directive_in_iss(self) -> None:
+        # Regression: the .iss carried ``OutputDir=dist`` which
+        # collided with the ``/OutputDir=<absolute-path>``
+        # command-line flag passed by the build script and the
+        # compiler reported ``I/O error 123`` (``ERROR_INVALID_NAME``)
+        # on the line. The build script is the source of truth
+        # for the output directory; the .iss should not duplicate
+        # it. Strip comment lines so explanatory prose does not
+        # trip the negative assertion.
+        import re
+
+        code_lines = [
+            line
+            for line in _iss_text().splitlines()
+            if line.strip() and not line.lstrip().startswith(";")
+        ]
+        code_text = "\n".join(code_lines)
+        assert not re.search(r"^\s*OutputDir\s*=", code_text, re.MULTILINE | re.IGNORECASE), (
+            "Installer source must not declare an OutputDir= "
+            "directive; the build script passes the absolute "
+            "output directory via the /OutputDir= command-line "
+            "flag, and a duplicate here caused ISCC to fail with "
+            "``I/O error 123`` (ERROR_INVALID_NAME)"
+        )
+
     def test_does_not_install_to_program_files(self) -> None:
         text = _iss_text()
         # ``DefaultDirName`` must not point at ``Program Files``.
