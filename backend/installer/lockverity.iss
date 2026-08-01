@@ -276,7 +276,7 @@ end;
 // ``stop``). We use ``/C`` redirection so the child inherits a
 // console; this matches the operator-visible behaviour and
 // keeps the lifecycle path identical to the documented one.
-function RunCliSync(const Args: string; const TimeoutS: Integer = 30): string;
+function RunCliSync(const Args: string; const TimeoutS: Integer): string;
 var
     Exe: string;
     CmdLine, StdOut: string;

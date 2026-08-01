@@ -281,6 +281,38 @@ class TestInstallerSourceContract:
             "Installer must declare AppReadmeFile for the wizard info page"
         )
 
+    def test_no_pascal_default_parameter_values(self) -> None:
+        # Regression: the [Code] section declared
+        # ``function RunCliSync(const Args: string;
+        # const TimeoutS: Integer = 30): string;`` — the
+        # ``= 30`` is a Delphi-style default parameter value.
+        # Inno Setup's bundled Pascal Script is a stripped-down
+        # older version that does *not* support default
+        # parameter values; the compiler reported
+        # ``Semicolon (';') expected`` at the ``=`` column.
+        # Strip comment lines so the explanatory prose does
+        # not trip the negative assertion.
+        import re
+
+        code_lines = [
+            line
+            for line in _iss_text().splitlines()
+            if line.strip() and not line.lstrip().startswith(";")
+        ]
+        code_text = "\n".join(code_lines)
+        # Look for the ``: Type = <number>`` pattern that would
+        # indicate a default parameter value. The pattern is
+        # specific to a function/procedure parameter list.
+        assert not re.search(
+            r":\s*[A-Za-z][A-Za-z0-9_]*\s*=\s*\d",
+            code_text,
+        ), (
+            "Installer source [Code] section must not declare "
+            "Delphi-style default parameter values; Inno Setup's "
+            "Pascal Script does not support them. Pass the "
+            "value explicitly at the call site instead."
+        )
+
     def test_launch_after_install_can_be_skipped_in_silent(self) -> None:
         text = _iss_text()
         # The Pascal ``ShouldRunPostInstall`` function honours
