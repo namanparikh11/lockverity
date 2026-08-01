@@ -127,14 +127,20 @@ class TestInstallerSourceContract:
         )
 
     def test_no_outputdir_directive_in_iss(self) -> None:
-        # Regression: the .iss carried ``OutputDir=dist`` which
-        # collided with the ``/OutputDir=<absolute-path>``
-        # command-line flag passed by the build script and the
-        # compiler reported ``I/O error 123`` (``ERROR_INVALID_NAME``)
-        # on the line. The build script is the source of truth
-        # for the output directory; the .iss should not duplicate
-        # it. Strip comment lines so explanatory prose does not
-        # trip the negative assertion.
+        # Regression: the .iss carried ``OutputDir=dist`` and the
+        # build script passed ``/OutputDir=<abs-path>`` and
+        # ``/OutputBaseFilename=<name>`` as command-line flags.
+        # None of those long-form flags are valid in ISCC 6.7.3:
+        # the parser treats single-character switch tokens
+        # (``/O``, ``/F``) and the rest of the string becomes the
+        # switch's argument, leading to ``I/O error 123``
+        # (``ERROR_INVALID_NAME``) on the resulting path. The
+        # .iss must not declare an ``OutputDir=`` directive at
+        # all — the build script uses the canonical ``/O<full-path>``
+        # flag (which sets directory + filename in one go) and
+        # the .iss keeps ``OutputBaseFilename=...`` as a
+        # human-readable fallback. Strip comment lines so
+        # explanatory prose does not trip the negative assertion.
         import re
 
         code_lines = [
@@ -145,10 +151,10 @@ class TestInstallerSourceContract:
         code_text = "\n".join(code_lines)
         assert not re.search(r"^\s*OutputDir\s*=", code_text, re.MULTILINE | re.IGNORECASE), (
             "Installer source must not declare an OutputDir= "
-            "directive; the build script passes the absolute "
-            "output directory via the /OutputDir= command-line "
-            "flag, and a duplicate here caused ISCC to fail with "
-            "``I/O error 123`` (ERROR_INVALID_NAME)"
+            "directive; the build script passes the full output "
+            "path via the canonical ISCC ``/O<full-path>`` "
+            "command-line flag, and a duplicate here caused ISCC "
+            "to fail with ``I/O error 123`` (ERROR_INVALID_NAME)"
         )
 
     def test_does_not_install_to_program_files(self) -> None:
@@ -695,6 +701,41 @@ class TestBuildScriptContract:
         assert "%LOCALAPPDATA%\\\\Programs\\\\Lockverity" in text or (
             "LOCALAPPDATA" in text and "Programs" in text and "Lockverity" in text
         ), "Build script must record the default LocalAppData install path"
+
+    def test_build_script_uses_canonical_iscc_output_flag(self) -> None:
+        # Regression: the build script passed
+        # ``/OutputDir=<abs-path>`` and
+        # ``/OutputBaseFilename=<name>`` as command-line flags to
+        # ISCC. Neither is a valid ISCC 6.7.3 flag — the parser
+        # treats single-character switch tokens (``/O``, ``/F``)
+        # and the rest of the string becomes the switch's
+        # argument, leading to ``I/O error 123``
+        # (``ERROR_INVALID_NAME``) on the resulting path. The
+        # canonical, supported ISCC flag for the output file is
+        # ``/O<full-path>`` (directory + filename in one go).
+        text = _build_text()
+        import re
+
+        # The long-form ``/OutputDir=`` flag must not be present.
+        assert not re.search(r"[\"']/OutputDir=", text), (
+            "Build script must not pass the non-existent "
+            "``/OutputDir=`` flag to ISCC; use the canonical "
+            "``/O<full-path>`` flag instead"
+        )
+        # The long-form ``/OutputBaseFilename=`` flag must not be
+        # present either — ``/O<full-path>`` already controls
+        # the final filename.
+        assert not re.search(r"[\"']/OutputBaseFilename=", text), (
+            "Build script must not pass the non-existent "
+            "``/OutputBaseFilename=`` flag to ISCC; use the "
+            "canonical ``/O<full-path>`` flag instead"
+        )
+        # The canonical ``/O<full-path>`` flag must be used.
+        assert re.search(r"[\"']/O\{installer_full_path\}[\"']", text), (
+            "Build script must pass the canonical ISCC "
+            "``/O<full-path>`` command-line flag (directory + "
+            "filename in one go)"
+        )
 
 
 # ---------------------------------------------------------------------

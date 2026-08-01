@@ -314,15 +314,24 @@ def _build_installer(
         shutil.rmtree(work_dir)
     work_dir.mkdir(parents=True, exist_ok=True)
     # ``ISCC`` writes its build log to ``{app}\\`` by default.
-    # The /OutputBaseFilename flag controls the final exe name.
-    # AppId and AppVersion are taken from the .iss source; they
-    # are NOT command-line flags (``/AppId`` and ``/AppVersion``
-    # are not valid ISCC options). The committed .iss is the
-    # single source of truth for both values.
+    # The /O<full-path> flag sets the final installer EXE path
+    # (directory + filename). The /F<base-name> flag is *not*
+    # needed when /O<full-path> is given — /O is the canonical
+    # way to control the output. There is no ``/OutputDir`` or
+    # ``/OutputBaseFilename`` long form in ISCC; the long forms
+    # used in earlier revisions of this script were being
+    # parsed as ``/O utputDir=...`` and ``/F utputBaseFilename=...``
+    # by the single-character switch parser, leading to
+    # ``I/O error 123`` (ERROR_INVALID_NAME) on the resulting
+    # path. AppId and AppVersion are taken from the .iss source;
+    # they are NOT command-line flags (``/AppId`` and
+    # ``/AppVersion`` are not valid ISCC options). The committed
+    # .iss is the single source of truth for both values.
+    installer_name = "Lockverity-2.1.0-windows-x64-setup.exe"
+    installer_full_path = output_dir / installer_name
     cmd: list[str] = [
         str(iscc),
-        "/OutputBaseFilename=Lockverity-2.1.0-windows-x64-setup",
-        f"/OutputDir={output_dir}",
+        f"/O{installer_full_path}",
         str(ISS_SOURCE),
     ]
     _log("iscc", f"running {iscc}")
@@ -338,7 +347,7 @@ def _build_installer(
         )
     if result.returncode != 0:
         raise SystemExit(f"ERROR: ISCC failed (rc={result.returncode}); see {log_path}")
-    installer_exe = output_dir / "Lockverity-2.1.0-windows-x64-setup.exe"
+    installer_exe = output_dir / installer_name
     if not installer_exe.is_file():
         raise SystemExit(f"ERROR: expected installer EXE not produced: {installer_exe}")
     return installer_exe
