@@ -411,8 +411,13 @@ begin
 end;
 
 // Surfaces the retained-data path on uninstall so the operator
-// knows where their databases, logs and uploads live.
-procedure CurUninstallProgressChanged(CurProgress: CurUninstallProgress);
+// knows where their databases, logs and uploads live. The
+// ``CurUninstallProgressChanged`` event handler's parameter
+// type is ``Integer`` (a 0..100 progress percentage); the
+// type-name ``CurUninstallProgress`` is the unit the event is
+// declared in and is not itself a usable type for the
+// parameter declaration.
+procedure CurUninstallProgressChanged(CurProgress: Integer);
 begin
     // No-op: the retained-data path is shown in the final
     // uninstall confirmation dialog below.

@@ -313,6 +313,31 @@ class TestInstallerSourceContract:
             "value explicitly at the call site instead."
         )
 
+    def test_no_curuninstallprogress_type_for_progress_param(self) -> None:
+        # Regression: the [Code] section declared
+        # ``procedure CurUninstallProgressChanged(CurProgress:
+        # CurUninstallProgress);`` — ``CurUninstallProgress`` is
+        # the *unit* the event function is declared in (and also
+        # the name of the underlying record type), but it is
+        # *not* itself a usable type for the event's parameter
+        # declaration. The compiler reported
+        # ``Unknown type 'CurUninstallProgress'``. The correct
+        # parameter type is ``Integer`` (a 0..100 progress
+        # percentage). Strip comment lines so the explanatory
+        # prose does not trip the negative assertion.
+        code_lines = [
+            line
+            for line in _iss_text().splitlines()
+            if line.strip() and not line.lstrip().startswith(";")
+        ]
+        code_text = "\n".join(code_lines)
+        assert "CurUninstallProgress)" not in code_text, (
+            "Installer source [Code] section must not use "
+            "``CurUninstallProgress`` as a parameter type; the "
+            "correct type for ``CurUninstallProgressChanged``'s "
+            "``CurProgress`` parameter is ``Integer``"
+        )
+
     def test_launch_after_install_can_be_skipped_in_silent(self) -> None:
         text = _iss_text()
         # The Pascal ``ShouldRunPostInstall`` function honours
