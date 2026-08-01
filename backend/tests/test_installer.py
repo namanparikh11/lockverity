@@ -338,6 +338,171 @@ class TestInstallerSourceContract:
             "summary when Setup is run with no arguments"
         )
 
+    def test_all_setup_directives_recognised_by_inno_6_7_3(self) -> None:
+        # Belt-and-braces regression: every [Setup] section
+        # directive declared in the .iss must be a directive
+        # Inno Setup 6.7.3 recognises. The list is taken from the
+        # official isetup.xml shipped with the compiler. Without
+        # this guard, a stray legacy directive (e.g.
+        # ``DiskDirectory``, ``SlicesPerDisk``) will be accepted
+        # at commit time and only fail at compile time inside the
+        # installer build script — which is slow and breaks the
+        # spec's "compile from a clean committed HEAD" rule.
+        import re
+
+        # The full set of [Setup] section directives supported by
+        # Inno Setup 6.7.3. Sourced from the upstream
+        # ``ISHelp/isetup.xml`` help file shipped with the
+        # compiler. Keep this list in sync with the locked
+        # compiler version.
+        KNOWN_SETUP_DIRECTIVES: set[str] = {  # noqa: N806 - sentinel constant naming
+            "AppId",
+            "AppIdFormat",
+            "AppName",
+            "AppVerName",
+            "AppVersion",
+            "AppPublisher",
+            "AppPublisherURL",
+            "AppSupportURL",
+            "AppUpdatesURL",
+            "AppContact",
+            "AppCopyright",
+            "AppComments",
+            "AppModifyPath",
+            "AppReadmeFile",
+            "AppMutex",
+            "PrivilegesRequired",
+            "PrivilegesRequiredOverridesAllowed",
+            "ArchitecturesInstallIn64BitMode",
+            "ArchitecturesAllowed",
+            "DefaultDirName",
+            "DefaultGroupName",
+            "BaseFilename",
+            "UninstallDisplayIcon",
+            "UninstallDisplayName",
+            "UninstallFilesDir",
+            "UninstallRegKey",
+            "Uninstallable",
+            "CloseApplicationsFilter",
+            "DisableAppendDir",
+            "DisableDirPage",
+            "DisableProgramGroupPage",
+            "AllowNoIcons",
+            "AllowRootDirectory",
+            "AlwaysShowComponentsList",
+            "AlwaysShowDirOnReadyPage",
+            "AlwaysShowGroupOnReadyPage",
+            "WizardStyle",
+            "WizardSizePercent",
+            "WizardImageAlphaFormat",
+            "WizardImageBackColor",
+            "WizardImageFile",
+            "WizardSmallImageFile",
+            "WizardBackColor",
+            "WizardBackColorWidth",
+            "Compression",
+            "SolidCompression",
+            "CompressionThreads",
+            "LZMAAlgorithm",
+            "LZMABlockSize",
+            "LZMADictionarySize",
+            "LZMAMatchFinder",
+            "LZMANumBlockThreads",
+            "LZMANumFastBytes",
+            "LZMAUseSeparateProcess",
+            "DiskClusterSize",
+            "DiskSliceSize",
+            "DiskSpanning",
+            "OutputBaseFilename",
+            "OutputDir",
+            "OutputManifestFile",
+            "SetupIconFile",
+            "SignedUninstaller",
+            "SignedUninstallerDir",
+            "SignTool",
+            "SignToolMinimumTimeBetween",
+            "SignToolRetryCount",
+            "SignToolRetryDelay",
+            "SignToolRunMinimized",
+            "SetupLogging",
+            "DebugLogging",
+            "CloseApplications",
+            "CloseApplicationsFilterExcludes",
+            "RestartApplications",
+            "AllowCancelDuringInstall",
+            "SetupMutex",
+            "TouchDate",
+            "TouchSize",
+            "Touch",
+            "TerminalServicesAware",
+            "UninstallLogMode",
+            "UninstallRestartComputer",
+            "UpdateUninstallLogAppName",
+            "UsedUserAreasWarning",
+            "CreateUninstRegKey",
+            "CloseEscButton",
+            "InfoBeforeFile",
+            "LicenseFile",
+            "InfoAfterFile",
+            "UserInfoPage",
+            "ShowUserInfoPage",
+            "UserInfoTitle",
+            "Encryption",
+            "EncryptionPassword",
+            "MinAES",
+            "AllowUNCPath",
+            "AllowNetworkDrive",
+            "AppNoMessagesFile",
+            "TimeStamp",
+            "TimeStampTouch",
+            "AppUserModelID",
+            "ShowLanguageDialog",
+            "MergeDuplicateFiles",
+            "UninstallStyle",
+            "VersionInfoVersion",
+            "VersionInfoCompany",
+            "VersionInfoDescription",
+            "VersionInfoTextVersion",
+            "VersionInfoCopyright",
+            "VersionInfoProductName",
+            "VersionInfoProductVersion",
+            "VersionInfoFileVersion",
+            "VersionInfoFileDescription",
+            "VersionInfoOriginalFilename",
+            "VersionInfoComments",
+            "VersionInfoInternalName",
+            "VersionInfoLegalCopyright",
+            "VersionInfoLegalTrademarks",
+            "VersionInfoPrivateBuild",
+            "VersionInfoSpecialBuild",
+            "MinVersion",
+            "OnlyBelowVersion",
+        }
+        # Parse the [Setup] section from the .iss.
+        in_setup = False
+        declared: list[tuple[int, str]] = []  # (line_no, directive_name)
+        for line_no, line in enumerate(_iss_text().splitlines(), 1):
+            stripped = line.strip()
+            if stripped == "[Setup]":
+                in_setup = True
+                continue
+            if stripped.startswith("[") and stripped.endswith("]"):
+                if in_setup:
+                    break
+                continue
+            if not in_setup or not stripped or stripped.startswith(";"):
+                continue
+            m = re.match(r"^([A-Za-z][A-Za-z0-9_]*)", stripped)
+            if m and "=" in stripped:
+                declared.append((line_no, m.group(1)))
+        unknown = [(n, d) for n, d in declared if d not in KNOWN_SETUP_DIRECTIVES]
+        assert not unknown, (
+            "Installer source declares [Setup] section directives "
+            "that Inno Setup 6.7.3 does not recognise: "
+            + ", ".join(f"{d} (line {n})" for n, d in unknown)
+            + ". Remove them or use the supported replacement."
+        )
+
     def test_no_python_or_node_required(self) -> None:
         text = _iss_text()
         # The installer source must not bundle or invoke a

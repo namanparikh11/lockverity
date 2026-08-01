@@ -117,10 +117,13 @@ AppMutex={#MyAppId},Global\{#MyAppId}
 SetupLogging=yes
 
 ; Compression: keep the .exe self-contained (no separate archive).
-; The installer is a single offline EXE.
+; The installer is a single offline EXE. ``DiskSpanning=no`` is the
+; only directive needed in Inno Setup 6.7.3 — the legacy
+; ``SlicesPerDisk`` and ``DiskDirectory`` directives are not
+; recognised in 6.7.3 (they are holdovers from 2.x/3.x-era Inno
+; Setup and the compiler reports them as
+; ``Unrecognized [Setup] section directive``).
 DiskSpanning=no
-SlicesPerDisk=1
-DiskDirectory=.
 
 [Languages]
 Name: "english"; MessagesFile: "compiler:Default.isl"
