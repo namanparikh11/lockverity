@@ -362,10 +362,12 @@ def _build_installer(
         )
         staged_iss.write_text(staged_iss_text, encoding="utf-8")
     # ``ISCC`` writes its build log to ``{app}\\`` by default.
-    # The /O<full-path> flag sets the final installer EXE path
-    # (directory + filename). The /F<base-name> flag is *not*
-    # needed when /O<full-path> is given — /O is the canonical
-    # way to control the output. There is no ``/OutputDir`` or
+    # The /O flag is the output *directory* (ISCC appends the
+    # ``OutputBaseFilename`` from the .iss). The final filename
+    # is taken from the .iss's ``OutputBaseFilename`` directive
+    # (committed in ``backend/installer/lockverity.iss``), so
+    # the .iss remains the single source of truth for the
+    # final name. There is no ``/OutputDir`` or
     # ``/OutputBaseFilename`` long form in ISCC; the long forms
     # used in earlier revisions of this script were being
     # parsed as ``/O utputDir=...`` and ``/F utputBaseFilename=...``
@@ -375,11 +377,9 @@ def _build_installer(
     # they are NOT command-line flags (``/AppId`` and
     # ``/AppVersion`` are not valid ISCC options). The committed
     # .iss is the single source of truth for both values.
-    installer_name = "Lockverity-2.1.0-windows-x64-setup.exe"
-    installer_full_path = output_dir / installer_name
     cmd: list[str] = [
         str(iscc),
-        f"/O{installer_full_path}",
+        f"/O{output_dir}",
         str(staged_iss),
     ]
     _log("iscc", f"running {iscc}")
@@ -395,6 +395,9 @@ def _build_installer(
         )
     if result.returncode != 0:
         raise SystemExit(f"ERROR: ISCC failed (rc={result.returncode}); see {log_path}")
+    # The .iss's ``OutputBaseFilename`` directive controls the
+    # final filename; ISCC appends ``.exe`` automatically.
+    installer_name = "Lockverity-2.1.0-windows-x64-setup.exe"
     installer_exe = output_dir / installer_name
     if not installer_exe.is_file():
         raise SystemExit(f"ERROR: expected installer EXE not produced: {installer_exe}")

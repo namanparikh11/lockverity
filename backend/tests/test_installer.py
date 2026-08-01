@@ -796,7 +796,7 @@ class TestBuildScriptContract:
         ), "Build script must record the default LocalAppData install path"
 
     def test_build_script_uses_canonical_iscc_output_flag(self) -> None:
-        # Regression: the build script passed
+        # Regression: the build script originally passed
         # ``/OutputDir=<abs-path>`` and
         # ``/OutputBaseFilename=<name>`` as command-line flags to
         # ISCC. Neither is a valid ISCC 6.7.3 flag — the parser
@@ -804,8 +804,11 @@ class TestBuildScriptContract:
         # and the rest of the string becomes the switch's
         # argument, leading to ``I/O error 123``
         # (``ERROR_INVALID_NAME``) on the resulting path. The
-        # canonical, supported ISCC flag for the output file is
-        # ``/O<full-path>`` (directory + filename in one go).
+        # canonical, supported ISCC flag for the output
+        # *directory* is ``/O<directory>``; the final filename
+        # is taken from the .iss's ``OutputBaseFilename``
+        # directive (which is the single source of truth for the
+        # final name).
         text = _build_text()
         import re
 
@@ -813,21 +816,23 @@ class TestBuildScriptContract:
         assert not re.search(r"[\"']/OutputDir=", text), (
             "Build script must not pass the non-existent "
             "``/OutputDir=`` flag to ISCC; use the canonical "
-            "``/O<full-path>`` flag instead"
+            "``/O<directory>`` flag instead"
         )
         # The long-form ``/OutputBaseFilename=`` flag must not be
-        # present either — ``/O<full-path>`` already controls
-        # the final filename.
+        # present either — the .iss's ``OutputBaseFilename``
+        # directive is the source of truth.
         assert not re.search(r"[\"']/OutputBaseFilename=", text), (
             "Build script must not pass the non-existent "
-            "``/OutputBaseFilename=`` flag to ISCC; use the "
-            "canonical ``/O<full-path>`` flag instead"
+            "``/OutputBaseFilename=`` flag to ISCC; the .iss's "
+            "``OutputBaseFilename`` directive is the source of "
+            "truth"
         )
-        # The canonical ``/O<full-path>`` flag must be used.
-        assert re.search(r"[\"']/O\{installer_full_path\}[\"']", text), (
+        # The canonical ``/O<directory>`` flag must be used.
+        assert re.search(r"[\"']/O\{output_dir\}[\"']", text), (
             "Build script must pass the canonical ISCC "
-            "``/O<full-path>`` command-line flag (directory + "
-            "filename in one go)"
+            "``/O<directory>`` command-line flag (output "
+            "directory only; the filename is taken from the "
+            ".iss's ``OutputBaseFilename`` directive)"
         )
 
     def test_build_script_copies_iss_into_staging(self) -> None:
