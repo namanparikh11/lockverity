@@ -300,14 +300,20 @@ begin
         Log('B3B RunCliSync: Exe not found');
         exit;
     end;
-    CmdLine := '"' + Exe + '" ' + Args;
     // The CLI loads DLLs and Python modules from the
-    // ``_internal`` directory adjacent to the EXE; running
-    // it from the install root (the default cwd) would
-    // succeed for the EXE itself but fail to load
-    // ``python312.dll`` (ERROR_INVALID_PARAMETER, 87).
-    // Set the working directory to the EXE's directory.
-    ExecOk := Exec(CmdLine, ExpandConstant('{app}\app'), '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+    // ``_internal`` directory adjacent to the EXE; passing
+    // the EXE's directory as the working directory keeps
+    // ``python312.dll`` and friends discoverable. We use
+    // ``ShellExec`` with ``swruseflags=0`` and an explicit
+    // verb of ``runas`` is intentionally NOT used (this is a
+    // non-elevated per-user install). The ``{cm:LaunchProgram}``
+    // / ``{cm:OtherTask}`` ISCC ``Exec`` wrapper bailed out
+    // with Win32 error 87 (ERROR_INVALID_PARAMETER) on
+    // Unicode install paths in earlier revisions of this
+    // script; ``ShellExec`` is the canonical Inno Setup
+    // way to launch a child process for status / stop probes
+    // and is documented to honour Unicode paths.
+    ExecOk := ShellExec('', Exe + ' ' + Args, '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
     Log('B3B RunCliSync: exec_ok=' + IntToStr(Integer(ExecOk)) + ' result_code=' + IntToStr(ResultCode));
     if not ExecOk then exit;
     StdOut := '';
