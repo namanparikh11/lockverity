@@ -317,6 +317,7 @@ begin
     // a verified live instance is recorded in the state file.
     Rc := RunCliSync('status', 15);
     Result := (Rc = 'ok');
+    Log('B3B HasLiveInstance: status_rc=' + Rc);
 end;
 
 // Request a graceful stop via the installed CLI. We block until
@@ -330,6 +331,7 @@ begin
     Result := False;
     Rc := RunCliSync('stop', GRACEFUL_STOP_TIMEOUT_S);
     Result := (Rc = 'ok');
+    Log('B3B RequestGracefulStop: stop_rc=' + Rc);
 end;
 
 // Called by Inno Setup before the installer replaces files. If a

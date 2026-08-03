@@ -188,7 +188,7 @@ def step_smoke(install_dir: Path, home_dir: Path, port: int, log: Path) -> dict[
     }
 
 
-def step_uninstall(install_dir: Path, log: Path) -> dict[str, object]:
+def step_uninstall(install_dir: Path, home_dir: Path, log: Path) -> dict[str, object]:
     """Run the actual Inno Setup-generated uninstaller.
 
     The Inno Setup installer EXE is *also* the uninstaller when
@@ -198,6 +198,14 @@ def step_uninstall(install_dir: Path, log: Path) -> dict[str, object]:
     reinstalls, so we have to drive the per-install
     ``unins000.exe`` instead. The per-user uninstall registry
     entry points at this exact file.
+
+    The test home is passed via ``LOCKVERITY_HOME`` so the
+    uninstaller's [Code] section can find the live state
+    file (which the test created with the same home) and
+    drive the identity-verified Part B2 graceful stop before
+    file deletion. The default ``{localappdata}\\Lockverity``
+    is the production default; tests that override the home
+    must propagate the same override to the uninstaller.
     """
     uninstaller = install_dir / "unins000.exe"
     if not uninstaller.is_file():
@@ -206,6 +214,8 @@ def step_uninstall(install_dir: Path, log: Path) -> dict[str, object]:
             "ok": False,
             "reason": f"uninstaller not found: {uninstaller}",
         }
+    env = os.environ.copy()
+    env["LOCKVERITY_HOME"] = str(home_dir)
     cmd = [
         str(uninstaller),
         "/VERYSILENT",
@@ -214,7 +224,13 @@ def step_uninstall(install_dir: Path, log: Path) -> dict[str, object]:
         f"/LOG={log}",
     ]
     result = subprocess.run(  # noqa: S603 - argv is built by us
-        cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=300
+        cmd,
+        env=env,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        timeout=300,
     )
     return {
         "step": "uninstall",
@@ -314,7 +330,11 @@ def step_uninstall_while_running(
     # B2) via the AppMutex detection, then the rest of the
     # uninstall proceeds. The actual uninstaller we invoke is
     # the per-install ``unins000.exe``, not the installer EXE.
+    # The test's ``LOCKVERITY_HOME`` is forwarded so the [Code]
+    # can locate the live state file.
     uninstaller = install_dir / "unins000.exe"
+    env = os.environ.copy()
+    env["LOCKVERITY_HOME"] = str(home_dir)
     cmd = [
         str(uninstaller),
         "/VERYSILENT",
@@ -323,7 +343,13 @@ def step_uninstall_while_running(
         f"/LOG={log}",
     ]
     uninstall_result = subprocess.run(  # noqa: S603 - argv is built by us
-        cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=300
+        cmd,
+        env=env,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        timeout=300,
     )
     try:
         start_proc.wait(timeout=30)
@@ -462,7 +488,13 @@ def main(argv: list[str] | None = None) -> int:
     )
 
     # Step 8: uninstall (final cleanup)
-    steps.append(step_uninstall(args.install_dir, log_dir / "b3b-step8-uninstall-final.log"))
+    steps.append(
+        step_uninstall(
+            args.install_dir,
+            args.home_dir,
+            log_dir / "b3b-step8-uninstall-final.log",
+        )
+    )
 
     # Step 9: verify install dir removed
     install_dir_after = args.install_dir.is_dir()
