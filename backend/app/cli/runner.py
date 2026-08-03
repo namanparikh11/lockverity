@@ -90,7 +90,7 @@ import psutil
 
 from app import __version__
 from app.cli import lock as start_lock
-from app.cli.home import ensure_home, logs_dir
+from app.cli.home import data_dir, ensure_home, logs_dir
 from app.cli.logging_setup import configure_logging, get_cli_logger
 from app.cli.process import (
     IdentityMatch,
@@ -599,7 +599,33 @@ def start(
     # Migrations first; abort if Alembic fails so we
     # never launch a server against a stale schema.
     if database_url is None:
-        database_url = get_settings().database_url
+        # Honour an explicit operator override on the
+        # supervisor's process environment. The operator
+        # can pin the database location with
+        # ``LOCKVERITY_DATABASE_URL`` in the parent shell;
+        # the supervisor must pass that through verbatim
+        # so a developer / CI override is never silently
+        # shadowed by the default.
+        explicit = os.environ.get("LOCKVERITY_DATABASE_URL", "").strip()
+        if explicit:
+            database_url = explicit
+        else:
+            # The default must be CWD-independent. A
+            # relative ``sqlite:///./lockverity.sqlite``
+            # URL would resolve to whatever the process
+            # CWD happened to be at start time -- which
+            # in the v2.1 Part B3B acceptance flow was
+            # the install directory (the install root or
+            # ``{app}\app\``), leaving ``lockverity.sqlite``
+            # beside the installed executables. The
+            # install directory must remain read-only
+            # application content in production; runtime
+            # data goes under ``home/data/``. The
+            # absolute ``sqlite:///<home>/data/...`` URL
+            # is invariant of the caller's CWD in every
+            # mode (source, portable, installed, frozen).
+            default_db_path = data_dir(home) / "lockverity.sqlite"
+            database_url = f"sqlite:///{default_db_path.as_posix()}"
     # Acquire the start lock for the entire lifetime
     # of the child. The lock is released in the
     # ``finally`` block so a crash during migration,

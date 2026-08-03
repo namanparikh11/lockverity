@@ -68,6 +68,16 @@ ArchitecturesInstallIn64BitMode=x64compatible
 ; ``{autoprograms}``, ``{autostartmenu}``, etc.) and
 ; ``{localappdata}`` is already inherently per-user.)
 DefaultDirName={localappdata}\Programs\{#MyAppName}
+; Dedicated Start Menu program group so the Lockverity
+; shortcuts live in ``Programs\Lockverity\`` (a coherent
+; per-app folder) rather than directly under the user's
+; default ``Programs\`` folder. ``DisableProgramGroupPage=yes``
+; suppresses the wizard's group-picker page so the user
+; never sees a confusing "where do you want shortcuts?"
+; prompt on a per-user install; the group name is fixed by
+; the installer and the resulting shortcuts land in
+; ``%APPDATA%\Microsoft\Windows\Start Menu\Programs\Lockverity\``.
+DefaultGroupName={#MyAppDisplayName}
 DisableProgramGroupPage=yes
 AllowNoIcons=yes
 DisableDirPage=auto
@@ -170,6 +180,25 @@ Source: "root_extra\*"; DestDir: "{app}"; Flags: "ignoreversion recursesubdirs"
 Source: "..\pyinstaller\favicon-exe.ico"; DestDir: "{app}"; \
     Flags: "ignoreversion"
 
+[Run]
+; Completion-page "Launch Lockverity" checkbox. The
+; entry creates a single checkbox on the wizard's
+; finished page. ``postinstall`` registers the
+; checkbox; ``nowait`` returns control to the wizard
+; immediately (the launcher is a windowless graphical
+; exe that returns after handing off to the
+; ``lockverity-cli`` subprocess, so we do not want
+; the wizard to block on its exit code); ``unchecked``
+; leaves the checkbox off by default so the operator
+; has to opt in (the more conservative default for a
+; per-user security product); ``skipifsilent`` keeps
+; the launch out of silent / unattended installs so a
+; CI / acceptance installer never opens a browser. The
+; Filename points at the installed ``Lockverity.exe``,
+; the documented graphical launcher.
+Filename: "{app}\{#MyAppExeName}"; Description: "Launch Lockverity"; \
+    Flags: nowait postinstall unchecked skipifsilent
+
 [Icons]
 ; Start Menu shortcut under a dedicated Lockverity folder. The
 ; uninstaller removes this entry by following the standard
@@ -208,6 +237,26 @@ Name: "{app}"
 Type: filesandordirs; Name: "{app}\{#MyAppPayloadDir}"
 Type: filesandordirs; Name: "{app}\docs"
 Type: filesandordirs; Name: "{app}\favicon-exe.ico"
+; Defensive cleanup: if a previous install (or a
+; crashed / interrupted run) left runtime artefacts
+; in the install root (e.g. ``lockverity.sqlite``,
+; WAL / journal sidecars, log files, lock files,
+; pid files) delete them as part of the uninstall so
+; the install root is fully removed. The application
+; is required to keep runtime data under the runtime
+; home (Part B2 ``LOCKVERITY_HOME``), so any such
+; file at the install root is a leftover from a
+; misconfigured / crashed prior run. The patterns
+; use ``Type: files`` (not ``filesandordirs``) so a
+; maliciously-named directory cannot be removed
+; silently; the patterns only match files at the
+; install root, not subdirectories.
+Type: files; Name: "{app}\*.sqlite"
+Type: files; Name: "{app}\*.sqlite-*"
+Type: files; Name: "{app}\*.log"
+Type: files; Name: "{app}\*.lock"
+Type: files; Name: "{app}\*.pid"
+Type: files; Name: "{app}\*.state.json"
 
 [Code]
 // =====================================================================

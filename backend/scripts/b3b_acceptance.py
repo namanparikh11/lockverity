@@ -140,6 +140,19 @@ def step_verify_installed_payload(install_dir: Path) -> dict[str, object]:
 def step_smoke(install_dir: Path, home_dir: Path, port: int, log: Path) -> dict[str, object]:
     installed_cli = install_dir / "app" / "lockverity-cli.exe"
     env = _restricted_env(home_dir)
+    # The CLI is started with the install dir as the
+    # caller's CWD on purpose: the v2.1 Part B3B
+    # release-blocker regression test verifies the
+    # default database URL is **CWD-independent** --
+    # a relative ``sqlite:///./lockverity.sqlite`` URL
+    # would resolve under the install dir; the fixed
+    # default (resolved under the runtime home) must
+    # not. The CLI's own CWD must be the install dir
+    # to mirror the documented
+    # "double-click ``Lockverity.exe`` from the Start
+    # Menu" launch path, where Windows gives the
+    # launcher / CLI a per-user CWD that is *not* the
+    # install dir.
     start_proc = subprocess.Popen(  # noqa: S603 - argv is built by us
         [str(installed_cli), "start", "--port", str(port)],
         env=env,
@@ -153,6 +166,21 @@ def step_smoke(install_dir: Path, home_dir: Path, port: int, log: Path) -> dict[
         if _is_responsive(f"http://127.0.0.1:{port}/api/v1/health"):
             health_ok = True
             break
+    # Snapshot the install dir and the runtime home so
+    # the test can prove the SQLite database landed
+    # under ``home/data/`` and *not* under the install
+    # dir. The list of ``*.sqlite`` files is the
+    # canonical evidence: the install dir must contain
+    # zero of them; the runtime home must contain
+    # exactly one. (The runtime home may also have
+    # WAL / SHM sidecars; we only count the main
+    # ``lockverity.sqlite`` file here.)
+    install_dir_sqlite = [str(p) for p in install_dir.rglob("*.sqlite")]
+    home_dir_sqlite = (
+        sorted(str(p) for p in (home_dir / "data").glob("*.sqlite"))
+        if (home_dir / "data").is_dir()
+        else []
+    )
     # Query status
     status_result = subprocess.run(  # noqa: S603 - argv is built by us
         [str(installed_cli), "status", "--json"],
@@ -185,6 +213,11 @@ def step_smoke(install_dir: Path, home_dir: Path, port: int, log: Path) -> dict[
         "status_stdout_tail": (status_result.stdout or "")[-1000:],
         "stop_rc": stop_result.returncode,
         "stop_stdout_tail": (stop_result.stdout or "")[-500:],
+        # CWD-independence evidence.
+        "install_dir_sqlite_files": install_dir_sqlite,
+        "home_dir_sqlite_files": home_dir_sqlite,
+        "database_under_home": bool(home_dir_sqlite),
+        "no_database_under_install_dir": not bool(install_dir_sqlite),
     }
 
 
@@ -520,13 +553,32 @@ def main(argv: list[str] | None = None) -> int:
         )
     )
 
-    # Step 9: verify install dir removed
+    # Step 9: verify install dir removed. The Inno
+    # Setup uninstaller renames ``unins000.exe`` to a
+    # hidden name (``_unin*.tmp``) and the renamed
+    # file deletes itself at the very end of the
+    # uninstall. On a busy host (anti-virus scanning
+    # the file, or a still-closing child Lockverity
+    # process) the self-delete can take a few
+    # seconds. We wait for the install dir to disappear
+    # (the install dir cannot exist if the uninstaller
+    # renamed itself, ran the file-deletion phase, and
+    # self-deleted) up to a bounded timeout, then record
+    # the result. A failure here means a manual operator
+    # step would be required to clean up -- the test
+    # reports it as ``install_dir_removed_after_wait=False``
+    # instead of claiming success.
+    _uninst_deadline = time.monotonic() + 30.0
     install_dir_after = args.install_dir.is_dir()
+    while install_dir_after and time.monotonic() < _uninst_deadline:
+        time.sleep(0.5)
+        install_dir_after = args.install_dir.is_dir()
     install_dir_files = list(args.install_dir.glob("**/*"))[:20] if install_dir_after else []
     steps.append(
         {
             "step": "post_uninstall_install_dir_state",
             "install_dir_exists": install_dir_after,
+            "install_dir_removed_after_wait": not install_dir_after,
             "install_dir_files": [str(p) for p in install_dir_files],
         }
     )
@@ -534,11 +586,30 @@ def main(argv: list[str] | None = None) -> int:
     # Step 10: runtime home preservation
     home_after = args.home_dir.is_dir()
     home_files = list(args.home_dir.glob("**/*"))[:20] if home_after else []
+    home_dir_sqlite = (
+        sorted(str(p) for p in (args.home_dir / "data").glob("*.sqlite"))
+        if (args.home_dir / "data").is_dir()
+        else []
+    )
+    home_dir_logs = (
+        sorted(str(p) for p in (args.home_dir / "logs").glob("*.log"))
+        if (args.home_dir / "logs").is_dir()
+        else []
+    )
+    home_dir_state = (
+        sorted(str(p) for p in (args.home_dir / "run").glob("*.json"))
+        if (args.home_dir / "run").is_dir()
+        else []
+    )
     steps.append(
         {
             "step": "runtime_home_preservation",
             "home_dir_exists": home_after,
             "home_files_sample": [str(p) for p in home_files],
+            "home_dir_data_sqlite": home_dir_sqlite,
+            "home_dir_logs": home_dir_logs,
+            "home_dir_state_files": home_dir_state,
+            "database_preserved_in_home": bool(home_dir_sqlite),
         }
     )
 

@@ -381,6 +381,136 @@ class TestInstallerSourceContract:
         assert "ShouldRunPostInstall" in text
         assert "param:NoRun" in text or "NoRun" in text
 
+    def test_run_section_has_postinstall_launch(self) -> None:
+        # The completion-page "Launch Lockverity" checkbox
+        # is implemented by a single ``[Run]`` entry that
+        # runs the installed ``Lockverity.exe`` after the
+        # install. The entry must be guarded by
+        # ``skipifsilent`` so a silent / unattended install
+        # never opens the graphical launcher (and never
+        # opens a browser window). The ``postinstall`` flag
+        # registers the completion-page checkbox. The
+        # ``unchecked`` flag leaves the checkbox off by
+        # default so the operator has to opt in.
+        text = _iss_text()
+        assert "[Run]" in text, "Installer must declare a [Run] section"
+        run_section = text.split("[Run]", 1)[1]
+        next_section = run_section.find("[")
+        if next_section != -1:
+            run_section = run_section[:next_section]
+        joined = " ".join(
+            stripped
+            for stripped in (line.strip() for line in run_section.splitlines())
+            if stripped and not stripped.startswith(";")
+        )
+        # The launcher target must use the ``{app}``
+        # constant so the path resolves to the actual
+        # install location (and never a relative or
+        # portable path that depends on the install
+        # layout).
+        assert "Filename:" in joined, (
+            "[Run] section must contain a Filename: directive"
+        )
+        # The Filename must point at the installed
+        # ``Lockverity.exe`` via the documented
+        # ``{#MyAppExeName}`` define (which the source
+        # pins to ``Lockverity.exe``). We accept either
+        # the define form (``{#MyAppExeName}``) or the
+        # literal name (``Lockverity.exe``); the former
+        # is canonical because the source uses the
+        # define for the rest of the install.
+        assert (
+            "{#MyAppExeName}" in joined or "Lockverity.exe" in joined
+        ), "[Run] Filename: must point at the installed Lockverity.exe"
+        # The Flags: line must include ``postinstall``
+        # (checkbox on the finished page) and
+        # ``skipifsilent`` (never auto-launch under
+        # /VERYSILENT). The ``nowait`` and ``unchecked``
+        # flags are the documented defaults but not
+        # strictly required -- the regression contract
+        # is "checkbox is visible" + "no launch in
+        # silent mode".
+        assert "postinstall" in joined, (
+            "[Run] must include 'postinstall' so the completion-page "
+            "checkbox is registered"
+        )
+        assert "skipifsilent" in joined, (
+            "[Run] must include 'skipifsilent' so a silent install "
+            "never opens the graphical launcher or a browser window"
+        )
+
+    def test_default_group_name_is_lockverity(self) -> None:
+        # The Start Menu shortcuts must live in a
+        # dedicated ``Programs\\Lockverity\\`` folder,
+        # not directly under the user's default
+        # ``Programs\\`` folder. ``DisableProgramGroupPage=yes``
+        # is acceptable (it suppresses the wizard's
+        # group-picker page so the user never sees a
+        # confusing prompt on a per-user install); what
+        # matters is the ``DefaultGroupName`` directive,
+        # which is the canonical value the ``{group}``
+        # constant resolves to when the group page is
+        # disabled.
+        text = _iss_text()
+        match = re.search(
+            r"DefaultGroupName\s*=\s*\{?#MyAppDisplayName\}?",
+            text,
+        )
+        assert match, (
+            "Installer source must declare "
+            "'DefaultGroupName={#MyAppDisplayName}' so the Start Menu "
+            "shortcuts land in Programs\\Lockverity\\, not in the user's "
+            "default Programs\\(Default)\\ folder."
+        )
+
+    def test_uninstall_deletes_runtime_artefact_patterns(self) -> None:
+        # Defensive cleanup: if a prior crashed /
+        # misconfigured run left runtime artefacts
+        # (SQLite database, WAL / SHM / journal sidecars,
+        # log files, lock files, pid files, state files)
+        # in the install root, the uninstaller must
+        # remove them. The default Part B2 database
+        # URL is CWD-independent (so this is a
+        # defence-in-depth measure for a misconfigured
+        # ``LOCKVERITY_DATABASE_URL`` override), but the
+        # pattern is a hard contract: the install dir
+        # must be fully removable after the uninstall.
+        text = _iss_text()
+        assert "[UninstallDelete]" in text, (
+            "Installer must declare a [UninstallDelete] section"
+        )
+        section = text.split("[UninstallDelete]", 1)[1]
+        next_section = section.find("[")
+        if next_section != -1:
+            section = section[:next_section]
+        # Parse the ``Name:`` patterns out of the
+        # multi-directive lines. Inno Setup allows
+        # multiple directives per line separated by
+        # ``;`` (e.g. ``Type: files; Name: "{app}\*.log"``).
+        # The naive "starts with name:" parser would
+        # miss them; we tokenise on ``;`` and inspect
+        # every ``Name:`` token.
+        names: list[str] = []
+        for line in section.splitlines():
+            stripped = line.strip()
+            if not stripped or stripped.startswith(";"):
+                continue
+            for token in stripped.split(";"):
+                tok = token.strip()
+                if tok.lower().startswith("name:"):
+                    names.append(tok.split(":", 1)[1].strip())
+        required = [
+            r"{app}\*.sqlite",
+            r"{app}\*.sqlite-*",
+            r"{app}\*.log",
+        ]
+        for pattern in required:
+            assert any(pattern in name for name in names), (
+                f"[UninstallDelete] must include a Name: pattern that "
+                f"deletes {pattern!r} so the install root is fully "
+                f"removable after uninstall. Found patterns: {names!r}"
+            )
+
     def test_runtime_data_preserved_on_uninstall(self) -> None:
         text = _iss_text()
         # The uninstall must NOT remove the runtime data home.
