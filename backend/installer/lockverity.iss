@@ -300,14 +300,19 @@ begin
         Log('B3B RunCliSync: Exe not found');
         exit;
     end;
-    CmdLine := '"' + Exe + '" ' + Args;
-    // The CLI loads DLLs and Python modules from the
-    // ``_internal`` directory adjacent to the EXE. We set
-    // the working directory to the EXE's directory so
-    // ``python312.dll`` and friends are discoverable. The
-    // ``Exec`` function signature is
+    // The ``Exec`` function signature is
     // ``(Filename, Params, WorkingDir, ShowCmd, Wait, ResultCode)``.
-    ExecOk := Exec(CmdLine, '', ExpandConstant('{app}\app'), SW_HIDE, ewWaitUntilTerminated, ResultCode);
+    // We pass the absolute Exe path unquoted (the path has
+    // no whitespace problems once it is absolute; quoting
+    // caused ERROR_INVALID_PARAMETER 87 in earlier
+    // revisions because ``ShellExecuteEx`` treats the quoted
+    // string as a verb-relative lookup). The working
+    // directory is the EXE's directory so ``python312.dll``
+    // and friends are discoverable. Args is passed as the
+    // Params argument, which Inno Setup ``Exec`` appends to
+    // the Filename with the standard Windows command-line
+    // escaping rules.
+    ExecOk := Exec(Exe, Args, ExpandConstant('{app}\app'), SW_HIDE, ewWaitUntilTerminated, ResultCode);
     Log('B3B RunCliSync: exec_ok=' + IntToStr(Integer(ExecOk)) + ' result_code=' + IntToStr(ResultCode));
     if not ExecOk then exit;
     StdOut := '';
