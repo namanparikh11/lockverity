@@ -283,12 +283,21 @@ var
     Exe: string;
     CmdLine, StdOut: string;
     ResultCode: Integer;
+    ExecOk: Boolean;
 begin
     Result := '';
     Exe := ExpandConstant('{app}') + '\' + CLI_RELATIVE;
-    if not FileExists(Exe) then exit;
+    Log('B3B RunCliSync: exe=' + Exe);
+    Log('B3B RunCliSync: args=' + Args);
+    if not FileExists(Exe) then
+    begin
+        Log('B3B RunCliSync: Exe not found');
+        exit;
+    end;
     CmdLine := '"' + Exe + '" ' + Args;
-    if not Exec(CmdLine, '', '', SW_HIDE, ewWaitUntilTerminated, ResultCode) then exit;
+    ExecOk := Exec(CmdLine, '', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+    Log('B3B RunCliSync: exec_ok=' + IntToStr(Integer(ExecOk)) + ' result_code=' + IntToStr(ResultCode));
+    if not ExecOk then exit;
     StdOut := '';
     // ``Exec`` does not return stdout directly; ``ExecAsUser``
     // would require a temporary script. The CLI is well-behaved
