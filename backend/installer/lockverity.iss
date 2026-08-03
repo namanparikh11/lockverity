@@ -236,15 +236,24 @@ Filename: "{app}\{#MyAppPayloadDir}\{#MyAppExeName}"; Description: "Launch Lockv
 [Icons]
 ; Start Menu shortcut under a dedicated Lockverity folder. The
 ; uninstaller removes this entry by following the standard
-; ``{group}\`` rule.
-Name: "{group}\{#MyAppDisplayName}"; Filename: "{app}\{#MyAppExeName}"; \
-    IconFilename: "{app}\{#MyAppExeName}"; IconIndex: 0; \
+; ``{group}\`` rule. All three Start Menu shortcuts point at
+; the **actual installed** graphical launcher at
+; ``{app}\app\Lockverity.exe`` (the inner ``app\``
+; subdirectory, not the install root) because the accepted
+; v2.1 Part B3A payload is installed verbatim under
+; ``{app}\app\``. Pointing at ``{app}\Lockverity.exe``
+; would target a file that does not exist on disk.
+Name: "{group}\{#MyAppDisplayName}"; Filename: "{app}\{#MyAppPayloadDir}\{#MyAppExeName}"; \
+    IconFilename: "{app}\{#MyAppPayloadDir}\{#MyAppExeName}"; IconIndex: 0; \
+    WorkingDir: "{app}\{#MyAppPayloadDir}"; \
     Comment: "Launch Lockverity"
 Name: "{group}\Lockverity documentation"; Filename: "{app}\docs\windows-installer.md"; \
-    IconFilename: "{app}\{#MyAppExeName}"; IconIndex: 0; \
+    IconFilename: "{app}\{#MyAppPayloadDir}\{#MyAppExeName}"; IconIndex: 0; \
+    WorkingDir: "{app}\{#MyAppPayloadDir}"; \
     Comment: "Lockverity installer documentation"
 Name: "{group}\Uninstall {#MyAppDisplayName}"; Filename: "{uninstallexe}"; \
-    IconFilename: "{app}\{#MyAppExeName}"; IconIndex: 0; \
+    IconFilename: "{app}\{#MyAppPayloadDir}\{#MyAppExeName}"; IconIndex: 0; \
+    WorkingDir: "{app}\{#MyAppPayloadDir}"; \
     Comment: "Uninstall Lockverity"
 
 ; Optional desktop shortcut. The shortcut points at the
