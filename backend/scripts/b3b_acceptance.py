@@ -37,9 +37,9 @@ DEFAULT_INSTALLER = REPO_ROOT / "build" / "installer" / "Lockverity-2.1.0-window
 DEFAULT_INSTALL_DIR = Path(r"C:\Temp\Lockverity B3B Unicode Ω\Lockverity")
 DEFAULT_RUNTIME_HOME = Path(r"C:\Temp\Lockverity B3B Unicode Ω\Home")
 DEFAULT_LOG_DIR = REPO_ROOT / "build" / "installer" / "logs"
-EXPECTED_LOCKVERITY_EXE_SHA256 = "11f4fef6a79f60d215b4ccb3158a5cdc93dca56cac3e086dde287bbc58aaa0a8"
+EXPECTED_LOCKVERITY_EXE_SHA256 = "3ff7f81eac4b1709986dec8396801b2798fd7813440280ed03cb0897a27ac4fe"
 EXPECTED_LOCKVERITY_CLI_EXE_SHA256 = (
-    "73b8a3ce2a971095512af735f2dcd13e82aef008c4aa949baf4d9861b48d5313"
+    "8c27a93cb9f2cd9669afb103e465e90148a7931dc3fe8bc9e0bdaf3187c7cb52"
 )
 
 
