@@ -8,6 +8,25 @@ the operator's `PATH`, does **not** install a Windows service, does
 **not** register an autorun entry, does **not** add a firewall rule,
 and does **not** require administrator privilege.
 
+### Accepted v2.1 B3A portable payload (supersession ledger)
+
+The v2.1 B3B installer embeds the accepted Part B3A portable payload
+that was built from a commit which already contains the
+**CWD-independent runtime database** fix. The fix is the v2.1
+Part B3B release-blocker correction: the historical default
+`sqlite:///./lockverity.sqlite` (CWD-relative) was replaced with a
+runtime-home-relative absolute path so an installed Lockverity never
+writes its database beside the installed executables.
+
+| Ledger entry | Source commit | Portable ZIP SHA-256 | Lockverity.exe SHA-256 | lockverity-cli.exe SHA-256 | Status |
+| --- | --- | --- | --- | --- | --- |
+| Original v2.1 B3A | `81b400bc40ae6ada2787470fca8b31c5ea8b1c30` | `ec9a4d3fdf160e5364a62acba25fc2bcbaaf5e067ba116cd3f355d2c61cca588` | `beecc5cd4d9d336f5adf450c947bf1db62a6493876a8250bfdba9889997ff059` | `f74f3e5b8631bf3ec5f018064367fd26a2b5b8b1cf19518a94a0deb40c2e4796` | **Superseded for v2.1** (CWD-relative default DB URL) |
+| Current v2.1 B3A | `c9b4bb5bcfb14f3143d72e3ba11d21e4490d8f09` | `348b8c555b05f41b0b5ae762c5edc125c509785470903abbd6e74626b5bb2f7e` | `11f4fef6a79f60d215b4ccb3158a5cdc93dca56cac3e086dde287bbc58aaa0a8` | `73b8a3ce2a971095512af735f2dcd13e82aef008c4aa949baf4d9861b48d5313` | **Canonical for v2.1** (CWD-independent default DB URL) |
+
+The superseded payload is retained in the ledger so the correction
+trail is auditable. The final v2.1 installer (`03e1924a7c49f1c5e1e35efa7ca5ac2c7e3c4a003515d939c8708cdb9f5b4852`)
+embeds only the current payload.
+
 This page documents installation, silent install, runtime data
 separation, reinstall / repair, and uninstall. It also explains the
 unsigned / SmartScreen / antivirus behaviour you should expect.
