@@ -10,6 +10,7 @@ acceptance test reproducible from a non-interactive shell.
 
 from __future__ import annotations
 
+import importlib.util
 import sys
 from pathlib import Path
 
@@ -32,7 +33,6 @@ sys.argv = [
 
 # Import the b3b_acceptance module and run main().
 spec_path = BACKEND_ROOT / "scripts" / "b3b_acceptance.py"
-import importlib.util
 spec = importlib.util.spec_from_file_location("b3b_acceptance", spec_path)
 mod = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(mod)
