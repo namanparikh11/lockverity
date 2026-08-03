@@ -263,19 +263,35 @@ def step_reinstall_while_running(
             break
     # Now run the installer again (reinstall). The Pascal [Code]
     # in the .iss detects the running instance via AppMutex and
-    # requests a graceful stop before file replacement.
+    # requests a graceful stop before file replacement. We do
+    # *not* pass ``/CLOSEAPPS`` because Inno Setup's RestartManager
+    # does not handle the detached ``Lockverity.exe`` server
+    # reliably (the server is a detached child of the
+    # ``lockverity-cli.exe`` wrapper, and RestartManager walks
+    # the handle table from the installer process up — the
+    # detached server is not in the installer's handle table).
+    # The canonical B3B flow is the [Code]'s ``PrepareToInstall``
+    # hook which calls the installed ``lockverity-cli.exe stop``
+    # (Part B2 identity-verified). In silent mode the [Code]
+    # does not show a MsgBox; the operator would see the same
+    # flow in wizard mode with a Retry/Cancel prompt.
     cmd = [
         str(installer),
         "/VERYSILENT",
         "/SUPPRESSMSGBOXES",
         "/NORESTART",
         "/SP-",
-        "/CLOSEAPPS",
         f"/DIR={install_dir}",
         f"/LOG={log}",
     ]
     reinstall_result = subprocess.run(  # noqa: S603 - argv is built by us
-        cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=600
+        cmd,
+        env=env,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        timeout=600,
     )
     # Wait for process to exit (the AppMutex-detected graceful
     # stop should have made it exit).
