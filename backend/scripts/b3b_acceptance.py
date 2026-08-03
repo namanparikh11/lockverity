@@ -37,9 +37,9 @@ DEFAULT_INSTALLER = REPO_ROOT / "build" / "installer" / "Lockverity-2.1.0-window
 DEFAULT_INSTALL_DIR = Path(r"C:\Temp\Lockverity B3B Unicode Ω\Lockverity")
 DEFAULT_RUNTIME_HOME = Path(r"C:\Temp\Lockverity B3B Unicode Ω\Home")
 DEFAULT_LOG_DIR = REPO_ROOT / "build" / "installer" / "logs"
-EXPECTED_LOCKVERITY_EXE_SHA256 = "beecc5cd4d9d336f5adf450c947bf1db62a6493876a8250bfdba9889997ff059"
+EXPECTED_LOCKVERITY_EXE_SHA256 = "af8a777e2fb0fb7ae24998f9cfee2c66e9ed284dfcdeac6ccf0ad3cf84723b59"
 EXPECTED_LOCKVERITY_CLI_EXE_SHA256 = (
-    "f74f3e5b8631bf3ec5f018064367fd26a2b5b8b1cf19518a94a0deb40c2e4796"
+    "99196d1e92ebcba3363d459cd7a21811762ae85a4008b6f15ff885621ad2c428"
 )
 
 
@@ -442,18 +442,27 @@ def step_registry_review() -> dict[str, object]:
 def step_shortcut_review(install_dir: Path) -> dict[str, object]:
     """Inspect the Start Menu and desktop shortcut files.
 
-    The .iss declares the Start Menu group as ``(Default)`` —
-    a literal Inno Setup convention that maps to the user's
-    default Start Menu folder (``Programs\\(Default)\\``) — so
-    the shortcut files appear directly in ``Programs\\(Default)``
-    rather than in a per-app subfolder.
+    The .iss declares ``DefaultGroupName={#MyAppDisplayName}``
+    (== ``Lockverity``) and keeps
+    ``DisableProgramGroupPage=yes`` so the shortcuts land in
+    ``Programs\\Lockverity\\`` -- a coherent per-app folder
+    -- rather than the legacy ``Programs\\(Default)\\`` which
+    was a literal Inno Setup convention for the user's
+    default Programs folder. The function inspects both
+    the per-app folder and the legacy default folder so the
+    test is robust against a future installer that flips
+    the group name back to the default.
     """
     start_menu_root = (
         Path(os.environ["APPDATA"]) / "Microsoft" / "Windows" / "Start Menu" / "Programs"
     )
     desktop = Path(os.environ["USERPROFILE"]) / "Desktop"
     start_menu_files: list[str] = []
-    for sub in (start_menu_root, start_menu_root / "(Default)"):
+    for sub in (
+        start_menu_root / "Lockverity",
+        start_menu_root / "(Default)",
+        start_menu_root,
+    ):
         if sub.is_dir():
             for p in sub.glob("Lockverity*"):
                 if p.is_file():
