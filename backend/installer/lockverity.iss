@@ -349,29 +349,50 @@ begin
     HasLive := HasLiveInstance();
     if HasLive then
     begin
-        // Ask the operator to close the running Lockverity
-        // instance. The installer is non-elevated, so we cannot
-        // terminate the process. We also do not silently
-        // install on top of a live instance -- a partial
-        // upgrade would leave the locked files in an
-        // inconsistent state.
-        PromptResult := MsgBox(
-            'Lockverity is currently running.' + #13#10 + #13#10 +
-            'The installer cannot replace the application while the runtime is loaded.' + #13#10 +
-            'Please close Lockverity (right-click the system tray or taskbar icon) and click Retry, or Cancel to abort the install.' + #13#10 + #13#10 +
-            'When Lockverity has stopped, click Retry to continue.',
-            mbError, MB_RETRYCANCEL);
-        if PromptResult = IDRETRY then
+        // A live instance is using the locked files. In
+        // interactive (wizard) mode the operator is shown a
+        // ``MB_RETRYCANCEL`` prompt and can either close the
+        // instance and click Retry, or cancel the install. In
+        // silent mode (``/VERYSILENT`` / ``/SUPPRESSMSGBOXES``)
+        // the operator has explicitly opted out of UI; we
+        // attempt a graceful stop via the installed CLI and
+        // abort the install if it cannot be verified. The
+        // installer is non-elevated so we never terminate the
+        // process; a silent partial upgrade would leave the
+        // locked files in an inconsistent state, which is worse
+        // than an aborted install with a clear actionable error.
+        if WizardSilent then
         begin
-            // Operator confirms they have closed the instance.
-            // Re-check the state file before proceeding.
-            if HasLiveInstance() then
+            if not RequestGracefulStop() then
             begin
-                Result := 'Lockverity is still running. Please close it and try again.';
+                Result := 'Lockverity is still running and could not be stopped gracefully. Close Lockverity and re-run the installer.';
+            end
+            else if HasLiveInstance() then
+            begin
+                Result := 'Lockverity is still running after the graceful stop. Close Lockverity and re-run the installer.';
             end;
         end
         else
-            Result := 'Install cancelled by operator.';
+        begin
+            PromptResult := MsgBox(
+                'Lockverity is currently running.' + #13#10 + #13#10 +
+                'The installer cannot replace the application while the runtime is loaded.' + #13#10 +
+                'Please close Lockverity (right-click the system tray or taskbar icon) and click Retry, or Cancel to abort the install.' + #13#10 + #13#10 +
+                'When Lockverity has stopped, click Retry to continue.',
+                mbError, MB_RETRYCANCEL);
+            if PromptResult = IDRETRY then
+            begin
+                // Operator confirms they have closed the
+                // instance. Re-check the state file before
+                // proceeding.
+                if HasLiveInstance() then
+                begin
+                    Result := 'Lockverity is still running. Please close it and try again.';
+                end;
+            end
+            else
+                Result := 'Install cancelled by operator.';
+        end;
     end;
 end;
 
@@ -397,16 +418,26 @@ procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
 begin
     // ``CurUninstallStepChanged`` runs at each uninstall phase.
     // We use the pre-uninstall step to request a graceful
-    // shutdown of the installed instance.
+    // shutdown of the installed instance. The interactive
+    // (wizard) mode shows a non-blocking informational
+    // MsgBox if the graceful stop fails; the silent mode
+    // never shows UI and just logs to the install log.
     if CurUninstallStep = usUninstall then
     begin
         if HasLiveInstance() then
         begin
             if not RequestGracefulStop() then
             begin
-                MsgBox(
-                    'Lockverity is still running. The uninstaller will continue and remove the application files, but you may need to close Lockverity manually before the next install.',
-                    mbInformation, MB_OK);
+                if not WizardSilent then
+                begin
+                    MsgBox(
+                        'Lockverity is still running. The uninstaller will continue and remove the application files, but you may need to close Lockverity manually before the next install.',
+                        mbInformation, MB_OK);
+                end
+                else
+                begin
+                    Log('B3B uninstall: live instance did not stop gracefully; continuing uninstall');
+                end;
             end;
         end;
     end;
@@ -430,11 +461,22 @@ begin
     // ``UninstallAfterSuccess`` is called when the uninstall
     // finishes. We surface the retained-data path; the operator
     // is responsible for the optional manual data-removal step
-    // (documented in ``docs\windows-installer.md``).
-    MsgBox(
-        'Lockverity has been removed from this computer.' + #13#10 + #13#10 +
-        'Your runtime data, databases and logs were preserved in:' + #13#10 +
-        '  ' + ExpandConstant('{localappdata}') + '\Lockverity' + #13#10 + #13#10 +
-        'To remove the data manually, see the "Removing runtime data" section in the Lockverity documentation.',
-        mbInformation, MB_OK);
+    // (documented in ``docs\windows-installer.md``). The
+    // informational MsgBox is suppressed in silent mode so the
+    // unattended uninstall can complete without UI; the
+    // retained-data path is also written to the install log so
+    // an operator reviewing the log has the same information.
+    if not WizardSilent then
+    begin
+        MsgBox(
+            'Lockverity has been removed from this computer.' + #13#10 + #13#10 +
+            'Your runtime data, databases and logs were preserved in:' + #13#10 +
+            '  ' + ExpandConstant('{localappdata}') + '\Lockverity' + #13#10 + #13#10 +
+            'To remove the data manually, see the "Removing runtime data" section in the Lockverity documentation.',
+            mbInformation, MB_OK);
+    end
+    else
+    begin
+        Log('B3B uninstall: complete. Retained data at ' + ExpandConstant('{localappdata}') + '\Lockverity');
+    end;
 end;
