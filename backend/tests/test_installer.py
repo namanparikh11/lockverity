@@ -87,6 +87,22 @@ class TestInstallerSourceContract:
             "PrivilegesRequired must be ``lowest`` (no admin, no UAC)"
         )
 
+    def test_no_privilege_override_allowed(self) -> None:
+        # The v2.1 B3B release-blocker check requires the
+        # per-user contract to be enforced unconditionally.
+        # ``PrivilegesRequiredOverridesAllowed=dialog`` would
+        # re-introduce the "Install for all users" option in
+        # the wizard, which requires admin elevation and a
+        # UAC prompt -- a per-user installer must never offer
+        # that path.
+        text = _iss_text()
+        assert "PrivilegesRequiredOverridesAllowed" not in text, (
+            "Installer must not declare PrivilegesRequiredOverridesAllowed; "
+            "the per-user contract is unconditional. Declaring this directive "
+            "re-introduces the 'Install for all users' wizard option and the "
+            "UAC prompt, which the v2.1 B3B spec forbids."
+        )
+
     def test_architecture_x64(self) -> None:
         text = _iss_text()
         assert re.search(
@@ -258,6 +274,56 @@ class TestInstallerSourceContract:
             re.DOTALL,
         ), "Desktop shortcut task must be declared with Flags: unchecked"
 
+    def test_desktop_task_uses_explicit_english_description(self) -> None:
+        # The v2.1 B3B acceptance spec requires the desktop
+        # task to be visibly presented on the "Select
+        # Additional Tasks" wizard page with the documented
+        # text "Create a desktop shortcut". Using the Inno
+        # Setup default ``{cm:CreateDesktopIcon}`` is
+        # acceptable in the default English pack but a
+        # future translation pass could change the default
+        # and break the acceptance test; the explicit
+        # English description makes the contract
+        # language-independent.
+        text = _iss_text()
+        assert re.search(
+            r'Name:\s*"desktopicon"\s*;\s*Description:\s*"Create a desktop shortcut"',
+            text,
+        ), (
+            "Desktop task must declare Description: 'Create a desktop shortcut' "
+            "so the wizard shows the documented text on the Additional Tasks page"
+        )
+
+    def test_desktop_shortcut_uses_per_user_autodesktop(self) -> None:
+        # The desktop shortcut must use ``{autodesktop}``
+        # (the current user's desktop) -- not
+        # ``{commondesktop}`` (the all-users desktop at
+        # ``C:\Users\Public\Desktop``). A per-user install
+        # must not write to the public desktop.
+        text = _iss_text()
+        assert "{autodesktop}" in text, (
+            "Installer must use {autodesktop} for the desktop shortcut so it "
+            "lands in the current user's desktop, not the public desktop"
+        )
+        assert "{commondesktop}" not in text, (
+            "Installer must not use {commondesktop}; a per-user install must "
+            "not write to C:\\Users\\Public\\Desktop"
+        )
+
+    def test_license_page_is_declared(self) -> None:
+        # The v2.1 B3B acceptance spec requires a visible
+        # licence page before installation. The page is
+        # enabled by declaring ``LicenseFile=LICENSE`` in
+        # the [Setup] section. Without it Inno Setup does
+        # not show a licence page -- the previous UIAutomation
+        # walk captured no licence page and the regression
+        # here ensures the page is never silently dropped.
+        text = _iss_text()
+        assert re.search(r"^\s*LicenseFile\s*=\s*LICENSE\s*$", text, re.MULTILINE), (
+            "Installer must declare 'LicenseFile=LICENSE' in [Setup] so the "
+            "wizard renders a visible licence-acceptance page"
+        )
+
     def test_no_setup_logging_path_reveals_secrets(self) -> None:
         text = _iss_text()
         for forbidden in (
@@ -394,31 +460,48 @@ class TestInstallerSourceContract:
         # default so the operator has to opt in.
         text = _iss_text()
         assert "[Run]" in text, "Installer must declare a [Run] section"
-        run_section = text.split("[Run]", 1)[1]
-        next_section = run_section.find("[")
-        if next_section != -1:
-            run_section = run_section[:next_section]
-        joined = " ".join(
-            stripped
-            for stripped in (line.strip() for line in run_section.splitlines())
-            if stripped and not stripped.startswith(";")
-        )
+        # Extract the [Run] section body. Strip comment
+        # lines first so the next-section marker (e.g.
+        # ``[Icons]``) is only matched on directive lines.
+        after_run = text.split("[Run]", 1)[1]
+        non_comment_lines = [
+            ln for ln in after_run.splitlines() if ln.strip() and not ln.strip().startswith(";")
+        ]
+        # Find the next ``[`` that starts a section header
+        # (i.e. at the beginning of a non-comment line).
+        run_lines = []
+        for ln in non_comment_lines:
+            stripped = ln.strip()
+            if stripped.startswith("[") and stripped.endswith("]"):
+                break
+            run_lines.append(stripped)
+        joined = " ".join(run_lines)
         # The launcher target must use the ``{app}``
         # constant so the path resolves to the actual
         # install location (and never a relative or
         # portable path that depends on the install
         # layout).
-        assert "Filename:" in joined, "[Run] section must contain a Filename: directive"
-        # The Filename must point at the installed
-        # ``Lockverity.exe`` via the documented
-        # ``{#MyAppExeName}`` define (which the source
-        # pins to ``Lockverity.exe``). We accept either
-        # the define form (``{#MyAppExeName}``) or the
-        # literal name (``Lockverity.exe``); the former
-        # is canonical because the source uses the
-        # define for the rest of the install.
-        assert "{#MyAppExeName}" in joined or "Lockverity.exe" in joined, (
-            "[Run] Filename: must point at the installed Lockverity.exe"
+        assert "Filename:" in joined, (
+            f"[Run] section must contain a Filename: directive; got: {joined!r}"
+        )
+        # The Filename must point at the **actual installed**
+        # graphical launcher. The accepted v2.1 Part B3A
+        # payload is installed verbatim under ``{app}\app\``
+        # (see the Files section), so the launcher lives
+        # at ``{app}\app\Lockverity.exe``. Pointing at
+        # ``{app}\Lockverity.exe`` would target a file that
+        # does not exist on disk.
+        filename_part = [ln for ln in run_lines if ln.lower().startswith("filename:")]
+        assert filename_part, "[Run] section must contain a Filename: directive"
+        # The Filename line must include the inner ``app\``
+        # subdirectory (either the ``{#MyAppPayloadDir}``
+        # define or the literal ``app\``). A bare
+        # ``{app}\{#MyAppExeName}`` would point at a file
+        # that does not exist after install.
+        assert "{#MyAppPayloadDir}" in filename_part[0] or "app\\" in filename_part[0], (
+            f"[Run] Filename: must include the inner {{app}}\\app\\ "
+            f"subdirectory (the actual install location of Lockverity.exe); "
+            f"got: {filename_part[0]!r}"
         )
         # The Flags: line must include ``postinstall``
         # (checkbox on the finished page) and

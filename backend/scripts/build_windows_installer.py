@@ -297,6 +297,14 @@ def _stage_payload(payload_root: Path, staging_dir: Path) -> None:
     docs_dest = root_extra_dest / "docs"
     docs_dest.mkdir(parents=True, exist_ok=True)
     installer_doc = REPO_ROOT / "docs" / "windows-installer.md"
+    # Copy the LICENSE to the staging root so ISCC's
+    # ``LicenseFile=LICENSE`` directive (relative to the
+    # .iss) resolves at build time. The same LICENSE is
+    # also copied to ``root_extra\`` (above) so the final
+    # install ships it under ``{app}\LICENSE``.
+    license_src = payload_root / "LICENSE"
+    if license_src.is_file():
+        shutil.copy2(license_src, staging_dir / "LICENSE")
     if installer_doc.is_file():
         shutil.copy2(installer_doc, docs_dest / "windows-installer.md")
 

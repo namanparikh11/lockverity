@@ -51,11 +51,35 @@ AppPublisherURL={#MyAppURL}
 AppSupportURL={#MyAppURL}
 AppCopyright={#MyAppCopyright}
 AppReadmeFile=docs\windows-installer.md
+; Licence page. The accepted v2.1 Part B3A payload bundles
+; the LICENSE file under the install root (see the [Files]
+; section's ``root_extra\*`` source). Declaring
+; ``LicenseFile=LICENSE`` makes Inno Setup render a
+; dedicated licence-acceptance page between the welcome
+; page and the destination page. The page shows the
+; licence text in a read-only text control, a
+; "I accept the agreement" radio control, and a
+; "I do not accept" radio control. ``Next`` is disabled
+; until the operator selects the acceptance radio. The
+; v2.1 B3B acceptance contract requires this page to
+; appear (the previous UIAutomation walk did not capture
+; it because ``LicenseFile`` was not declared); the
+; regression test
+; ``test_license_page_is_declared`` in
+; ``backend/tests/test_installer.py`` pins the contract.
+LicenseFile=LICENSE
 
 ; Per-user, x64 only. No admin, no UAC. The installer runs in the
-; non-elevated context of the current user.
+; non-elevated context of the current user. We deliberately do
+; **not** allow a privilege-mode override: ``PrivilegesRequired=lowest``
+; with no override directive means the installer is unconditionally
+; per-user. The "Install for all users" path (which would require
+; admin elevation and a UAC prompt) is never offered. The v2.1 B3B
+; release-blocker check requires the per-user contract to be enforced;
+; an override is a source-level regression that the regression test
+; ``test_no_privilege_override_allowed`` in
+; ``backend/tests/test_installer.py`` would catch.
 PrivilegesRequired=lowest
-PrivilegesRequiredOverridesAllowed=dialog
 ArchitecturesInstallIn64BitMode=x64compatible
 
 ; Per-user install path. ``{localappdata}\Programs\<AppName>`` is
@@ -194,10 +218,20 @@ Source: "..\pyinstaller\favicon-exe.ico"; DestDir: "{app}"; \
 ; per-user security product); ``skipifsilent`` keeps
 ; the launch out of silent / unattended installs so a
 ; CI / acceptance installer never opens a browser. The
-; Filename points at the installed ``Lockverity.exe``,
-; the documented graphical launcher.
-Filename: "{app}\{#MyAppExeName}"; Description: "Launch Lockverity"; \
-    Flags: nowait postinstall unchecked skipifsilent
+; Filename points at the **actual installed** graphical
+; launcher. The accepted v2.1 Part B3A payload is
+; installed verbatim under ``{app}\app\`` (see the
+; [Files] section), so the launcher lives at
+; ``{app}\app\Lockverity.exe``. Pointing at
+; ``{app}\Lockverity.exe`` would target a file that does
+; not exist on disk. The ``workingdir`` of the [Run]
+; entry is the same as the launcher's directory (the
+; inner ``app\`` subdirectory) so the frozen Python
+; distribution (``_internal\python312.dll`` and friends)
+; is discoverable.
+Filename: "{app}\{#MyAppPayloadDir}\{#MyAppExeName}"; Description: "Launch Lockverity"; \
+    Flags: nowait postinstall unchecked skipifsilent; \
+    WorkingDir: "{app}\{#MyAppPayloadDir}"
 
 [Icons]
 ; Start Menu shortcut under a dedicated Lockverity folder. The
@@ -213,15 +247,41 @@ Name: "{group}\Uninstall {#MyAppDisplayName}"; Filename: "{uninstallexe}"; \
     IconFilename: "{app}\{#MyAppExeName}"; IconIndex: 0; \
     Comment: "Uninstall Lockverity"
 
-; Optional desktop shortcut. Unchecked by default per spec.
-Name: "{commondesktop}\{#MyAppDisplayName}"; Filename: "{app}\{#MyAppExeName}"; \
-    IconFilename: "{app}\{#MyAppExeName}"; IconIndex: 0; \
+; Optional desktop shortcut. The shortcut points at the
+; **actual installed** graphical launcher at
+; ``{app}\app\Lockverity.exe`` (the inner ``app\``
+; subdirectory, not the install root) because the accepted
+; v2.1 Part B3A payload is installed verbatim under
+; ``{app}\app\`` (see the Files section). The
+; ``{autodesktop}`` constant resolves to the **current
+; user's** desktop (``%USERPROFILE%\Desktop``), not the
+; public desktop — a per-user install must not write to
+; the all-users desktop. The shortcut is
+; gated on the ``desktopicon`` task so it is only
+; created when the operator opts in.
+Name: "{autodesktop}\{#MyAppDisplayName}"; Filename: "{app}\{#MyAppPayloadDir}\{#MyAppExeName}"; \
+    IconFilename: "{app}\{#MyAppPayloadDir}\{#MyAppExeName}"; IconIndex: 0; \
+    WorkingDir: "{app}\{#MyAppPayloadDir}"; \
     Comment: "Launch Lockverity"; Tasks: "desktopicon"
 
 [Tasks]
-; Optional desktop shortcut. Off by default. The user can opt
-; in via the wizard.
-Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
+; Optional desktop shortcut. Off by default. The user can
+; opt in via the wizard. The explicit English
+; description (rather than ``{cm:CreateDesktopIcon}``)
+; guarantees the wizard renders the documented text
+; regardless of the active Inno Setup language pack, so
+; the regression test
+; ``test_desktop_task_uses_explicit_english_description``
+; in ``backend/tests/test_installer.py`` can assert the
+; exact visible string. The explicit
+; ``GroupDescription`` ("Additional shortcuts:") is the
+; section header on the "Select Additional Tasks" wizard
+; page; setting it explicitly guarantees the section is
+; rendered with the documented heading rather than the
+; default ``{cm:AdditionalIcons}`` (which is identical
+; in the default English pack, but a future translation
+; pass could change the default and break the test).
+Name: "desktopicon"; Description: "Create a desktop shortcut"; GroupDescription: "Additional shortcuts:"; Flags: unchecked
 
 [Dirs]
 ; Create the uninstall log parent (Inno writes
