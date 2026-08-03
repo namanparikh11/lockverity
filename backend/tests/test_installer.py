@@ -31,11 +31,11 @@ DOCS_FILE = REPO_ROOT / "docs" / "windows-installer.md"
 
 STABLE_APP_ID = "{E5B0C0F4-7C42-4D6A-9B17-1A2B3C4D5E6F}"
 
-EXPECTED_PAYLOAD_ZIP_SHA256 = "64a32126279c43f75ecc53fbd95644634a873469adb580dfe04dd13097dfbd3c"
-EXPECTED_PAYLOAD_SOURCE_COMMIT = "f8adf679ef64a23f1c242c225decc80a512af192"
-EXPECTED_LOCKVERITY_EXE_SHA256 = "af8a777e2fb0fb7ae24998f9cfee2c66e9ed284dfcdeac6ccf0ad3cf84723b59"
+EXPECTED_PAYLOAD_ZIP_SHA256 = "658e9291601dcaa41348a9cb9e478b19dd0b0c17d636bd35c5b36fc8ee95c11b"
+EXPECTED_PAYLOAD_SOURCE_COMMIT = "81a4269d57f0c60e1ce75e83ff1501dc1be20eaa"
+EXPECTED_LOCKVERITY_EXE_SHA256 = "7b8e5363e64f58e8a9ed705db8f941495c55ccff430ac19a7e32f9e55a9701c7"
 EXPECTED_LOCKVERITY_CLI_EXE_SHA256 = (
-    "99196d1e92ebcba3363d459cd7a21811762ae85a4008b6f15ff885621ad2c428"
+    "9942cbc9018a1905ac25139ff6b632bcaca1881fbb5f441606053430a68bca51"
 )
 
 
@@ -408,9 +408,7 @@ class TestInstallerSourceContract:
         # install location (and never a relative or
         # portable path that depends on the install
         # layout).
-        assert "Filename:" in joined, (
-            "[Run] section must contain a Filename: directive"
-        )
+        assert "Filename:" in joined, "[Run] section must contain a Filename: directive"
         # The Filename must point at the installed
         # ``Lockverity.exe`` via the documented
         # ``{#MyAppExeName}`` define (which the source
@@ -419,9 +417,9 @@ class TestInstallerSourceContract:
         # literal name (``Lockverity.exe``); the former
         # is canonical because the source uses the
         # define for the rest of the install.
-        assert (
-            "{#MyAppExeName}" in joined or "Lockverity.exe" in joined
-        ), "[Run] Filename: must point at the installed Lockverity.exe"
+        assert "{#MyAppExeName}" in joined or "Lockverity.exe" in joined, (
+            "[Run] Filename: must point at the installed Lockverity.exe"
+        )
         # The Flags: line must include ``postinstall``
         # (checkbox on the finished page) and
         # ``skipifsilent`` (never auto-launch under
@@ -431,8 +429,7 @@ class TestInstallerSourceContract:
         # is "checkbox is visible" + "no launch in
         # silent mode".
         assert "postinstall" in joined, (
-            "[Run] must include 'postinstall' so the completion-page "
-            "checkbox is registered"
+            "[Run] must include 'postinstall' so the completion-page checkbox is registered"
         )
         assert "skipifsilent" in joined, (
             "[Run] must include 'skipifsilent' so a silent install "
@@ -476,9 +473,7 @@ class TestInstallerSourceContract:
         # pattern is a hard contract: the install dir
         # must be fully removable after the uninstall.
         text = _iss_text()
-        assert "[UninstallDelete]" in text, (
-            "Installer must declare a [UninstallDelete] section"
-        )
+        assert "[UninstallDelete]" in text, "Installer must declare a [UninstallDelete] section"
         section = text.split("[UninstallDelete]", 1)[1]
         next_section = section.find("[")
         if next_section != -1:
