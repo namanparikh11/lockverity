@@ -626,6 +626,24 @@ def start(
             # mode (source, portable, installed, frozen).
             default_db_path = data_dir(home) / "lockverity.sqlite"
             database_url = f"sqlite:///{default_db_path.as_posix()}"
+    # Publish the resolved database URL on the
+    # supervisor's process environment so every
+    # downstream code path (Alembic ``env.py``,
+    # ``app.db.session`` engine construction,
+    # ``get_settings().database_url`` readers) sees
+    # the same CWD-independent value. The Alembic
+    # ``env.py`` script calls ``get_settings()`` and
+    # overwrites ``config.sqlalchemy.url`` with
+    # ``settings.database_url`` -- if the supervisor's
+    # env does not carry the absolute URL, ``env.py``
+    # would silently overwrite the runner's
+    # ``set_main_option`` with the historical
+    # ``sqlite:///./lockverity.sqlite`` default and
+    # create the database file at the supervisor's
+    # CWD (the install root). Setting the env var
+    # before ``run_migrations`` is called closes the
+    # CWD-relative hole.
+    os.environ["LOCKVERITY_DATABASE_URL"] = database_url
     # Acquire the start lock for the entire lifetime
     # of the child. The lock is released in the
     # ``finally`` block so a crash during migration,
