@@ -301,7 +301,13 @@ begin
         exit;
     end;
     CmdLine := '"' + Exe + '" ' + Args;
-    ExecOk := Exec(CmdLine, '', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+    // The CLI loads DLLs and Python modules from the
+    // ``_internal`` directory adjacent to the EXE; running
+    // it from the install root (the default cwd) would
+    // succeed for the EXE itself but fail to load
+    // ``python312.dll`` (ERROR_INVALID_PARAMETER, 87).
+    // Set the working directory to the EXE's directory.
+    ExecOk := Exec(CmdLine, ExpandConstant('{app}\app'), '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
     Log('B3B RunCliSync: exec_ok=' + IntToStr(Integer(ExecOk)) + ' result_code=' + IntToStr(ResultCode));
     if not ExecOk then exit;
     StdOut := '';
