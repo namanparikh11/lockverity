@@ -286,7 +286,13 @@ var
     ExecOk: Boolean;
 begin
     Result := '';
-    Exe := ExpandConstant('{app}') + '\' + CLI_RELATIVE;
+    // The CLI lives at ``{app}\app\lockverity-cli.exe`` per the
+    // [Files] section's ``{app}\{#MyAppPayloadDir}\lockverity-cli.exe``
+    // source line. We compute the path directly to avoid
+    // Pascal string-escape quirks that previously produced
+    // UNC-style ``app\\lockverity-cli.exe`` paths and
+    // ERROR_INVALID_PARAMETER (87) from ``CreateProcess``.
+    Exe := ExpandConstant('{app}\app\lockverity-cli.exe');
     Log('B3B RunCliSync: exe=' + Exe);
     Log('B3B RunCliSync: args=' + Args);
     if not FileExists(Exe) then
