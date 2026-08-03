@@ -644,6 +644,16 @@ def start(
     # before ``run_migrations`` is called closes the
     # CWD-relative hole.
     os.environ["LOCKVERITY_DATABASE_URL"] = database_url
+    # ``get_settings`` is LRU-cached. If a previous
+    # call (during the CLI's import chain, or from
+    # a prior ``start`` attempt) populated the cache
+    # with the historical default URL, the Alembic
+    # ``env.py`` would return the cached value
+    # (not the just-set env var). Clear the cache so
+    # every downstream reader re-reads the env var.
+    from app.core.config import get_settings as _get_settings
+
+    _get_settings.cache_clear()
     # Acquire the start lock for the entire lifetime
     # of the child. The lock is released in the
     # ``finally`` block so a crash during migration,
