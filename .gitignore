@@ -172,11 +172,21 @@ build/packaging/logs/
 # The build script's redirected stdout / stderr /
 # exit-code capture files in ``backend/`` are
 # transient invocation output and must not be
-# committed.
+# committed. The patterns cover both the legacy
+# single-file redirect (e.g. ``backend/build-stdout.txt``)
+# and the build-step-numbered capture files emitted
+# by multi-iteration acceptance runs.
 backend/build-stdout.txt
 backend/build-stderr.txt
 backend/build-exit.txt
 backend/test-build.txt
+backend/build-b3b-summary.txt
+backend/build-b3b-stdout.log
+backend/build-b3b-stderr.log
+backend/build-installer*.stdout.log
+backend/build-installer*.stderr.log
+backend/build-installer*-stdout.log
+backend/build-installer*-stderr.log
 
 
 # Local databases and temporary artifacts
