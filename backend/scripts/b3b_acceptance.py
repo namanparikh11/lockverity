@@ -470,12 +470,20 @@ def main(argv: list[str] | None = None) -> int:
         )
     )
 
-    # Step 7: reinstall while running
-    if not args.install_dir.exists():
-        # Need to reinstall first to set up for the reinstall-while-running test
-        step_silent_install(
+    # Step 7: reinstall while running. The uninstall at the end of
+    # step 6 leaves the install dir with a runtime ``lockverity.sqlite``
+    # file but no installed binaries, so we re-install first to set
+    # up the reinstall-while-running test. The trigger is the absence
+    # of the lockverity-cli.exe, not just the install dir existence
+    # (Inno Setup's ``Deleting directory (145)`` aftereffects leave
+    # the install dir itself in place for the test runtime).
+    prep_steps: list[dict[str, object]] = []
+    if not (args.install_dir / "app" / "lockverity-cli.exe").is_file():
+        prep_step = step_silent_install(
             args.installer, args.install_dir, log_dir / "b3b-step7-reinstall-prep.log"
         )
+        prep_steps.append(prep_step)
+        steps.append({"step": "reinstall_prep", "rc": prep_step.get("rc")})
     port3 = args.port + 2 if _port_free(args.port + 2) else args.port
     steps.append(
         step_reinstall_while_running(
