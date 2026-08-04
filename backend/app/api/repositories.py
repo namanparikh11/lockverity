@@ -49,9 +49,7 @@ def create_repository(
     # external client (curl, scripts, or the
     # ``api.createRepository`` helper) never sees a
     # raw traceback.
-    repo = repository_service.safe_create_repository_from_url(
-        session, payload.canonical_url
-    )
+    repo = repository_service.safe_create_repository_from_url(session, payload.canonical_url)
     return RepositoryRead.model_validate(repo)
 
 

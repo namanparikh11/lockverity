@@ -124,9 +124,7 @@ def test_legacy_endpoint_returns_internal_unexpected_with_correlation_id(
     """
 
     def _raise_db_error(*_args, **_kwargs):
-        raise RuntimeError(
-            "simulated db write failure from the legacy route"
-        )
+        raise RuntimeError("simulated db write failure from the legacy route")
 
     # Patch the INNER service call so the failure happens
     # AFTER the wrapper's try/except is entered but BEFORE
