@@ -58,7 +58,7 @@ only), and self-contained.
    ```
 
    The output hash must equal
-   `373d4943f2bcb657b6c19557b5328eda016e6a0624d3460412d538dc85893d20`.
+   `136ba35219667e1df1a983a31c6a69d6a592c3e76b4e40b6aecda4945c44f71c`.
    The same value is in
    [`Lockverity-2.1.1-SHA256SUMS.txt`](https://github.com/namanparikh11/lockverity/releases/download/checkpoint-v2.1.1-public-release/Lockverity-2.1.1-SHA256SUMS.txt)
    and in the bundled `INSTALLER-MANIFEST.json` next to the
@@ -206,7 +206,7 @@ task, or registry autorun.
    ```
 
    The output hash must equal
-   `40d3ce94b4cf6e3df2976039adb2ad4390fc23203b0f33d4c4eb0a09ef1551c6`.
+   `0efa72236c0e519df6b90b6d9e8689566eb054b26d32228ce2a689c85ecfba0b`.
    The same value is in
    [`Lockverity-2.1.1-windows-x64-portable-SHA256SUMS.txt`](https://github.com/namanparikh11/lockverity/releases/download/checkpoint-v2.1.1-public-release/Lockverity-2.1.1-windows-x64-portable-SHA256SUMS.txt)
    and in the bundled `SHA256SUMS.txt` inside the ZIP.
@@ -400,10 +400,10 @@ Every release asset has a SHA-256 in the external
 [`Lockverity-2.1.1-SHA256SUMS.txt`](https://github.com/namanparikh11/lockverity/releases/download/checkpoint-v2.1.1-public-release/Lockverity-2.1.1-SHA256SUMS.txt):
 
 ```
-373d4943f2bcb657b6c19557b5328eda016e6a0624d3460412d538dc85893d20  Lockverity-2.1.1-windows-x64-setup.exe
-40d3ce94b4cf6e3df2976039adb2ad4390fc23203b0f33d4c4eb0a09ef1551c6  Lockverity-2.1.1-windows-x64-portable.zip
-77967e1cd7548f40b004e8b7570ece59ef0f0ba3617428e2a1c7d2e2e5fedcc0  INSTALLER-MANIFEST.json
-e5349a5c5b9dff8b8dc83afc98fe681a610ff95dca52d0f0775f232a1adb6179  BUILD-MANIFEST.json
+136ba35219667e1df1a983a31c6a69d6a592c3e76b4e40b6aecda4945c44f71c  Lockverity-2.1.1-windows-x64-setup.exe
+0efa72236c0e519df6b90b6d9e8689566eb054b26d32228ce2a689c85ecfba0b  Lockverity-2.1.1-windows-x64-portable.zip
+cdd761faf4119854af0d0da592f5952ec15e44c0bf48b79587769420f565dcb5  INSTALLER-MANIFEST.json
+a3cef7e0c895e05ea274de163513028057f509a90e6046a6f389adabbb0d3597  BUILD-MANIFEST.json
 ```
 
 The internal `Lockverity-2.1.1-windows-x64-portable-SHA256SUMS.txt`
