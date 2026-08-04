@@ -1025,3 +1025,134 @@ def test_intake_internal_error_no_secrets_in_response_details(
     # simulated ``RuntimeError`` in this test fires
     # inside ``intake_tar_gz``).
     assert details["kind"] in {"github", "upload", "tar_gz", "zip"}
+
+
+# ---------------------------------------------------------------------------
+# v2.1.1 packaged-runtime acceptance: a top-level try/except in
+# ``IntakeService.intake_github`` and ``intake_upload`` sanitises
+# every unhandled exception (e.g. a database write failure that
+# escapes the inner ``_quarantine_validate_extract`` block) into
+# the documented ``INTERNAL_UNEXPECTED`` envelope with a non-PII
+# 16-character lowercase hex ``correlation_id``. This is the
+# exact failure mode the v2.1.1 packaged-runtime acceptance
+# discovered when the runtime database was set read-only: the
+# write failure inside ``_get_or_create_github_repository``
+# escaped the inner extraction block and surfaced as the
+# legacy ``internal_error`` envelope without a correlation
+# id. The top-level wrapper closes that gap.
+# ---------------------------------------------------------------------------
+
+
+def test_intake_top_level_internal_error_sanitised(
+    app_config, workspace_root, fake_client: _FakeClient, monkeypatch
+) -> None:
+    """A non-ApiError exception that escapes the inner
+    ``_quarantine_validate_extract`` block (e.g. a database
+    write failure from ``_get_or_create_github_repository``)
+    is sanitised into ``INTERNAL_UNEXPECTED`` with a
+    16-character lowercase hex ``correlation_id``.
+    """
+
+    def _raise_db_error(*_args: Any, **_kwargs: Any) -> Any:
+        raise RuntimeError("simulated db write failure")
+
+    # Patch ``_get_or_create_github_repository`` so the failure
+    # happens AFTER the GitHub metadata is fetched successfully
+    # but BEFORE the inner ``_quarantine_validate_extract``
+    # block. This is the exact code path the packaged-runtime
+    # acceptance discovered: a DB write failure (the runtime
+    # database was set read-only) escaped the inner
+    # extraction block and surfaced as the legacy
+    # ``internal_error`` envelope without a correlation id.
+    monkeypatch.setattr(
+        "app.services.intake_service.IntakeService._get_or_create_github_repository",
+        _raise_db_error,
+    )
+    sha = "0123456789abcdef0123456789abcdef01234567"
+    fake_client.queue(
+        "/repos/octocat/Hello-World",
+        _FakeResponse(
+            200,
+            json.dumps(
+                {
+                    "default_branch": "main",
+                    "visibility": "public",
+                    "archived": False,
+                }
+            ).encode("utf-8"),
+            {"Content-Type": "application/json"},
+        ),
+    )
+    fake_client.queue(
+        "/repos/octocat/Hello-World/branches/main",
+        _FakeResponse(
+            200,
+            json.dumps({"name": "main", "commit": {"sha": sha}}).encode("utf-8"),
+            {"Content-Type": "application/json"},
+        ),
+    )
+    fake_client.queue(
+        f"/octocat/Hello-World/tar.gz/{sha}",
+        _FakeResponse(
+            200,
+            _build_tarball_bytes(),
+            {"Content-Type": "application/x-gzip"},
+        ),
+    )
+    with _db_session.SessionLocal() as s:
+        service = IntakeService(s)
+        with pytest.raises(ApiError) as exc:
+            service.intake_github(
+                GitHubIntakeRequest(canonical_url="https://github.com/octocat/Hello-World")
+            )
+    # The outer handler must sanitise the non-ApiError
+    # exception into the documented ``INTERNAL_UNEXPECTED``
+    # envelope, NOT the legacy ``INTERNAL`` envelope.
+    assert exc.value.code == ApiErrorCode.INTERNAL_UNEXPECTED.value
+    # The response ``details`` carries a 16-character
+    # lowercase hex ``correlation_id`` and ``kind=github``.
+    assert exc.value.details is not None
+    cid = exc.value.details.get("correlation_id")
+    assert isinstance(cid, str)
+    assert re.fullmatch(r"[0-9a-f]{16}", cid) is not None
+    assert exc.value.details.get("kind") == "github"
+    # The response message is the bounded safe message; the
+    # exception class name and the simulated message are NOT
+    # in the response.
+    assert "RuntimeError" not in exc.value.message
+    assert "simulated" not in exc.value.message
+    assert "Traceback" not in exc.value.message
+    # The exception is chained from the original so the log
+    # has the full traceback.
+    assert exc.value.__cause__ is not None
+
+
+def test_intake_top_level_internal_error_preserves_classified_errors(
+    app_config, workspace_root, fake_client: _FakeClient
+) -> None:
+    """The top-level wrapper does NOT swallow classified
+    ``ApiError`` instances. A 404 from the GitHub metadata
+    endpoint surfaces as the existing ``not_found`` envelope,
+    not as a new ``INTERNAL_UNEXPECTED``.
+    """
+    fake_client.queue(
+        "/repos/octocat/Hello-World",
+        _FakeResponse(404, b"{}", {"Content-Type": "application/json"}),
+    )
+    with _db_session.SessionLocal() as s:
+        service = IntakeService(s)
+        with pytest.raises(ApiError) as exc:
+            service.intake_github(
+                GitHubIntakeRequest(canonical_url="https://github.com/octocat/Hello-World")
+            )
+    # 404 still maps to ``not_found`` (the actionable
+    # ``Repository could not be accessed.`` message) and is
+    # not collapsed into ``INTERNAL_UNEXPECTED``.
+    assert exc.value.code == ApiErrorCode.NOT_FOUND.value
+    assert "could not be accessed" in exc.value.message
+    assert "private" in exc.value.message.lower()
+    # The classified envelope does NOT carry a correlation id
+    # because the failure was classified by the inner
+    # ``_github_error_to_api_error`` mapping, not by the
+    # top-level wrapper.
+    assert "correlation_id" not in (exc.value.details or {})

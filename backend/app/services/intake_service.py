@@ -16,6 +16,7 @@ up via the executor.
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import secrets
 from collections.abc import Callable, Iterable
@@ -99,6 +100,60 @@ class IntakeService:
     # GitHub intake
     # ------------------------------------------------------------------
     def intake_github(self, payload: GitHubIntakeRequest) -> IntakeResult:
+        # v2.1.1: a top-level try/except wraps the body so an
+        # unhandled exception (a database write failure, a
+        # filesystem error that survived every bounded
+        # fallback, a programmer error, etc.) is sanitised
+        # into the documented ``INTERNAL_UNEXPECTED``
+        # envelope with a non-PII 16-character lowercase hex
+        # ``correlation_id`` in ``details``. The inner
+        # branches already raise ``ApiError`` for the
+        # classified failure modes (``validation_error``,
+        # ``not_found``, ``invalid_ref``, ``rate_limited``,
+        # ``forbidden``, ``archive_unsafe``, etc.); those
+        # ``ApiError`` instances are re-raised as-is because
+        # the outer handler skips ``ApiError`` itself. The
+        # handler mirrors the workspace ``FAILED``
+        # transition onto the scan row and rolls back the
+        # session, so a top-level write failure does not
+        # leave a misleading ``QUEUED`` scan behind.
+        try:
+            return self._intake_github_inner(payload)
+        except ApiError:
+            # Already classified: ``validation_error``,
+            # ``not_found``, ``invalid_ref``, ``rate_limited``,
+            # ``forbidden``, ``archive_unsafe``, etc. Re-raise
+            # without modification so the inner handler
+            # owns the cleanup, the message, and the
+            # ``details`` envelope.
+            raise
+        except Exception as exc:
+            correlation_id = secrets.token_hex(8)
+            logger.exception(
+                "intake internal error (correlation_id=%s, kind=%s)",
+                correlation_id,
+                "github",
+            )
+            # Best-effort cleanup: roll back any partial
+            # transaction so the response does not carry a
+            # half-committed row. The workspace / scan
+            # transitions are not attempted here because
+            # the failure happened before the workspace
+            # was created; the outer route's error handler
+            # returns the 500 envelope to the client.
+            with contextlib.suppress(Exception):
+                self._session.rollback()
+            raise ApiError(
+                ApiErrorCode.INTERNAL_UNEXPECTED,
+                "An internal error occurred. See Diagnostics for the "
+                "correlation id and the runtime log for the full trace.",
+                details={
+                    "correlation_id": correlation_id,
+                    "kind": "github",
+                },
+            ) from exc
+
+    def _intake_github_inner(self, payload: GitHubIntakeRequest) -> IntakeResult:
         # Step 1: Normalize the URL.
         try:
             normalized = normalize_github_url(payload.canonical_url)
@@ -211,6 +266,47 @@ class IntakeService:
         repository and scan are created on the fly; the upload
         content is not retained outside the workspace.
         """
+        # v2.1.1: a top-level try/except wraps the body so an
+        # unhandled exception (a database write failure, a
+        # filesystem error that survived every bounded
+        # fallback, a programmer error, etc.) is sanitised
+        # into the documented ``INTERNAL_UNEXPECTED``
+        # envelope with a non-PII 16-character lowercase hex
+        # ``correlation_id`` in ``details``. The inner
+        # branches already raise ``ApiError`` for the
+        # classified failure modes (``validation_error``,
+        # ``archive_unsafe``); those ``ApiError`` instances
+        # are re-raised as-is because the outer handler
+        # skips ``ApiError`` itself.
+        try:
+            return self._intake_upload_inner(upload=upload, archive_filename=archive_filename)
+        except ApiError:
+            raise
+        except Exception as exc:
+            correlation_id = secrets.token_hex(8)
+            logger.exception(
+                "intake internal error (correlation_id=%s, kind=%s)",
+                correlation_id,
+                "upload",
+            )
+            with contextlib.suppress(Exception):
+                self._session.rollback()
+            raise ApiError(
+                ApiErrorCode.INTERNAL_UNEXPECTED,
+                "An internal error occurred. See Diagnostics for the "
+                "correlation id and the runtime log for the full trace.",
+                details={
+                    "correlation_id": correlation_id,
+                    "kind": "upload",
+                },
+            ) from exc
+
+    def _intake_upload_inner(
+        self,
+        *,
+        upload: Callable[[int], bytes] | Iterable[bytes],
+        archive_filename: str | None = None,
+    ) -> IntakeResult:
         # v2.0.5: the original filename (basename-only) is
         # persisted on the repository row for the
         # human-readable label. ``basename_safely`` strips
