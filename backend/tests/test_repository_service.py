@@ -5,9 +5,7 @@ from __future__ import annotations
 import re
 
 import pytest
-from app.db import session as _db_session
 from app.models.repository import (
-    Repository,
     RepositoryProvider,
     RepositorySourceType,
 )
@@ -110,11 +108,13 @@ def test_safe_wrapper_sanitises_unexpected_exception_into_internal_unexpected(
         _raise_db_error,
     )
 
-    with caplog.at_level("ERROR", logger="lockverity.repository_service"):
-        with pytest.raises(ApiError) as exc:
-            repository_service.safe_create_repository_from_url(
-                session, "https://github.com/octocat/Hello-World"
-            )
+    with (
+        caplog.at_level("ERROR", logger="lockverity.repository_service"),
+        pytest.raises(ApiError) as exc,
+    ):
+        repository_service.safe_create_repository_from_url(
+            session, "https://github.com/octocat/Hello-World"
+        )
 
     # The outer handler must sanitise the non-ApiError
     # exception into the documented ``INTERNAL_UNEXPECTED``
@@ -143,12 +143,9 @@ def test_safe_wrapper_sanitises_unexpected_exception_into_internal_unexpected(
     # The same correlation id appears in the log record so
     # the operator can cross-reference the response and the
     # log without parsing the response body.
-    log_records = [
-        r for r in caplog.records if r.name == "lockverity.repository_service"
-    ]
+    log_records = [r for r in caplog.records if r.name == "lockverity.repository_service"]
     assert any(cid in r.getMessage() for r in log_records), (
-        f"correlation id {cid!r} not found in log records: "
-        f"{[r.getMessage() for r in log_records]}"
+        f"correlation id {cid!r} not found in log records: {[r.getMessage() for r in log_records]}"
     )
 
 
@@ -170,9 +167,7 @@ def test_safe_wrapper_preserves_classified_errors(session) -> None:
     assert "correlation_id" not in (exc.value.details or {})
 
 
-def test_safe_wrapper_rolls_back_on_unexpected_failure(
-    session, monkeypatch
-) -> None:
+def test_safe_wrapper_rolls_back_on_unexpected_failure(session, monkeypatch) -> None:
     """A non-ApiError exception that escapes the inner
     service call leaves no orphan repository row. The
     session is rolled back best-effort so the
