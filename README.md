@@ -30,7 +30,7 @@ tag and continue to resolve from the original release URL.
 | Version | `2.1.1` |
 | Release tag | [`checkpoint-v2.1.1-public-release`](https://github.com/namanparikh11/lockverity/releases/tag/checkpoint-v2.1.1-public-release) |
 | Published | 2026-08-04 |
-| Source commit | `1f02e272e78da8341fbc3bbd626d25c89c2285c3` |
+| Source commit | `925d152fe72cacdfee9d4519058946df4b86b214` |
 | Latest release | https://github.com/namanparikh11/lockverity/releases/latest |
 | Previous release | [`checkpoint-v2.1.0-public-release`](https://github.com/namanparikh11/lockverity/releases/tag/checkpoint-v2.1.0-public-release) |
 
@@ -42,8 +42,8 @@ SHA-256, double-click, and follow the wizard.
 | Pick this | If you are a normal Windows user who wants the recommended install path |
 | --- | --- |
 | [Lockverity-2.1.1-windows-x64-setup.exe](https://github.com/namanparikh11/lockverity/releases/download/checkpoint-v2.1.1-public-release/Lockverity-2.1.1-windows-x64-setup.exe) | Windows x64 installer (per-user, no UAC, no admin) |
-| SHA-256 | `2f5670aff6e43025895e510a4e53f4144a3397b505904635426fb97f258067a7` |
-| Size | 31,138,386 bytes |
+| SHA-256 | `6e1d25f27770dee2f7c67fc05e5401044ab26c4597ed278a920f3dabf0073d69` |
+| Size | 31,136,618 bytes |
 | Privilege mode | per-user, no admin, no UAC |
 | Default install path | `%LOCALAPPDATA%\Programs\Lockverity` |
 | Runtime home | `%LOCALAPPDATA%\Lockverity` |
@@ -57,8 +57,8 @@ SHA-256, double-click, and follow the wizard.
 | Pick this | If you want Lockverity without a formal install |
 | --- | --- |
 | [Lockverity-2.1.1-windows-x64-portable.zip](https://github.com/namanparikh11/lockverity/releases/download/checkpoint-v2.1.1-public-release/Lockverity-2.1.1-windows-x64-portable.zip) | Windows x64 portable (extract anywhere, no install) |
-| SHA-256 | `5b4310aae9316f4683e1622ee75764996ebc6dde1b05a904a652561ca1e8defd` |
-| Size | 56,110,792 bytes |
+| SHA-256 | `dfc08d4c978782c669d4e55437d6ba056d2c94ce3665a219a802260657143d51` |
+| Size | 56,110,789 bytes |
 | Runtime home | `%LOCALAPPDATA%\Lockverity` (still under LocalAppData) |
 | Status | **Unsigned** (see [SmartScreen / unsigned / antivirus](#smartscreen--unsigned--antivirus)) |
 
