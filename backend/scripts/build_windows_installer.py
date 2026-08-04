@@ -4,7 +4,15 @@ This script is the canonical entry point for the v2.1 Part B3B
 Windows installer. It wraps the Inno Setup 6.x compiler
 (``ISCC.exe``) and:
 
-  - verifies the accepted B3A portable payload's hashes;
+  - verifies the accepted B3A portable payload's
+    *identity* (source commit, product version) by reading
+    its embedded ``BUILD-MANIFEST.json``;
+  - verifies the payload's *integrity* by reading its
+    embedded ``SHA256SUMS.txt`` and comparing every entry
+    against the actual file bytes (no generated binary
+    hash is pinned by this script; every generated hash is
+    read at build time and recorded in the external
+    ``INSTALLER-MANIFEST.json`` and ``SHA256SUMS.txt``);
   - extracts the payload into a dedicated staging directory
     (the installer source then copies the staging tree into
     ``{app}\\app\\``);
@@ -17,9 +25,11 @@ Windows installer. It wraps the Inno Setup 6.x compiler
   - emits a structured JSON report.
 
 The script never silently rebuilds the accepted portable
-payload. If the payload ZIP or any of the accepted hashes
-differ from the documented values, the script aborts with
-an actionable error.
+payload. If the payload's identity or integrity checks fail
+the script aborts with an actionable error. Tracked source
+files MUST NOT pin any generated payload binary hash — that
+is what caused the previous "rebuild -> source-commit ->
+rebuild" cycle.
 
 Usage::
 
@@ -57,9 +67,9 @@ DEFAULT_OUTPUT_DIR = REPO_ROOT / "build" / "installer"
 DEFAULT_STAGING_DIR = DEFAULT_OUTPUT_DIR / "staging"
 DEFAULT_WORK_DIR = DEFAULT_OUTPUT_DIR / "work"
 PAYLOAD_DIR_NAME = "app"
-# Stable AppId the Inno Setup source uses for the per-user
-# uninstaller key. The installer source is committed with the
-# same value; the build script is a sanity-check only.
+# Stable per-user AppId mirrored in the .iss source. The build
+# script is a sanity-check only; the .iss source is the
+# authoritative declaration of the per-user uninstaller key.
 STABLE_APP_ID = "{E5B0C0F4-7C42-4D6A-9B17-1A2B3C4D5E6F}"
 APP_VERSION = "2.1.0"
 # Inno Setup 6.7.3 is the only trusted compiler for this build.
@@ -70,12 +80,22 @@ ISCC_PATHS = (
     Path("C:/Program Files (x86)/Inno Setup 6/ISCC.exe"),
     Path("C:/Program Files/Inno Setup 6/ISCC.exe"),
 )
-EXPECTED_PAYLOAD_ZIP_SHA256 = "6e544e57d9fa6859de7bd446d9314f19ccc2bfcf7104091fb2e94a61a77e8b04"
+# Required source-identity pin. Tracked source may pin the
+# payload's source identity, product version, schema, architecture
+# and filenames — but the installer build script MUST NOT pin
+# any generated binary hash (the portable ZIP, the EXEs, etc.).
+# Every generated SHA-256 is read from the payload's own
+# ``SHA256SUMS.txt`` and ``BUILD-MANIFEST.json`` at build time
+# and written to the external ``INSTALLER-MANIFEST.json``. This
+# keeps a single source commit valid across any number of
+# portable rebuilds (timestamps, bootloader versions, etc.),
+# removing the "rebuild -> source-commit -> rebuild" cycle.
 EXPECTED_PAYLOAD_SOURCE_COMMIT = "c9b4bb5bcfb14f3143d72e3ba11d21e4490d8f09"
-EXPECTED_LOCKVERITY_EXE_SHA256 = "19e0c363837cada158c31e072307bcdc736708f2440f21b70a6d011d3f450fdf"
-EXPECTED_LOCKVERITY_CLI_EXE_SHA256 = (
-    "ffd597d6339480e449b265aee07675a2836bf987d29962b65e9d1ff05221c0f5"
-)
+# A regular expression for a full 40-character lowercase hex
+# git commit SHA. Used to assert that ``source_commit`` fields
+# in any generated manifest are well-formed before they enter
+# the installer manifest.
+_GIT_SHA1_RE = re.compile(r"^[0-9a-f]{40}$")
 # A bounded lock for the launched installer's /VERYSILENT
 # smoke. The smoke is disabled by default to keep the
 # build deterministic; pass ``--run-smoke`` to opt in.
@@ -182,9 +202,65 @@ def _sha256_of(path: Path) -> str:
     return h.hexdigest()
 
 
+def _read_payload_sha256sums(payload_root: Path) -> dict[str, str]:
+    """Read the payload's ``SHA256SUMS.txt`` and return a
+    ``{relative_path: expected_sha256}`` map.
+
+    The SHA256SUMS.txt format is two whitespace-separated
+    fields per line: a lowercase hex SHA-256 and a
+    forward-slash path relative to the payload root. The
+    function is permissive about line endings and tolerates
+    blank lines / comment lines. A path that is syntactically
+    invalid (absolute, contains ``..``, contains a backslash)
+    is rejected because the build script is the canonical
+    chokepoint and must not silently accept a tampered
+    payload.
+    """
+    sums_path = payload_root / "SHA256SUMS.txt"
+    if not sums_path.is_file():
+        raise SystemExit(
+            f"ERROR: SHA256SUMS.txt not found in payload at {sums_path}. "
+            "The payload is not a valid B3A portable package."
+        )
+    out: dict[str, str] = {}
+    for raw in sums_path.read_text(encoding="utf-8").splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        parts = line.split()
+        if len(parts) != 2:
+            raise SystemExit(
+                f"ERROR: malformed line in {sums_path}: {raw!r}. Expected '<sha256>  <path>'."
+            )
+        sha, rel = parts
+        if not _GIT_SHA1_RE.match(sha) and not re.match(r"^[0-9a-f]{64}$", sha):
+            raise SystemExit(f"ERROR: malformed SHA-256 in {sums_path}: {sha!r} (line: {raw!r}).")
+        rel_norm = rel.replace("\\", "/").lstrip("/")
+        if rel_norm.startswith("../") or "/../" in rel_norm or rel_norm == "..":
+            raise SystemExit(f"ERROR: SHA256SUMS path escapes payload root: {rel!r}.")
+        out[rel_norm] = sha
+    return out
+
+
 def _verify_payload_zip(payload_zip: Path) -> dict[str, object]:
-    """Verify the accepted B3A portable payload ZIP and return a
-    short summary used by the install manifest."""
+    """Verify the accepted B3A portable payload and return the
+    short summary used by the install manifest.
+
+    The verification is split into two orthogonal checks:
+
+    1. **Identity** — read the payload's ``BUILD-MANIFEST.json``
+       and assert that ``source_commit`` equals
+       ``EXPECTED_PAYLOAD_SOURCE_COMMIT`` and that ``version``
+       equals ``APP_VERSION``. This is the only source-identity
+       pin tracked Python code may keep.
+    2. **Integrity** — read the payload's ``SHA256SUMS.txt`` and
+       re-hash every file at the recorded relative path. The
+       expected SHA-256 for every file is read from the
+       payload's own manifest — *no* generated binary hash is
+       pinned by this script. A mismatch on any entry (including
+       a tampered file, a missing file, or an entry that names
+       a file that is not in the payload) is rejected.
+    """
     if not payload_zip.is_file():
         raise SystemExit(
             f"ERROR: accepted payload ZIP not found at {payload_zip}. "
@@ -192,20 +268,8 @@ def _verify_payload_zip(payload_zip: Path) -> dict[str, object]:
             "installer. Do not rebuild the application."
         )
     actual_zip_sha = _sha256_of(payload_zip)
-    if actual_zip_sha != EXPECTED_PAYLOAD_ZIP_SHA256:
-        raise SystemExit(
-            "ERROR: accepted payload ZIP SHA-256 mismatch.\n"
-            f"  expected: {EXPECTED_PAYLOAD_ZIP_SHA256}\n"
-            f"  actual:   {actual_zip_sha}\n"
-            f"  path:     {payload_zip}\n"
-            "The installer would embed the wrong payload. Restore the "
-            "accepted B3A portable ZIP and retry."
-        )
     payload_root = payload_zip.parent / PAYLOAD_NAME
     if not payload_root.is_dir():
-        # Extract to a sibling directory next to the ZIP. We do
-        # NOT use the staging directory for this so the build can
-        # be re-run without re-extracting.
         _log("payload", f"extracting accepted ZIP to {payload_root}")
         with zipfile.ZipFile(payload_zip) as archive:
             archive.extractall(payload_root.parent)
@@ -225,23 +289,39 @@ def _verify_payload_zip(payload_zip: Path) -> dict[str, object]:
             f"  expected: {APP_VERSION}\n"
             f"  actual:   {manifest.get('version')}\n"
         )
-    actual_exe_sha = _sha256_of(payload_root / "Lockverity.exe")
-    if actual_exe_sha != EXPECTED_LOCKVERITY_EXE_SHA256:
-        raise SystemExit("ERROR: payload Lockverity.exe SHA-256 does not match the accepted value.")
-    actual_cli_sha = _sha256_of(payload_root / "lockverity-cli.exe")
-    if actual_cli_sha != EXPECTED_LOCKVERITY_CLI_EXE_SHA256:
+    sums = _read_payload_sha256sums(payload_root)
+    if not sums:
         raise SystemExit(
-            "ERROR: payload lockverity-cli.exe SHA-256 does not match the accepted value."
+            f"ERROR: SHA256SUMS.txt in payload at {payload_root / 'SHA256SUMS.txt'} "
+            "is empty; refusing to embed a payload with no integrity record."
         )
+    computed: dict[str, str] = {}
+    for rel, expected_sha in sorted(sums.items()):
+        file_path = payload_root / rel
+        if not file_path.is_file():
+            raise SystemExit(
+                f"ERROR: SHA256SUMS references missing file in payload: {rel!r}. "
+                f"  expected sha256: {expected_sha}"
+            )
+        actual_sha = _sha256_of(file_path)
+        computed[rel] = actual_sha
+        if actual_sha != expected_sha:
+            raise SystemExit(
+                "ERROR: payload file SHA-256 mismatch.\n"
+                f"  path:     {rel}\n"
+                f"  expected: {expected_sha}\n"
+                f"  actual:   {actual_sha}\n"
+                "The payload appears to be tampered. Restore the accepted "
+                "B3A portable ZIP and retry."
+            )
     return {
         "payload_zip": str(payload_zip),
         "payload_zip_sha256": actual_zip_sha,
         "payload_source_commit": manifest.get("source_commit"),
         "payload_version": manifest.get("version"),
-        "lockverity_exe_sha256": actual_exe_sha,
-        "lockverity_cli_exe_sha256": actual_cli_sha,
         "build_manifest_sha256": _sha256_of(manifest_path),
         "payload_root": str(payload_root),
+        "payload_sha256_entries": computed,
     }
 
 
@@ -463,8 +543,10 @@ def _write_installer_manifest(
         "payload_zip": payload_zip.name,
         "payload_zip_sha256": payload_summary["payload_zip_sha256"],
         "payload_build_manifest_sha256": payload_summary["build_manifest_sha256"],
-        "lockverity_exe_sha256": payload_summary["lockverity_exe_sha256"],
-        "lockverity_cli_exe_sha256": payload_summary["lockverity_cli_exe_sha256"],
+        "lockverity_exe_sha256": payload_summary["payload_sha256_entries"]["Lockverity.exe"],
+        "lockverity_cli_exe_sha256": payload_summary["payload_sha256_entries"][
+            "lockverity-cli.exe"
+        ],
         "installer_build_timestamp_utc": datetime.datetime.now(tz=datetime.UTC).isoformat(
             timespec="seconds"
         ),
@@ -512,7 +594,12 @@ def _write_external_checksums(output_dir: Path, installer_exe: Path, manifest_pa
     return checksums_path
 
 
-def _run_silent_smoke(installer_exe: Path, output_dir: Path, port: int) -> dict[str, object]:
+def _run_silent_smoke(
+    installer_exe: Path,
+    output_dir: Path,
+    port: int,
+    expected_lockverity_cli_exe_sha256: str,
+) -> dict[str, object]:
     """Run a bounded silent-install smoke that the packaged
     binary actually launches and responds to ``/api/v1/health``.
 
@@ -564,10 +651,10 @@ def _run_silent_smoke(installer_exe: Path, output_dir: Path, port: int) -> dict[
             "expected": str(installed_cli),
         }
     installed_cli_sha = _sha256_of(installed_cli)
-    if installed_cli_sha != EXPECTED_LOCKVERITY_CLI_EXE_SHA256:
+    if installed_cli_sha != expected_lockverity_cli_exe_sha256:
         return {
             "status": "cli_mismatch",
-            "expected": EXPECTED_LOCKVERITY_CLI_EXE_SHA256,
+            "expected": expected_lockverity_cli_exe_sha256,
             "actual": installed_cli_sha,
         }
     # Start the installed CLI in foreground mode for the smoke.
@@ -768,7 +855,12 @@ def main(argv: list[str] | None = None) -> int:
     smoke_result: dict[str, object] | None = None
     if args.run_smoke:
         port = _free_port()
-        smoke_result = _run_silent_smoke(installer_exe, args.output_dir, port)
+        smoke_result = _run_silent_smoke(
+            installer_exe,
+            args.output_dir,
+            port,
+            payload_summary["payload_sha256_entries"]["lockverity-cli.exe"],
+        )
         _log("smoke", f"silent-install smoke status={smoke_result.get('status')}")
 
     report = {

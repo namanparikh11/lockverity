@@ -18,6 +18,22 @@ Part B3B release-blocker correction: the historical default
 runtime-home-relative absolute path so an installed Lockverity never
 writes its database beside the installed executables.
 
+> **This ledger is now an informational record of every portable
+> payload that has been published for v2.1.** The build script
+> (`backend/scripts/build_windows_installer.py`) and the
+> acceptance script (`backend/scripts/b3b_acceptance.py`) do not
+> read or assert against any of the generated hashes recorded
+> here. Every generated binary hash is read at build /
+> acceptance time from the payload's own
+> `SHA256SUMS.txt` and `BUILD-MANIFEST.json` and is written
+> to the external `INSTALLER-MANIFEST.json` and
+> `SHA256SUMS.txt`. The build pins the payload's *source
+> identity* (the B3A source commit) and the product version,
+> and nothing else. This design keeps a single source commit
+> valid across any number of portable rebuilds (PyInstaller
+> timestamps, bootloader versions, etc.) and removes the
+> historical "rebuild -> source-commit -> rebuild" cycle.
+
 | Ledger entry | Source commit | Portable ZIP SHA-256 | Lockverity.exe SHA-256 | lockverity-cli.exe SHA-256 | Status |
 | --- | --- | --- | --- | --- | --- |
 | Original v2.1 B3A | `81b400bc40ae6ada2787470fca8b31c5ea8b1c30` | `ec9a4d3fdf160e5364a62acba25fc2bcbaaf5e067ba116cd3f355d2c61cca588` | `beecc5cd4d9d336f5adf450c947bf1db62a6493876a8250bfdba9889997ff059` | `f74f3e5b8631bf3ec5f018064367fd26a2b5b8b1cf19518a94a0deb40c2e4796` | **Superseded for v2.1** (CWD-relative default DB URL) |

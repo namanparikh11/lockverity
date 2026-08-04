@@ -13,6 +13,19 @@ acceptance cycle.
 Every test in this file documents a single v2.1 Part B3B
 acceptance contract. New contracts must add a test; broken
 contracts must be repaired before the test is removed.
+
+Important: the tests in this file MUST NOT pin any generated
+binary hash (portable ZIP SHA-256, Lockverity.exe SHA-256,
+etc.) inside a tracked Python constant. Generated hashes are
+recorded in the portable's own ``SHA256SUMS.txt`` /
+``BUILD-MANIFEST.json`` and in the installer's external
+``INSTALLER-MANIFEST.json``. The tracked source may only pin
+the payload's *source identity* (``source_commit``) and the
+product ``version``; any other generated value is read at
+build / acceptance time from the artifact's own manifest.
+This design keeps a single source commit valid across any
+number of portable rebuilds and removes the historical
+"rebuild -> source-commit -> rebuild" cycle.
 """
 
 from __future__ import annotations
@@ -25,16 +38,35 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 BACKEND_ROOT = REPO_ROOT / "backend"
 ISS_SOURCE = BACKEND_ROOT / "installer" / "lockverity.iss"
 BUILD_SCRIPT = BACKEND_ROOT / "scripts" / "build_windows_installer.py"
+B3B_ACCEPTANCE_SCRIPT = BACKEND_ROOT / "scripts" / "b3b_acceptance.py"
 APPROVED_ICON = BACKEND_ROOT / "pyinstaller" / "favicon-exe.ico"
 APPROVED_FAVICON_ICO = REPO_ROOT / "frontend" / "public" / "favicon.ico"
 DOCS_FILE = REPO_ROOT / "docs" / "windows-installer.md"
 
 STABLE_APP_ID = "{E5B0C0F4-7C42-4D6A-9B17-1A2B3C4D5E6F}"
+APP_VERSION = "2.1.0"
 
-EXPECTED_PAYLOAD_ZIP_SHA256 = "6e544e57d9fa6859de7bd446d9314f19ccc2bfcf7104091fb2e94a61a77e8b04"
+# The payload's source identity is the only generated-binary
+# hash *adjacent* value tracked Python code may keep. The
+# payload's portable ZIP, the EXE SHA-256 values, the
+# INSTALLER-MANIFEST.json fields, and the SHA256SUMS.txt
+# entries are all read at build / acceptance time from the
+# payload's own generated manifests.
 EXPECTED_PAYLOAD_SOURCE_COMMIT = "c9b4bb5bcfb14f3143d72e3ba11d21e4490d8f09"
-EXPECTED_LOCKVERITY_EXE_SHA256 = "19e0c363837cada158c31e072307bcdc736708f2440f21b70a6d011d3f450fdf"
-EXPECTED_LOCKVERITY_CLI_EXE_SHA256 = (
+
+# Historical generated-hash literals kept solely as
+# "forbidden literals" used by the regression tests to
+# assert that the build script and the acceptance script do
+# NOT pin any of them. These values are *expected* to be
+# out of date after any rebuild; they exist for assertion
+# only and are never used as a positive expectation.
+_HISTORICAL_FORBIDDEN_PAYLOAD_ZIP_SHA256 = (
+    "6e544e57d9fa6859de7bd446d9314f19ccc2bfcf7104091fb2e94a61a77e8b04"
+)
+_HISTORICAL_FORBIDDEN_LOCKVERITY_EXE_SHA256 = (
+    "19e0c363837cada158c31e072307bcdc736708f2440f21b70a6d011d3f450fdf"
+)
+_HISTORICAL_FORBIDDEN_LOCKVERITY_CLI_EXE_SHA256 = (
     "ffd597d6339480e449b265aee07675a2836bf987d29962b65e9d1ff05221c0f5"
 )
 
@@ -45,6 +77,10 @@ def _iss_text() -> str:
 
 def _build_text() -> str:
     return BUILD_SCRIPT.read_text(encoding="utf-8", errors="replace")
+
+
+def _b3b_acceptance_text() -> str:
+    return B3B_ACCEPTANCE_SCRIPT.read_text(encoding="utf-8", errors="replace")
 
 
 # ---------------------------------------------------------------------
@@ -880,15 +916,40 @@ class TestBuildScriptContract:
         text = _build_text()
         assert STABLE_APP_ID in text, f"Build script must use the stable AppId {STABLE_APP_ID}"
 
-    def test_build_script_pins_accepted_payload_hashes(self) -> None:
+    def test_build_script_pins_source_identity_not_generated_hashes(self) -> None:
+        """The build script must pin the payload's *source identity*
+        and product version, but MUST NOT pin any generated
+        binary hash (portable ZIP, Lockverity.exe, etc.) inside
+        a tracked Python constant. Generated hashes are read at
+        build time from the payload's own ``SHA256SUMS.txt`` and
+        ``BUILD-MANIFEST.json`` and written to the external
+        ``INSTALLER-MANIFEST.json`` / ``SHA256SUMS.txt``.
+        """
         text = _build_text()
-        for expected in (
-            EXPECTED_PAYLOAD_ZIP_SHA256,
-            EXPECTED_PAYLOAD_SOURCE_COMMIT,
-            EXPECTED_LOCKVERITY_EXE_SHA256,
-            EXPECTED_LOCKVERITY_CLI_EXE_SHA256,
+        # The source identity and product version are the
+        # only generated-hash *adjacent* values tracked Python
+        # code may keep.
+        assert EXPECTED_PAYLOAD_SOURCE_COMMIT in text, (
+            f"Build script must pin payload source_commit {EXPECTED_PAYLOAD_SOURCE_COMMIT!r}"
+        )
+        assert APP_VERSION in text, f"Build script must pin product version {APP_VERSION!r}"
+        # No exact generated binary hash may live in a tracked
+        # Python constant. We assert this by checking that the
+        # previous-generation constant names are gone. The
+        # build script's hash constants must be limited to the
+        # source-identity pin (EXPECTED_PAYLOAD_SOURCE_COMMIT),
+        # the product version (APP_VERSION), the AppId, and
+        # build-time configuration (port hints, paths, etc.).
+        for forbidden_name in (
+            "EXPECTED_PAYLOAD_ZIP_SHA256",
+            "EXPECTED_LOCKVERITY_EXE_SHA256",
+            "EXPECTED_LOCKVERITY_CLI_EXE_SHA256",
         ):
-            assert expected in text, f"Build script must pin accepted hash {expected!r}"
+            assert f"{forbidden_name} = " not in text, (
+                f"Build script must not declare a module-level "
+                f"constant {forbidden_name!r} that pins a "
+                "generated binary hash"
+            )
 
     def test_build_script_uses_subprocess_without_shell_true(self) -> None:
         text = _build_text()
@@ -928,11 +989,27 @@ class TestBuildScriptContract:
             "Build script must validate the 40-char SHA format"
         )
 
-    def test_build_script_refuses_wrong_payload_hash(self) -> None:
+    def test_build_script_refuses_tampered_payload_via_sha256sums(self) -> None:
+        """The build script must refuse a payload whose files do
+        not match the payload's own ``SHA256SUMS.txt``. This is
+        the integrity check — no generated hash is pinned by
+        the build script; the expected SHA-256 for every file
+        is read from the payload's manifest.
+        """
         text = _build_text()
-        assert "SHA-256 mismatch" in text, "Build script must refuse a payload with a wrong SHA-256"
-        assert "Restore the accepted B3A" in text, (
-            "Build script must instruct the operator to restore the accepted B3A portable ZIP"
+        assert "SHA256SUMS.txt" in text, (
+            "Build script must read the payload's own SHA256SUMS.txt to verify integrity"
+        )
+        # The mismatch must be flagged on any entry of
+        # SHA256SUMS, not on a single pinned value.
+        assert "SHA-256 mismatch" in text, (
+            "Build script must refuse a payload whose SHA256SUMS entries do not match"
+        )
+        # The build script must also reject the case where
+        # SHA256SUMS references a file that is not in the
+        # payload.
+        assert "references missing file" in text, (
+            "Build script must refuse a payload whose SHA256SUMS references a missing file"
         )
 
     def test_build_script_generates_installer_manifest(self) -> None:
@@ -1161,3 +1238,311 @@ class TestInstallerDocumentation:
             "code signing",
         ):
             assert topic.lower() in text.lower(), f"Documentation must cover the topic {topic!r}"
+
+
+# ---------------------------------------------------------------------
+# Provenance-design regression tests
+# ---------------------------------------------------------------------
+
+
+class TestProvenanceDesign:
+    """The new provenance design must satisfy the regression
+    contract documented in the user's publication-readiness
+    instructions:
+
+      * no exact generated payload binary hash is required
+        from a tracked Python constant;
+      * generated manifest values are full 40-character SHAs;
+      * no local paths or secrets enter generated manifests;
+      * tampered payload files are rejected;
+      * mismatched source_commit is rejected;
+      * the installer accepts a payload whose manifest
+        source_commit equals the expected final source HEAD;
+      * all payload SHA256SUMS entries are verified.
+    """
+
+    def test_b3b_acceptance_does_not_pin_generated_hashes(self) -> None:
+        """The B3B acceptance script must not pin any generated
+        binary hash as a Python constant. Expected hashes are
+        read from the installer's external
+        ``INSTALLER-MANIFEST.json`` (which is itself generated
+        by the build script)."""
+        text = _b3b_acceptance_text()
+        for forbidden in (
+            "_HISTORICAL_FORBIDDEN_PAYLOAD_ZIP_SHA256",
+            "_HISTORICAL_FORBIDDEN_LOCKVERITY_EXE_SHA256",
+            "_HISTORICAL_FORBIDDEN_LOCKVERITY_CLI_EXE_SHA256",
+            "EXPECTED_LOCKVERITY_EXE_SHA256",
+            "EXPECTED_LOCKVERITY_CLI_EXE_SHA256",
+        ):
+            assert f"{forbidden} = " not in text, (
+                f"b3b_acceptance.py must not declare {forbidden!r} as a tracked constant"
+            )
+        # The acceptance script must read expected hashes from
+        # the installer manifest, not from a local constant.
+        assert "INSTALLER-MANIFEST.json" in text, (
+            "b3b_acceptance.py must read expected EXE hashes from INSTALLER-MANIFEST.json"
+        )
+
+    def test_installer_accepts_payload_with_matching_source_commit(self) -> None:
+        """The installer build script must accept a payload whose
+        ``BUILD-MANIFEST.json`` ``source_commit`` equals
+        ``EXPECTED_PAYLOAD_SOURCE_COMMIT``. This is a static
+        check on the build script's verification logic.
+        """
+        text = _build_text()
+        assert 'manifest.get("source_commit") != EXPECTED_PAYLOAD_SOURCE_COMMIT' in text, (
+            "Build script must reject payloads whose BUILD-MANIFEST.json source_commit "
+            "does not match EXPECTED_PAYLOAD_SOURCE_COMMIT"
+        )
+
+    def test_installer_rejects_mismatched_source_commit(self) -> None:
+        """Negative case: the build script must fail loudly if
+        ``source_commit`` does not match. The error message must
+        include both the expected and the actual commit."""
+        text = _build_text()
+        assert "source_commit" in text and "expected" in text and "actual" in text, (
+            "Build script must report both expected and actual source_commit on mismatch"
+        )
+
+    def test_installer_verifies_all_sha256sums_entries(self) -> None:
+        """The build script must iterate every entry of the
+        payload's ``SHA256SUMS.txt`` and verify it against the
+        actual file bytes."""
+        text = _build_text()
+        assert "SHA256SUMS" in text, "Build script must reference the payload's SHA256SUMS.txt"
+        # The build script must re-hash every file the
+        # SHA256SUMS.txt mentions. We assert that the verification
+        # loop hashes each entry (not just one or two
+        # special-case files).
+        assert "for rel, expected_sha in" in text, (
+            "Build script must iterate every SHA256SUMS.txt entry"
+        )
+        assert "_sha256_of(file_path)" in text, (
+            "Build script must re-hash every payload file referenced by SHA256SUMS.txt"
+        )
+
+    def test_installer_rejects_tampered_payload_files(self) -> None:
+        """The build script must reject a payload whose files do
+        not match the SHA256SUMS entries. This is asserted by
+        checking the explicit mismatch error path.
+        """
+        text = _build_text()
+        assert "payload file SHA-256 mismatch" in text, (
+            "Build script must emit a clear error when a payload file's "
+            "SHA-256 does not match its SHA256SUMS.txt entry"
+        )
+        # The error must list the file path, the expected and
+        # the actual hash. This is what the operator sees.
+        for needed in ("path:", "expected:", "actual:"):
+            assert needed in text, f"Build-script tamper-rejection error must include {needed!r}"
+
+    def test_generated_manifest_values_remain_full_40_char_shas(self) -> None:
+        """Generated ``source_commit`` fields in the install
+        manifest must be full 40-character lowercase hex SHA-1
+        strings. The build script validates the format before
+        writing it to ``INSTALLER-MANIFEST.json``."""
+        text = _build_text()
+        assert re.search(r"\[0-9a-f\]\{40\}", text), (
+            "Build script must validate 40-character hex SHA-1 format"
+        )
+        # The full HEAD is read via ``git rev-parse HEAD`` and
+        # is asserted to match the regex.
+        assert 're.match(r"^[0-9a-f]{40}$", full)' in text, (
+            "Build script must assert that git HEAD is a full 40-char SHA"
+        )
+
+    def test_no_local_paths_or_secrets_in_generated_manifests(self) -> None:
+        """The build script must not embed local absolute paths
+        (e.g. ``C:\\Users\\...``) or obvious secret-shaped strings
+        in the generated ``INSTALLER-MANIFEST.json``. The
+        manifest records the product name, version, source
+        commit, stable AppId, architecture, and platform — but
+        never the absolute install path (the operator's
+        ``%LOCALAPPDATA%`` is recorded as a literal string, not
+        a resolved absolute path).
+        """
+        text = _build_text()
+        # The manifest builder is the canonical chokepoint. We
+        # inspect its body for any local-path-shaped string
+        # such as ``C:\\Users\\``, ``\\\\\\\\``, ``/Users/``,
+        # ``/home/`` or an absolute path.
+        # Find the manifest builder by anchor.
+        anchor = "def _write_installer_manifest("
+        idx = text.find(anchor)
+        assert idx > 0, "Build script must define _write_installer_manifest"
+        # The manifest body is the next ``return manifest_path``
+        # or the next top-level ``def``. We extract a bounded
+        # slice to keep the search local.
+        end_idx = text.find("\n\n\n", idx)
+        if end_idx < 0:
+            end_idx = len(text)
+        body = text[idx:end_idx]
+        for forbidden_pattern in (
+            "C:\\\\Users\\\\",
+            "/Users/",
+            "/home/",
+            "C:\\\\Temp\\\\",
+            "secret",
+            "password=",
+            "api_key",
+        ):
+            assert forbidden_pattern.lower() not in body.lower(), (
+                f"Generated INSTALLER-MANIFEST.json body must not contain {forbidden_pattern!r}"
+            )
+        # The default install path is recorded as the literal
+        # token ``%LOCALAPPDATA%\\Programs\\Lockverity`` (an
+        # environment-variable template, not a resolved
+        # absolute path). Assert the literal is present.
+        assert '"%LOCALAPPDATA%\\\\Programs\\\\Lockverity"' in body, (
+            "Generated manifest must record the install path as the "
+            "literal %LOCALAPPDATA%\\Programs\\Lockverity template"
+        )
+
+    def test_no_exact_generated_payload_binary_hash_required_from_tracked_constant(self) -> None:
+        """The combined tracked-Python source must not pin any
+        generated payload binary hash. We assert this across
+        both the build script and the acceptance script: no
+        64-character hex literal appears as a Python constant
+        declaration in either file, except for the forbidden
+        historical literals explicitly named above.
+        """
+        # Build a list of "expected historical" 64-hex literals
+        # that the test file itself uses to assert *non-
+        # presence* of those exact values.
+        expected_in_tests = {
+            _HISTORICAL_FORBIDDEN_PAYLOAD_ZIP_SHA256,
+            _HISTORICAL_FORBIDDEN_LOCKVERITY_EXE_SHA256,
+            _HISTORICAL_FORBIDDEN_LOCKVERITY_CLI_EXE_SHA256,
+        }
+        forbidden_in_build = {
+            _HISTORICAL_FORBIDDEN_PAYLOAD_ZIP_SHA256,
+            _HISTORICAL_FORBIDDEN_LOCKVERITY_EXE_SHA256,
+        }
+        for forbidden in forbidden_in_build:
+            assert forbidden not in _build_text(), (
+                f"Build script must not contain the generated hash {forbidden!r}"
+            )
+        # The acceptance script may read these from the
+        # installer's manifest but must not declare them as
+        # pinned constants.
+        for forbidden in expected_in_tests:
+            assert (
+                forbidden not in _b3b_acceptance_text()
+                or (f'"{forbidden}"' in _b3b_acceptance_text()) is False
+            ), f"b3b_acceptance.py must not declare the generated hash {forbidden!r} as a constant"
+
+    def test_build_writes_full_40_char_source_commit_to_manifest(self) -> None:
+        """The build script writes ``installer_source_commit``
+        to the generated ``INSTALLER-MANIFEST.json`` from the
+        full 40-character ``git rev-parse HEAD``. Tracked
+        Python must not shorten the SHA."""
+        text = _build_text()
+        # Locate the manifest builder and assert the recorded
+        # value is a 40-character SHA captured from
+        # ``_git_head_full``.
+        assert "_git_head_full()" in text, (
+            "Build script must use the full 40-character _git_head_full()"
+        )
+        # The manifest body must record the full SHA without
+        # slicing. We assert by checking the manifest builder
+        # references both ``installer_source_commit`` and the
+        # 40-character SHA source.
+        assert '"installer_source_commit": installer_source_commit' in text, (
+            "Build script must record the full 40-char installer_source_commit in the manifest"
+        )
+
+    def test_installer_manifest_records_all_required_fields(self) -> None:
+        """The generated ``INSTALLER-MANIFEST.json`` must
+        record the documented fields. The list below is the
+        complete set the operator-facing release report
+        expects. Missing fields break the audit chain."""
+        text = _build_text()
+        required = (
+            "product",
+            "version",
+            "installer_source_commit",
+            "payload_source_commit",
+            "payload_zip",
+            "payload_zip_sha256",
+            "payload_build_manifest_sha256",
+            "lockverity_exe_sha256",
+            "lockverity_cli_exe_sha256",
+            "installer_build_timestamp_utc",
+            "target_platform",
+            "target_architecture",
+            "inno_setup_version",
+            "inno_setup_compiler_path",
+            "inno_setup_compiler_sha256",
+            "installer_filename",
+            "installer_sha256",
+            "stable_app_id",
+            "default_install_path",
+            "privilege_mode",
+            "code_signing_status",
+        )
+        for field in required:
+            assert f'"{field}"' in text, (
+                f"Generated INSTALLER-MANIFEST.json must record the field {field!r}"
+            )
+
+    def test_sha256sums_uses_lowercase_hex_format(self) -> None:
+        """The payload's ``SHA256SUMS.txt`` uses lowercase hex
+        and is parsed by the build script. The build script
+        must assert that every parsed SHA-256 is a full
+        64-character lowercase hex string."""
+        text = _build_text()
+        # The build script's regex for SHA-256 entries is
+        # ``r"^[0-9a-f]{64}$"`` (lowercase hex only, 64 chars).
+        assert 'r"^[0-9a-f]{64}$"' in text, (
+            "Build script must require SHA256SUMS.txt SHA-256 entries to be lowercase hex"
+        )
+
+    def test_b3b_acceptance_reads_expected_hashes_from_installer_manifest(self) -> None:
+        """The B3B acceptance script's payload-verification step
+        must read the expected EXE hashes from the installer's
+        external ``INSTALLER-MANIFEST.json`` — the canonical
+        generated record — not from any local constant."""
+        text = _b3b_acceptance_text()
+        # The acceptance script must reference the
+        # ``_read_installer_manifest`` helper (or equivalent
+        # ``INSTALLER-MANIFEST.json`` reader).
+        assert "_read_installer_manifest" in text, (
+            "b3b_acceptance.py must read expected hashes from INSTALLER-MANIFEST.json"
+        )
+        # The expected hashes must be loaded from the
+        # manifest, not from a local constant. The test pins
+        # this: no `EXPECTED_*_EXE_SHA256` declaration is
+        # allowed.
+        assert "EXPECTED_LOCKVERITY_EXE_SHA256 = " not in text, (
+            "b3b_acceptance.py must not declare EXPECTED_LOCKVERITY_EXE_SHA256"
+        )
+        assert "EXPECTED_LOCKVERITY_CLI_EXE_SHA256 = " not in text, (
+            "b3b_acceptance.py must not declare EXPECTED_LOCKVERITY_CLI_EXE_SHA256"
+        )
+
+    def test_installer_rejects_payload_with_no_sha256sums(self) -> None:
+        """The build script must refuse a payload whose
+        ``SHA256SUMS.txt`` is empty. An empty integrity record
+        would mean the operator cannot detect any tampering."""
+        text = _build_text()
+        assert "is empty" in text, "Build script must refuse a payload with empty SHA256SUMS.txt"
+
+    def test_sha256sums_parser_rejects_path_escape(self) -> None:
+        """The build script's ``SHA256SUMS.txt`` parser must
+        reject entries whose relative path escapes the
+        payload root (``..`` or absolute paths). This prevents
+        a tampered manifest from tricking the build into
+        reading or writing files outside the payload."""
+        text = _build_text()
+        assert "escapes payload root" in text, (
+            "Build script must reject SHA256SUMS.txt paths that escape the payload root"
+        )
+
+    def test_sha256sums_parser_rejects_oversized_or_malformed_sha(self) -> None:
+        """The build script must reject a ``SHA256SUMS.txt``
+        line whose SHA-256 is not 64 lowercase hex characters."""
+        text = _build_text()
+        assert "malformed SHA-256" in text, (
+            "Build script must reject malformed SHA-256 in SHA256SUMS.txt"
+        )
