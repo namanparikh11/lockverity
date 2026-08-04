@@ -506,7 +506,7 @@ def _build_installer(
         raise SystemExit(f"ERROR: ISCC failed (rc={result.returncode}); see {log_path}")
     # The .iss's ``OutputBaseFilename`` directive controls the
     # final filename; ISCC appends ``.exe`` automatically.
-    installer_name = "Lockverity-2.1.0-windows-x64-setup.exe"
+    installer_name = f"Lockverity-{APP_VERSION}-windows-x64-setup.exe"
     installer_exe = output_dir / installer_name
     if not installer_exe.is_file():
         raise SystemExit(f"ERROR: expected installer EXE not produced: {installer_exe}")
