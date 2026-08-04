@@ -19,7 +19,7 @@ import { AboutPage } from "@/pages/AboutPage";
 
 const SYSTEM_INFO_BODY = {
   name: "Lockverity",
-  version: "2.1.0",
+  version: "2.1.1",
   tagline: "Evidence-first software supply-chain assurance",
   environment: "test",
   api_prefix: "/api/v1",
@@ -71,7 +71,7 @@ describe("version consistency", () => {
       </MemoryRouter>
     );
     await waitFor(() => {
-      expect(screen.getByText("v2.1.0")).toBeInTheDocument();
+      expect(screen.getByText("v2.1.1")).toBeInTheDocument();
     });
   });
 
@@ -110,10 +110,10 @@ describe("About page current product copy", () => {
       </MemoryRouter>
     );
     await waitFor(() => {
-      expect(screen.getByTestId("about-version")).toHaveTextContent("v2.1.0");
+      expect(screen.getByTestId("about-version")).toHaveTextContent("v2.1.1");
     });
     expect(screen.getByTestId("about-version-footer")).toHaveTextContent(
-      "v2.1.0"
+      "v2.1.1"
     );
   });
 
@@ -128,13 +128,13 @@ describe("About page current product copy", () => {
         </Routes>
       </MemoryRouter>
     );
-    // The "What v2.1.0 implements today" section header
+    // The "What v2.1.1 implements today" section header
     // must be present. The About page is the single source
     // of truth for the current milestone and must be
     // kept in sync with ``backend/app/_version.py``.
     await waitFor(() => {
       expect(
-        screen.getByRole("heading", { name: /what v2\.1\.0 implements today/i })
+        screen.getByRole("heading", { name: /what v2\.1\.1 implements today/i })
       ).toBeInTheDocument();
     });
     // The human-readable evidence report is described

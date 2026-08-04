@@ -33,6 +33,7 @@ import io
 import os
 import secrets
 import shutil
+import sys
 import zipfile
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
@@ -54,6 +55,72 @@ from app.utils.paths import (
 # symlinks in the same way; this is the only portable signal.
 _S_IFLNK = 0o120000
 _S_IFMT = 0o170000
+
+# Windows ``MAX_PATH`` (260) is the legacy ceiling for the
+# Win32 ANSI file API. The wide (UTF-16) API accepts paths
+# longer than 260 characters when the caller opts in with
+# the Windows long-path prefix (a literal ``\\?\`` at the
+# start of the path). A long-named repository plus a deep
+# workspace tree (e.g. ``<home>\\var\\workspace\\
+# workspaces\\<key>\\contents\\<repo>-<sha>\\<deeper>\\<file>``)
+# can exceed 260 characters; the ``Path.open("wb")`` call
+# on such a path raises ``FileNotFoundError`` on Windows
+# even when the parent directory exists and is writable.
+# The v2.1.1 hotfix detects the over-limit path and writes
+# through the long-path prefix so the extraction is
+# invariant of the operator's home directory depth. The
+# prefix is a no-op on POSIX.
+_LONG_PATH_PREFIX = "\\\\?\\"
+_WINDOWS_MAX_PATH = 260
+
+
+def _open_for_write(path: Path):
+    r"""Return a writable file handle for ``path``, supporting long Windows paths.
+
+    On Windows the ``Path.open("wb")`` call uses the Win32
+    ANSI file API which is bounded by ``MAX_PATH`` (260).
+    When the resolved path is longer than that, the call
+    fails with ``FileNotFoundError`` even when the parent
+    directory exists. The Windows wide file API accepts
+    paths longer than 260 characters when the caller uses
+    the Windows long-path prefix (a literal backslash
+    backslash question mark backslash at the start of the
+    path); the same approach works in Python by passing the
+    prefixed string to :func:`builtins.open`. The prefix is
+    rejected on POSIX so this helper falls through to the
+    default ``Path.open`` on every non-Windows host.
+    """
+    if sys.platform != "win32":
+        return path.open("wb")
+    text = str(path)
+    if len(text) < _WINDOWS_MAX_PATH:
+        return path.open("wb")
+    return open(_LONG_PATH_PREFIX + text, "wb")
+
+
+def _mkdir_parents(path: Path) -> None:
+    """Create the parent directory of ``path`` (and all missing ancestors).
+
+    On Windows the ``Path.mkdir(parents=True, exist_ok=True)``
+    call fails for the same ``MAX_PATH`` reason as the
+    ``Path.open`` call above. This helper retries the
+    long-path-prefixed form on the same condition.
+    """
+    parent = path.parent
+    if parent.exists():
+        return
+    if sys.platform != "win32":
+        parent.mkdir(parents=True, exist_ok=True)
+        return
+    text = str(parent)
+    if len(text) < _WINDOWS_MAX_PATH:
+        parent.mkdir(parents=True, exist_ok=True)
+        return
+    # The long-path prefix is documented for ``CreateDirectoryW``
+    # as well. We bypass the strict-prefix check by passing the
+    # prefixed string through ``os.makedirs``; the function
+    # supports arbitrary paths when the prefix is supplied.
+    os.makedirs(_LONG_PATH_PREFIX + text, exist_ok=True)
 
 
 class ZipIntakeError(Exception):
@@ -292,7 +359,11 @@ def extract_zip(
                         "archive_path_escape",
                         f"Destination {dest_resolved} is outside the workspace contents.",
                     )
-                dest.parent.mkdir(parents=True, exist_ok=True)
+                # v2.1.1: ``_mkdir_parents`` retries the call through
+                # the long-path prefix on Windows when the
+                # resolved path exceeds ``MAX_PATH`` (260). Same
+                # rationale as in the tarball path above.
+                _mkdir_parents(dest)
                 if dest.exists() or dest.is_symlink():
                     raise ZipIntakeError(
                         "archive_overwrite_forbidden",
@@ -317,7 +388,7 @@ def extract_zip(
                         "archive_uncompressed_too_large",
                         "Cumulative uncompressed size exceeds limit.",
                     )
-                with zf.open(info, "r") as src, dest.open("wb") as out:
+                with zf.open(info, "r") as src, _open_for_write(dest) as out:
                     _copy_capped(src, out, max_bytes=info.file_size + 1)
                 # Update mtime / perms to match the archive entry
                 # when reasonable.
@@ -528,7 +599,17 @@ def intake_tar_gz(
                         "archive_path_escape",
                         f"Destination {dest_resolved} is outside the workspace contents.",
                     )
-                dest.parent.mkdir(parents=True, exist_ok=True)
+                # v2.1.1: ``dest.parent.mkdir(parents=True, exist_ok=True)``
+                # is the historical mkdir call, but on Windows
+                # the resulting path can exceed ``MAX_PATH``
+                # (260) for a long-named repository + full
+                # SHA + deep tree. ``_mkdir_parents`` retries
+                # the call through the long-path prefix in
+                # that case so the extraction does not abort
+                # with a confusing ``FileNotFoundError`` on a
+                # valid workspace root. ``_open_for_write``
+                # applies the same fix to the file handle.
+                _mkdir_parents(dest)
                 if dest.exists() or dest.is_symlink():
                     raise ZipIntakeError(
                         "archive_overwrite_forbidden",
@@ -540,7 +621,7 @@ def intake_tar_gz(
                         "archive_extract_failed",
                         f"Could not extract {name!r}.",
                     )
-                with dest.open("wb") as out:
+                with _open_for_write(dest) as out:
                     while True:
                         chunk = src.read(DEFAULT_CHUNK_SIZE)
                         if not chunk:

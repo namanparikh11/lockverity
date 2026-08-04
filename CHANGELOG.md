@@ -5,6 +5,123 @@ follow [Semantic Versioning](https://semver.org/). Lockverity is
 pre-1.0 in the sense that the public API may evolve; the
 underlying data model and Alembic migrations are stable.
 
+## v2.1.1 — Public-repository scan intake and error taxonomy (DRAFT, in progress)
+
+A targeted hotfix for the v2.1.0 public-repository scan
+intake. The hotfix is code-only: no new feature, no
+behaviour change beyond the bug fix and the actionable
+error taxonomy. The v2.1.0 release tag, release body,
+and six release assets remain unchanged on
+``checkpoint-v2.1.0-public-release``; v2.1.1 is not yet
+published.
+
+### Fixed
+
+- **Public self-scan of the Lockverity repository now
+  starts successfully.** Two related defects in the
+  v2.1.0 scan intake caused the published v2.1.0 build
+  to fail with ``FileNotFoundError`` (surfaced to the
+  user as "Unknown error / An internal error occurred.")
+  on a self-scan of
+  ``https://github.com/namanparikh11/lockverity``:
+  1. ``backend/app/core/config.py:45``'s default
+     ``workspace_root = "./var/workspace"`` is
+     CWD-relative and resolved under the install
+     directory's ``_internal`` PyInstaller support
+     directory when the CLI launched the child server,
+     instead of under the operator-controlled runtime
+     home.
+  2. Combined with the long-named extracted directory
+     (``<repo>-<40-char-sha>\backend\alembic\versions\…``),
+     the destination path can exceed Windows
+     ``MAX_PATH`` (260) and ``Path.open("wb")`` would
+     fail with ``FileNotFoundError`` even when the parent
+     directory existed and was writable.
+  The fix mirrors the v2.1 Part B3B ``database_url``
+  approach: the runner computes an absolute,
+  runtime-home-relative workspace root and publishes
+  it on the supervisor's process environment
+  (``LOCKVERITY_WORKSPACE_ROOT``). The new
+  ``_open_for_write`` and ``_mkdir_parents`` helpers
+  in ``backend/app/utils/zip_intake.py`` retry through
+  the Windows long-path prefix (``\\?\``) for paths
+  that exceed 260 characters. POSIX is a no-op.
+- **Actionable error taxonomy for the scan intake.**
+  Generic "Unknown error" / "Archive was rejected." /
+  raw "Upstream returned 404 Not Found." messages are
+  replaced with category-specific, user-facing
+  messages. At minimum:
+  - 404 / private repository: *"Repository could not
+    be accessed. Confirm that the URL exists and is
+    public. Private repositories are not supported in
+    this version."* The message does not reveal
+    whether a private repository actually exists.
+  - 429 rate limit: *"GitHub rate limit reached. Wait
+    a few minutes and retry. Configure
+    ``LOCKVERITY_GITHUB_TOKEN`` to lift the
+    unauthenticated limit. The Diagnostics page shows
+    the current rate-limit state."*
+  - 403 denial: *"GitHub denied the request. The
+    repository may be private, the URL may be wrong,
+    or the configured token may lack access. Private
+    repositories are not supported in this version."*
+  - Archive rejection: 11 category-specific actionable
+    messages (``archive_unsafe_path``,
+    ``archive_symlink_forbidden``,
+    ``archive_too_many_files``,
+    ``archive_entry_too_large``,
+    ``archive_uncompressed_too_large``,
+    ``archive_overwrite_forbidden``,
+    ``archive_path_resolve_failed``,
+    ``archive_path_escape``,
+    ``archive_extract_failed``,
+    ``archive_quarantine_write_failed``,
+    ``archive_validation_failed``). The original
+    rejection code and bounded diagnostic message
+    remain in the API response ``details`` envelope
+    for operator debugging.
+  - Internal error: a new
+    ``ApiErrorCode.INTERNAL_UNEXPECTED`` carries a
+    short non-PII correlation id (``8-char hex``) in
+    the response ``details`` envelope. The
+    user-facing message points the operator at the
+    Diagnostics page and the runtime log; the full
+    stack trace is written to the local log only.
+    The response never includes a stack trace, a
+    filesystem path, a token, a credential, or the
+    raw exception string.
+
+### Preserved
+
+- **OpenSSF Scorecard partial scans remain Partial.**
+  When the OpenSSF Scorecard repository-posture
+  provider is unavailable, the ScopeForge CLI scan
+  (and any other affected repository) remains
+  ``Partial``, not ``Completed``. A missing or
+  unavailable provider is still recorded as such
+  and surfaced explicitly; the UI does not convert
+  absence into "no findings". The provider-honesty
+  contract is unchanged.
+- **Failed-start record cleanup.** A scan that fails
+  before transitioning to ``READY`` is not left as a
+  misleading running scan; the new
+  ``INTERNAL_UNEXPECTED`` path bubbles the failure
+  to the API envelope without leaving a partial
+  workspace state.
+
+### Not changed
+
+- No new feature. No public-claim broadening. No
+  design or visual change.
+- No new credential, token, or private-repository
+  authentication support.
+- The v2.1.0 installer EXE, the v2.1.0 portable ZIP,
+  the ``checkpoint-v2.1.0-public-release`` tag, the
+  GitHub Release body, and the six v2.1.0 release
+  assets are unchanged. The v2.1.0 release remains
+  the published release until v2.1.1 is published
+  on its own tag.
+
 ## v2.1.0 — Local runtime brand polish and single-port production runtime (current)
 
 A focused, additive release that ships the v2.1 Part A

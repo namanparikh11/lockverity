@@ -15,13 +15,18 @@ an explicit omission marker.
 
 ## Current release
 
-**Lockverity v2.1.0** — Windows x64 installer, Windows x64 portable
-package, single-port production runtime, cross-platform local runtime
-CLI, original brand assets, and a concise About page.
+**Lockverity v2.1.1** — Hotfix release for the public-repository scan
+intake. The Windows x64 installer, Windows x64 portable package,
+single-port production runtime, cross-platform local runtime CLI,
+original brand assets, and concise About page are unchanged from
+v2.1.0; this hotfix is a code-only correction plus an actionable
+error taxonomy. The published v2.1.0 release assets remain in place
+under the original ``checkpoint-v2.1.0-public-release`` tag until a
+v2.1.1 release is published.
 
 | Field | Value |
 | --- | --- |
-| Version | `2.1.0` |
+| Version | `2.1.1` |
 | Release tag | [`checkpoint-v2.1.0-public-release`](https://github.com/namanparikh11/lockverity/releases/tag/checkpoint-v2.1.0-public-release) |
 | Published | 2026-08-04 |
 | Source commit | `da21f778f542572f4e71ba694b5d9f240d1bcdff` |

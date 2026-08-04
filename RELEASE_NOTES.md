@@ -29,6 +29,53 @@ The product is built around three guarantees:
   dependency graph is reported as `partial`, never
   `complete`.
 
+## Status — v2.1.1 hotfix in progress (DRAFT)
+
+The current **published** release is **Lockverity v2.1.0**
+(release tag ``checkpoint-v2.1.0-public-release``,
+Windows x64 installer, Windows x64 portable package,
+six release assets, original brand assets, concise
+About page). The v2.1.1 hotfix is in progress on the
+``hotfix/v2.1.1-scan-intake-errors`` branch and is not
+yet published. The hotfix is code-only; the v2.1.0
+release tag, body, and six assets are unchanged.
+
+What v2.1.1 will fix (when published):
+
+- The v2.1.0 public-repository scan intake failed on a
+  self-scan of the Lockverity repository (and on any
+  public repository whose long-named extracted
+  directory pushed the destination path past Windows
+  ``MAX_PATH``). The v2.1.0 user-visible result was
+  "Could not start a scan (Unknown error.) / An
+  internal error occurred." The hotfix routes the
+  workspace root through the runtime home and adds
+  Windows long-path support, so a public self-scan
+  starts successfully and the operator gets a clean
+  result.
+- The v2.1.0 user-facing error messages for
+  repository-not-accessible, rate-limited, denied,
+  and archive-rejection conditions were generic
+  ("Unknown error", "Archive was rejected."). The
+  hotfix replaces these with category-specific,
+  actionable messages and adds a non-PII correlation
+  id for unhandled internal failures, so the
+  operator always knows whether to retry, re-upload,
+  or open an issue.
+
+What v2.1.1 will **not** do (preserved contracts):
+
+- v2.1.1 does not add private-repository support.
+- v2.1.1 does not change the published v2.1.0
+  release assets. The
+  ``checkpoint-v2.1.0-public-release`` tag and its
+  six assets remain the canonical published release
+  until v2.1.1 is published on its own tag.
+- v2.1.1 does not convert any Partial scan to
+  Completed. A missing or unavailable provider is
+  still surfaced as such; the OpenSSF Scorecard
+  repository-posture case remains Partial.
+
 ## Status — v2.1.0 local-first release
 
 The repository is a **local-first release**, not a production

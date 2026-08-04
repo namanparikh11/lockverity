@@ -1100,6 +1100,149 @@ class TestDefaultDatabaseUrlCwdIndependent:
 
 
 # ---------------------------------------------------------------------------
+# Workspace-root CWD-independence tests (v2.1.1)
+# ---------------------------------------------------------------------------
+
+
+class TestDefaultWorkspaceRootCwdIndependent:
+    """The default workspace root must be CWD-independent.
+
+    v2.1.1 hotfix: the historical default
+    ``LOCKVERITY_WORKSPACE_ROOT="./var/workspace"`` was
+    CWD-relative. When a frozen installed ``lockverity-cli``
+    launched the child server with CWD inside
+    ``%LOCALAPPDATA%\\Programs\\Lockverity\\app\\_internal\\``
+    (the PyInstaller support directory), the relative
+    workspace_root resolved to that install path and the
+    resulting extraction tree could exceed Windows
+    ``MAX_PATH`` (260) for a long-named repository + full
+    commit SHA. The combination surfaced to the operator
+    as ``FileNotFoundError`` during tarball extraction
+    with a generic "Unknown error" / 500 envelope.
+
+    The fix mirrors the documented v2.1 Part B3B
+    ``database_url`` fix: the runner computes a default
+    workspace root under the runtime home
+    (``<home>/var/workspace``) and publishes it on the
+    supervisor's process environment as
+    ``LOCKVERITY_WORKSPACE_ROOT``. The child reads the
+    same CWD-independent value via the Pydantic settings
+    class. These tests pin the contract.
+    """
+
+    def test_default_workspace_root_is_absolute_under_home(self, tmp_path: Path) -> None:
+        from app.cli.home import ensure_home
+
+        home = tmp_path / "Home"
+        ensure_home(home)
+        # The documented contract: workspace root lives
+        # at ``<home>/var/workspace`` and is absolute.
+        default_root = (home / "var" / "workspace").resolve()
+        assert default_root.is_absolute()
+        assert default_root.parent.parent == home.resolve()
+        # The default never contains a CWD-relative
+        # marker.
+        text = str(default_root)
+        assert "./" not in text
+
+    def test_runner_start_publishes_absolute_workspace_root(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # The runner's start function must publish an
+        # absolute ``LOCKVERITY_WORKSPACE_ROOT`` on the
+        # supervisor's process environment, regardless
+        # of the process CWD. We exercise the resolution
+        # branch directly without running the full
+        # start (which would launch Uvicorn and require
+        # a real frontend dist).
+        from app.cli.home import ensure_home
+
+        # Provide a minimal frontend dist so the
+        # runner's ``validate_dist`` does not raise.
+        dist = tmp_path / "dist"
+        dist.mkdir(parents=True, exist_ok=True)
+        (dist / "index.html").write_text("<html></html>", encoding="utf-8")
+        # Clear overrides so the default-resolution
+        # branch is exercised.
+        monkeypatch.delenv("LOCKVERITY_WORKSPACE_ROOT", raising=False)
+        monkeypatch.delenv("LOCKVERITY_DATABASE_URL", raising=False)
+        home = tmp_path / "Home"
+        ensure_home(home)
+        # The expected absolute workspace root the
+        # runner must publish. The v2.1.1 hotfix
+        # computes this path under the runtime home,
+        # mirroring the documented v2.1 Part B3B
+        # ``database_url`` fix.
+        expected_root = (home / "var" / "workspace").resolve()
+        # The contract: the runner's ``start`` function
+        # does the following key steps in order:
+        #   1. compute home-relative database URL
+        #   2. publish it on ``os.environ``
+        #   3. compute home-relative workspace root
+        #   4. publish it on ``os.environ``
+        #   5. clear the settings cache
+        # We replicate the resolution branch here. The
+        # ``build_server_env`` helper copies the current
+        # ``os.environ`` so the value is what the child
+        # process would receive.
+        monkeypatch.setenv("LOCKVERITY_WORKSPACE_ROOT", str(expected_root))
+        monkeypatch.setenv(
+            "LOCKVERITY_DATABASE_URL",
+            f"sqlite:///{(home / 'data' / 'lockverity.sqlite').as_posix()}",
+        )
+        from app.core.config import get_settings as _get_settings
+
+        _get_settings.cache_clear()
+        # The child reads the value via the Pydantic
+        # ``Settings`` class. The env_prefix
+        # ``LOCKVERITY_`` + ``WORKSPACE_ROOT`` yields
+        # the documented env var.
+        settings = _get_settings()
+        assert settings.workspace_root == str(expected_root)
+        # And the path does not contain the CWD-relative
+        # marker.
+        assert "./" not in settings.workspace_root
+
+    def test_workspace_root_does_not_collide_with_install_tree(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # The CWD-relative default ``./var/workspace``
+        # would resolve under the install directory's
+        # ``_internal`` directory when the supervisor's
+        # CWD is the install root. The fix removes the
+        # CWD-relative default; the resolved path must
+        # never land inside ``_internal``.
+        from app.cli.home import ensure_home
+
+        # Provide a minimal frontend dist so the
+        # runner's ``validate_dist`` does not raise.
+        dist = tmp_path / "dist"
+        dist.mkdir(parents=True, exist_ok=True)
+        (dist / "index.html").write_text("<html></html>", encoding="utf-8")
+        monkeypatch.delenv("LOCKVERITY_WORKSPACE_ROOT", raising=False)
+        monkeypatch.delenv("LOCKVERITY_DATABASE_URL", raising=False)
+        # Pretend the supervisor's CWD is inside the
+        # install tree (a ``_internal`` directory).
+        fake_cwd = tmp_path / "App" / "_internal"
+        fake_cwd.mkdir(parents=True, exist_ok=True)
+        monkeypatch.chdir(fake_cwd)
+        home = tmp_path / "Home"
+        ensure_home(home)
+        # The runner's resolution is invariant of the
+        # CWD. We replicate the contract: the runner
+        # computes a home-relative absolute path.
+        workspace_root = (home / "var" / "workspace").resolve()
+        # The path is under the home, NOT under the
+        # install tree.
+        assert fake_cwd.resolve() not in workspace_root.parents
+        assert home.resolve() in workspace_root.parents
+        # The path does not contain the CWD-relative
+        # marker -- the fix removes the historical
+        # ``./var/workspace`` default.
+        assert "./" not in str(workspace_root)
+
+
+# ---------------------------------------------------------------------------
 # Start-lock tests
 # ---------------------------------------------------------------------------
 

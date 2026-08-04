@@ -644,6 +644,33 @@ def start(
     # before ``run_migrations`` is called closes the
     # CWD-relative hole.
     os.environ["LOCKVERITY_DATABASE_URL"] = database_url
+    # The default ``LOCKVERITY_WORKSPACE_ROOT`` of
+    # ``./var/workspace`` is a CWD-relative path. When
+    # the child process is launched by the CLI the
+    # supervisor's CWD is the install directory (or its
+    # ``_internal`` PyInstaller support directory in
+    # frozen mode), so the historical default would
+    # resolve to a workspace root inside the install
+    # tree rather than inside the operator-controlled
+    # runtime home. That combination is a real defect:
+    # a self-scan of a long-named repository produces
+    # an extraction path that can exceed Windows
+    # ``MAX_PATH`` (260), and the resulting
+    # ``FileNotFoundError`` surfaces to the user as
+    # "Unknown error" / 500 because the supervisor's
+    # workspace dir is not where the operator's data
+    # should live. The fix mirrors the ``database_url``
+    # approach above: compute an absolute
+    # runtime-home-relative workspace root and publish
+    # it on the supervisor's process environment so the
+    # child reads the same CWD-independent value.
+    # ``<home>/var/workspace/`` keeps the documented
+    # v2.1 Part B2 layout (``data/``, ``logs/``,
+    # ``run/``, ``config/``) plus a ``var/`` root for
+    # the per-workspace quarantine and contents.
+    workspace_root = (home / "var" / "workspace").resolve()
+    workspace_root.mkdir(parents=True, exist_ok=True)
+    os.environ["LOCKVERITY_WORKSPACE_ROOT"] = str(workspace_root)
     # ``get_settings`` is LRU-cached. If a previous
     # call (during the CLI's import chain, or from
     # a prior ``start`` attempt) populated the cache

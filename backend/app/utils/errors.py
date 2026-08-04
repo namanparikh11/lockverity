@@ -30,6 +30,15 @@ class ApiErrorCode(str, Enum):
     # cleaned up). The route must return this code
     # before creating a broken queued scan.
     RESCAN_SOURCE_UNAVAILABLE = "rescan_source_unavailable"
+    # v2.1.1: a request reached the application but the
+    # server failed to satisfy it for an unexpected
+    # reason (a programmer error, an unhandled
+    # exception, a filesystem error that survived every
+    # bounded fallback, etc.). The error envelope
+    # carries a short, non-PII correlation id; the full
+    # stack trace and the safe diagnostics are written
+    # to the local log file under the runtime home.
+    INTERNAL_UNEXPECTED = "internal_unexpected"
 
 
 class ApiError(Exception):

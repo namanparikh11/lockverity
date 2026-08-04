@@ -164,7 +164,7 @@ export function AboutPage() {
             data model and the UI surface evidence: a finding is
             severity-tagged, confidence-tagged, and backed by a file
             path, a manifest, a provider response, or an explicit
-            omission marker. Current build is v2.1.0.
+            omission marker. Current build is v2.1.1.
           </p>
         </div>
       </section>

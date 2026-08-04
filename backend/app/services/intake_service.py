@@ -17,6 +17,7 @@ up via the executor.
 from __future__ import annotations
 
 import logging
+import secrets
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from typing import Any
@@ -292,9 +293,17 @@ class IntakeService:
             from app.utils.paths import basename_safely
 
             safe_archive_filename = basename_safely(archive_filename) or ""
+            # v2.1.1: replace the generic "Archive was
+            # rejected." with a category-specific actionable
+            # message so the user knows whether to retry, to
+            # re-upload, or to open an issue. The original
+            # ``exc.code`` and bounded ``exc.message`` remain
+            # in the error envelope ``details`` so debugging
+            # tooling keeps the precise failure category.
+            safe_message = _archive_rejection_message(exc.code)
             raise ApiError(
                 ApiErrorCode.ARCHIVE_UNSAFE,
-                "Archive was rejected.",
+                safe_message,
                 details={
                     "code": exc.code,
                     "message": exc.message,
@@ -313,7 +322,28 @@ class IntakeService:
                 self._session.commit()
             except Exception:
                 self._session.rollback()
-            raise
+            # v2.1.1: re-raise as a sanitised
+            # ``INTERNAL_UNEXPECTED`` ``ApiError`` with a
+            # non-PII correlation id. The original exception's
+            # safe ``str()`` is recorded in the workspace's
+            # ``failure_summary`` and the rotating runtime
+            # log; the client envelope only carries the
+            # bounded message and the correlation id.
+            correlation_id = secrets.token_hex(8)
+            logger.exception(
+                "intake internal error (correlation_id=%s, kind=%s)",
+                correlation_id,
+                intake_kind,
+            )
+            raise ApiError(
+                ApiErrorCode.INTERNAL_UNEXPECTED,
+                "An internal error occurred. See Diagnostics for the "
+                "correlation id and the runtime log for the full trace.",
+                details={
+                    "correlation_id": correlation_id,
+                    "kind": intake_kind,
+                },
+            ) from exc
         self._workspaces.transition(
             workspace,
             target=WorkspaceState.READY,
@@ -444,16 +474,148 @@ def _github_error_to_api_error(exc: GitHubIntakeError) -> ApiError:
         details["http_status"] = http_status
     if exc.code in {"github_not_found"}:
         code = ApiErrorCode.NOT_FOUND
+        # v2.1.1: distinguish "URL is wrong / repo
+        # does not exist" from "private repo / not
+        # supported". The not_found case is the most
+        # common user-reported failure mode after a
+        # typo or copy-paste; a private repo produces
+        # the same HTTP status. The actionable message
+        # below covers both: the operator should confirm
+        # the URL and the visibility before re-trying.
+        safe_message = (
+            "Repository could not be accessed. "
+            "Confirm that the URL exists and is public. "
+            "Private repositories are not supported in this version."
+        )
     elif exc.code in {"github_rate_limited"}:
         code = ApiErrorCode.RATE_LIMITED
+        # v2.1.1: surface a retryable message instead of
+        # the upstream's raw "429 Too Many Requests"
+        # string. The Diagnostics page shows the current
+        # rate-limit state; the operator can also
+        # configure a token to lift the unauthenticated
+        # 60-per-hour GitHub cap.
+        safe_message = (
+            "GitHub rate limit reached. Wait a few minutes and retry. "
+            "Configure LOCKVERITY_GITHUB_TOKEN to lift the unauthenticated limit. "
+            "The Diagnostics page shows the current rate-limit state."
+        )
     elif exc.code in {"github_unauthorized", "github_forbidden"}:
         code = ApiErrorCode.FORBIDDEN
+        safe_message = (
+            "GitHub denied the request. The repository may be private, "
+            "the URL may be wrong, or the configured token may lack access. "
+            "Private repositories are not supported in this version."
+        )
     elif exc.code in {"github_response_too_large"}:
         code = ApiErrorCode.VALIDATION_ERROR
+        safe_message = (
+            "The requested repository archive exceeds the configured "
+            "download cap. Use a smaller ref or a self-uploaded archive."
+        )
     elif exc.code in {"github_host_forbidden"}:
         code = ApiErrorCode.FORBIDDEN
+        safe_message = (
+            "The configured GitHub host is not in the bounded allowlist. "
+            "Verify the upstream URL and the network policy."
+        )
+    elif exc.code in {"github_unavailable", "github_timeout"}:
+        code = ApiErrorCode.PROVIDER_UNAVAILABLE
+        safe_message = (
+            "GitHub did not respond in time. Retry shortly. "
+            "If the issue persists, see the Diagnostics page."
+        )
     safe_message = safe_message or "GitHub intake failed."
     return ApiError(code, safe_message, details=details)
+
+
+# v2.1.1: category-specific actionable message for the
+# archive-rejection branch. The original intake surfaced
+# the literal zip_intake failure code and message in
+# the response, which was the right diagnostic value for
+# an operator reading the API response but a poor user
+# message for the operator who just wanted to know what
+# to do next. The mapping here translates the rejection
+# code into an actionable, category-specific user
+# message; the original code and message stay in
+# ``details`` for diagnostics.
+_ARCHIVE_REJECTION_MESSAGES: dict[str, str] = {
+    "archive_unsafe_path": (
+        "Archive was rejected: it contains a path that is "
+        "outside the archive root, an absolute path, a "
+        "Windows drive-letter path, a UNC path, or a "
+        "symlink. Re-create the archive from a clean source "
+        "checkout."
+    ),
+    "archive_symlink_forbidden": (
+        "Archive was rejected: it contains a symbolic or "
+        "hard link. Lockverity never follows links inside an "
+        "uploaded archive. Re-create the archive as plain "
+        "files."
+    ),
+    "archive_too_many_files": (
+        "Archive was rejected: it contains more files than "
+        "the configured cap. Reduce the archive size or split "
+        "the upload."
+    ),
+    "archive_entry_too_large": (
+        "Archive was rejected: a single entry exceeds the "
+        "configured per-entry cap. Re-create the archive "
+        "without the oversized file."
+    ),
+    "archive_uncompressed_too_large": (
+        "Archive was rejected: the cumulative uncompressed "
+        "size exceeds the configured cap. Re-create the "
+        "archive with fewer files."
+    ),
+    "archive_overwrite_forbidden": (
+        "Archive was rejected: the workspace already contains "
+        "a file with the same path. Retry with a fresh "
+        "workspace."
+    ),
+    "archive_path_resolve_failed": (
+        "Archive was rejected: a path inside the archive "
+        "could not be resolved on this host. This is "
+        "usually a Windows long-path issue with a deep "
+        "workspace tree; retry with a shallower extraction "
+        "or a different runtime home."
+    ),
+    "archive_path_escape": (
+        "Archive was rejected: a path inside the archive "
+        "resolves outside the workspace contents. The "
+        "archive appears to be malicious or corrupted. Do "
+        "not retry; investigate the archive source."
+    ),
+    "archive_extract_failed": (
+        "Archive was rejected: a tarball member could not "
+        "be extracted. The tarball appears to be corrupted "
+        "or truncated. Re-download or re-create it."
+    ),
+    "archive_quarantine_write_failed": (
+        "Archive was rejected: the quarantine directory is "
+        "not writable. Check the runtime home directory "
+        "permissions."
+    ),
+    "archive_validation_failed": (
+        "Archive was rejected: the archive failed safety "
+        "validation. Inspect the archive source and the "
+        "operational log for the precise failure."
+    ),
+}
+
+
+def _archive_rejection_message(code: str) -> str:
+    """Return the actionable user-facing message for an archive rejection code.
+
+    The function prefers a category-specific message; if
+    the code is unknown it falls through to a generic
+    "Archive was rejected." which the operator can read
+    alongside the precise code carried in the response
+    ``details`` envelope.
+    """
+    return _ARCHIVE_REJECTION_MESSAGES.get(
+        code, "Archive was rejected. See the response details for the precise failure."
+    )
 
 
 __all__ = [
