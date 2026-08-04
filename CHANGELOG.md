@@ -5,15 +5,18 @@ follow [Semantic Versioning](https://semver.org/). Lockverity is
 pre-1.0 in the sense that the public API may evolve; the
 underlying data model and Alembic migrations are stable.
 
-## v2.1.1 — Public-repository scan intake and error taxonomy (DRAFT, in progress)
+## v2.1.1 — Public-repository scan intake and error taxonomy
 
 A targeted hotfix for the v2.1.0 public-repository scan
-intake. The hotfix is code-only: no new feature, no
-behaviour change beyond the bug fix and the actionable
-error taxonomy. The v2.1.0 release tag, release body,
-and six release assets remain unchanged on
-``checkpoint-v2.1.0-public-release``; v2.1.1 is not yet
-published.
+intake, published on 2026-08-04 alongside the
+``checkpoint-v2.1.1-public-release`` tag. The hotfix is
+code-only: no new feature, no behaviour change beyond
+the bug fix, the actionable error taxonomy, and the
+repository-intake consistency closure. The v2.1.0
+release tag, release body, and six release assets
+remain unchanged on
+``checkpoint-v2.1.0-public-release`` and are not
+re-published.
 
 ### Acceptance corrections (commit 2 of the v2.1.1 hotfix)
 
@@ -130,6 +133,61 @@ published.
 
 - **OpenSSF Scorecard partial scans remain Partial.**
 
+### Repository-intake consistency defect closure (commit 5 of the v2.1.1 hotfix)
+
+The v2.1.0 / v2.1.0-only-cycle bundled UI had two
+public repository-intake pages, ``/analyze`` and
+``/repositories/new``. The v2.1.0 hotfix scope
+covered only ``/analyze``; ``/repositories/new``
+submitted through the legacy ``POST /repositories``
+endpoint and rendered the legacy generic
+``Server error`` envelope on an unexpected failure,
+without the v2.1.1 correlation id. Both pages are
+public repository-intake workflows and must behave
+identically.
+
+- **Canonical intake path for both pages.** The
+  ``/repositories/new`` page now submits through
+  ``api.createRepositoryGithub`` →
+  ``POST /api/v1/repositories/github``, the same
+  canonical GitHub intake endpoint that ``/analyze``
+  uses. The legacy ``POST /api/v1/repositories``
+  endpoint is retained for backwards compatibility
+  (other clients, scripts, ``curl``) and is wrapped
+  with the same ``INTERNAL_UNEXPECTED`` boundary as
+  defence in depth via the new
+  ``repository_service.safe_create_repository_from_url``
+  helper. ``/repositories/new`` now navigates to
+  ``/scans/{result.scan.id}`` on success, matching
+  the ``/analyze`` post-intake flow.
+- **Shared intake-error formatting helpers.** A new
+  ``frontend/src/components/intakeErrorFormatting.ts``
+  module exports ``intakeErrorTitleFor`` and
+  ``intakeErrorDescriptionFor`` so every intake
+  page renders the same category-specific title
+  and the same ``Reference: <correlation-id>.
+  Open Diagnostics or inspect the local runtime
+  log.`` line for ``internal_unexpected`` envelopes.
+  The per-page copies in ``AnalyzePage.tsx`` and
+  ``NewRepositoryPage.tsx`` are removed.
+- **Regression coverage.** New tests cover
+  ``/repositories/new`` submitting through the
+  canonical intake endpoint, rendering the
+  private / not-found wording, the ``invalid_ref``
+  wording, the rate-limit wording, the
+  ``internal_unexpected`` correlation-id line,
+  the no-``Unknown error``-and-no-legacy-``Server
+  error``-title contract, and the reset / retry
+  behaviour. New backend tests cover the
+  ``safe_create_repository_from_url`` wrapper at
+  the service level (sanitised
+  ``internal_unexpected`` envelope, classified
+  errors preserved, transaction rollback leaves no
+  orphan rows) and end-to-end through the legacy
+  route (HTTP 500, 16-char hex correlation id,
+  ``kind=repository``, no exception class or
+  traceback in the response).
+
 ### Fixed
 
 - **Public self-scan of the Lockverity repository now
@@ -237,7 +295,14 @@ published.
   the published release until v2.1.1 is published
   on its own tag.
 
-## v2.1.0 — Local runtime brand polish and single-port production runtime (current)
+## v2.1.0 — Local runtime brand polish and single-port production runtime
+
+Historical. v2.1.0 was the previous published release,
+on the ``checkpoint-v2.1.0-public-release`` tag. v2.1.1
+supersedes v2.1.0 on
+``checkpoint-v2.1.1-public-release``; the v2.1.0 release
+tag and its six assets remain on GitHub and continue to
+resolve from the original tag URL.
 
 A focused, additive release that ships the v2.1 Part A
 milestone (original brand assets, favicon closure,
