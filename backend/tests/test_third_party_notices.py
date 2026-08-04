@@ -35,7 +35,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 BACKEND_ROOT = REPO_ROOT / "backend"
 BUILD_SCRIPT = BACKEND_ROOT / "scripts" / "build_windows_portable.py"
 DEFAULT_PACKAGING_DIR = REPO_ROOT / "build" / "packaging"
-PORTABLE_NAME = "Lockverity-2.1.0-windows-x64-portable"
+PORTABLE_NAME = "Lockverity-2.1.1-windows-x64-portable"
 DEFAULT_NOTICES_PATH = DEFAULT_PACKAGING_DIR / PORTABLE_NAME / "THIRD_PARTY_NOTICES.txt"
 DEFAULT_MANIFEST_PATH = DEFAULT_PACKAGING_DIR / PORTABLE_NAME / "BUILD-MANIFEST.json"
 

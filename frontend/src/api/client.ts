@@ -389,11 +389,13 @@ export type ErrorCategory =
   | "unauthorized"
   | "forbidden"
   | "not_found"
+  | "invalid_ref"
   | "validation"
   | "rate_limited"
   | "provider_unavailable"
   | "duplicate"
   | "rescan_source_unavailable"
+  | "internal_unexpected"
   | "server"
   | "unknown";
 
@@ -409,8 +411,33 @@ export function categorizeError(err: unknown): ErrorCategory {
     if (code === "unauthorized" || status === 401) return "unauthorized";
     if (code === "forbidden" || status === 403) return "forbidden";
     if (code === "not_found" || status === 404) return "not_found";
+    // v2.1.1: ``invalid_ref`` is a 422 envelope
+    // distinct from the generic ``validation_error``
+    // (also 422). The check is code-first because the
+    // stable error code is the source of truth; the
+    // status code (422) is a fallback. The two
+    // categories render different actionable messages
+    // in the UI.
+    if (code === "invalid_ref" || (status === 422 && code === "invalid_ref")) {
+      return "invalid_ref";
+    }
     if (code === "rate_limited" || status === 429) return "rate_limited";
     if (code === "duplicate" || status === 409) return "duplicate";
+    // v2.1.1: archive-rejection envelopes (400) and
+    // path-unsafe envelopes (400) render as a
+    // validation banner so the operator sees the
+    // category-specific archive message instead of
+    // the generic "Unknown error" default. The
+    // stable code is checked first; the 400 status
+    // is a fallback so future 400 envelopes are
+    // also classified.
+    if (
+      code === "archive_unsafe" ||
+      code === "path_unsafe" ||
+      (status === 400 && code !== "")
+    ) {
+      return "validation";
+    }
     if (code === "provider_unavailable" || status === 502 || status === 503) {
       return "provider_unavailable";
     }
@@ -424,9 +451,35 @@ export function categorizeError(err: unknown): ErrorCategory {
     if (code === "rescan_source_unavailable") {
       return "rescan_source_unavailable";
     }
+    // v2.1.1: ``internal_unexpected`` carries a
+    // non-PII ``correlation_id`` in the response
+    // ``details`` envelope; the UI surfaces the id
+    // alongside the message so the operator can
+    // cross-reference the local log.
+    if (code === "internal_unexpected") {
+      return "internal_unexpected";
+    }
     if (code === "validation_error" || status === 422) return "validation";
     if (status >= 500) return "server";
     return "unknown";
   }
   return "unknown";
+}
+
+/**
+ * Return the safe correlation id from an ``internal_unexpected``
+ * ``ApiClientError``, when present. The id is a 16-character
+ * lowercase hex string (``secrets.token_hex(8)``); the format
+ * is documented as ``^[0-9a-f]{16}$``. Returns ``null`` for
+ * errors that are not ``internal_unexpected`` or that do not
+ * carry the id in their details.
+ */
+export function correlationIdFromError(err: unknown): string | null {
+  if (!(err instanceof ApiClientError)) return null;
+  if (err.apiError.code !== "internal_unexpected") return null;
+  const details = err.apiError.details ?? {};
+  const cid = (details as { correlation_id?: unknown }).correlation_id;
+  if (typeof cid !== "string") return null;
+  if (!/^[0-9a-f]{16}$/.test(cid)) return null;
+  return cid;
 }

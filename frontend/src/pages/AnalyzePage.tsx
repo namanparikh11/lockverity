@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router";
 
 import { api } from "@/api/api";
-import { ApiClientError, categorizeError, describeError } from "@/api/client";
+import { ApiClientError, categorizeError, correlationIdFromError, describeError } from "@/api/client";
 import { usePolling } from "@/api/hooks";
 import type { Scan } from "@/api/types";
 import { DataCompletenessNotice } from "@/components/DataCompletenessNotice";
@@ -230,6 +230,7 @@ function GitHubIntakeCard() {
             <ErrorState
               error={error}
               title={errorTitleFor(categorizeError(error))}
+              description={errorDescriptionFor(error)}
             />
           ) : (
             <ErrorState
@@ -273,6 +274,7 @@ function GitHubIntakeCard() {
             <ErrorState
               error={startError}
               title="Could not start the scan"
+              description={errorDescriptionFor(startError)}
             />
           ) : (
             <ErrorState
@@ -484,6 +486,7 @@ function UploadIntakeCard() {
             <ErrorState
               error={error}
               title={errorTitleFor(categorizeError(error))}
+              description={errorDescriptionFor(error)}
             />
           ) : (
             <ErrorState
@@ -527,6 +530,7 @@ function UploadIntakeCard() {
             <ErrorState
               error={startError}
               title="Could not start the scan"
+              description={errorDescriptionFor(startError)}
             />
           ) : (
             <ErrorState
@@ -671,6 +675,14 @@ function errorTitleFor(category: ReturnType<typeof categorizeError>): string {
   switch (category) {
     case "validation":
       return "The server rejected the submission";
+    case "invalid_ref":
+      // v2.1.1: a valid-looking branch, tag, or SHA
+      // that does not exist on a known-existing
+      // repository is a distinct failure mode from
+      // the generic validation case. The title
+      // matches the actionable backend message
+      // ("Check the ref and try again.").
+      return "The requested branch, tag, or commit was not found";
     case "rate_limited":
       return "Rate limit reached";
     case "provider_unavailable":
@@ -683,9 +695,58 @@ function errorTitleFor(category: ReturnType<typeof categorizeError>): string {
     case "forbidden":
     case "unauthorized":
       return "Repository not accessible";
+    case "not_found":
+      // v2.1.1: a 404 on the repository-metadata
+      // endpoint means the URL is wrong, the
+      // repository is private, or the repository
+      // does not exist. The actionable backend
+      // message explains the three cases; the title
+      // here is the category summary.
+      return "Repository could not be accessed";
+    case "internal_unexpected":
+      // v2.1.1: an unhandled server failure. The
+      // backend carries a non-PII ``correlation_id``
+      // in ``details``; the body line shows the id
+      // so the operator can grep the local log.
+      return "An internal error occurred";
+    case "server":
+      return "Server error";
     case "cancelled":
       return "Request cancelled";
+    case "rescan_source_unavailable":
+      return "Source is no longer available";
+    case "unknown":
     default:
-      return `Could not start a scan (${describeError("") || "unknown error"})`;
+      // v2.1.1: the default title no longer claims
+      // ``Unknown error`` when the backend has a
+      // classified message. The body line below
+      // carries the backend's safe message; the
+      // title is a generic catch-all so the UI
+      // never renders the literal string
+      // "Could not start a scan (Unknown error.)"
+      // when the backend has already supplied a
+      // classified error.
+      return "Could not start a scan";
   }
+}
+
+/**
+ * v2.1.1: the description line for an error banner.
+ * Carries the backend's safe message and, for
+ * ``internal_unexpected`` envelopes, the operator-
+ * facing correlation id. The correlation id is
+ * derived from the response ``details`` envelope and
+ * is rendered as ``Reference: <id>`` so the operator
+ * can grep the local runtime log for the same id.
+ */
+function errorDescriptionFor(err: unknown): string {
+  const base = describeError(err);
+  if (!err) return base;
+  // Only show the correlation id when it parses as
+  // a 16-character lowercase hex string. Defensive
+  // against upstream envelopes that do not match the
+  // documented format.
+  const cid = correlationIdFromError(err);
+  if (cid === null) return base;
+  return `${base} Reference: ${cid}. Open Diagnostics or inspect the local runtime log.`;
 }

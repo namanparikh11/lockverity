@@ -195,7 +195,23 @@ def _resolve_ref_to_sha(
     name: str,
     ref: str,
 ) -> str:
-    """Resolve ``ref`` (branch or tag) to a full commit SHA."""
+    """Resolve ``ref`` (branch or tag) to a full commit SHA.
+
+    v2.1.1: ``_resolve_ref_to_sha`` is called AFTER
+    :func:`fetch_repository_metadata` has already
+    succeeded, so the repository itself is known to
+    exist and be public. A 404 from the branches API
+    or the tags API in this scope therefore means the
+    ref does not exist on a known-existing repository,
+    not that the repository is private or absent. The
+    helper raises ``github_invalid_ref`` in that case
+    so the API response can carry a distinct,
+    actionable user message and a separate
+    ``invalid_ref`` envelope code (the "private
+    repository" and "URL is wrong" cases are surfaced
+    upstream as ``github_not_found`` and are not
+    conflated with the missing-ref case here).
+    """
     # The branches API returns the commit SHA; this is the
     # documented public endpoint. The tags API is consulted
     # only when the branch lookup fails with 404 - tags share
@@ -203,6 +219,7 @@ def _resolve_ref_to_sha(
     # answer differently depending on how the repository is
     # configured.
     branch_url = f"https://api.github.com/repos/{owner}/{name}/branches/{ref}"
+    branch_404 = False
     try:
         branch_response = client.get_json(branch_url)
     except BoundedHttpError as exc:
@@ -213,6 +230,7 @@ def _resolve_ref_to_sha(
                 http_status=exc.http_status,
             ) from exc
         branch_response = None
+        branch_404 = True
 
     if branch_response is not None:
         try:
@@ -241,15 +259,46 @@ def _resolve_ref_to_sha(
             )
         return sha
 
+    # v2.1.1: the ref was not found as a branch. Try the
+    # tags endpoint, but distinguish "tag endpoint
+    # returned 404" from any other failure so we can map
+    # the "neither branch nor tag" case to
+    # ``github_invalid_ref`` (not ``github_not_found``).
     tag_url = f"https://api.github.com/repos/{owner}/{name}/git/refs/tags/{ref}"
+    tag_404 = False
     try:
         tag_response = client.get_json(tag_url)
     except BoundedHttpError as exc:
+        if exc.code == "http_not_found":
+            tag_404 = True
+            tag_response = None
+        else:
+            raise GitHubIntakeError(
+                _http_code_to_intake_code(exc.code, exc.message),
+                exc.message,
+                http_status=exc.http_status,
+            ) from exc
+
+    if branch_404 and tag_404:
+        # Both endpoints returned 404. The repository
+        # metadata fetch already succeeded, so the
+        # repository exists and is public; the ref
+        # simply does not exist on it. The ``details``
+        # envelope below carries the requested ref
+        # (already a known-safe string by the time it
+        # reached this code path) and the
+        # ``http_status=422`` mapping gives the client
+        # a distinct, actionable envelope code.
         raise GitHubIntakeError(
-            _http_code_to_intake_code(exc.code, exc.message),
-            exc.message,
-            http_status=exc.http_status,
-        ) from exc
+            "github_invalid_ref",
+            f"Ref {ref!r} not found on the repository "
+            f"({owner}/{name}). The ref may be a branch, "
+            "tag, or full commit SHA; the value did not "
+            "match any of the three namespaces.",
+            http_status=422,
+        )
+
+    assert tag_response is not None  # only reachable when not tag_404
     try:
         payload = parse_bounded_json(tag_response.body)
     except BoundedJsonError as exc:

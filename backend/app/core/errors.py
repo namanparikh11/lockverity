@@ -64,6 +64,18 @@ def _status_for_code(code: str) -> int:
         # formed but the underlying state cannot
         # support a rescan.
         ApiErrorCode.RESCAN_SOURCE_UNAVAILABLE.value: 422,
+        # v2.1.1: a syntactically-valid ref was
+        # supplied but the ref does not exist on the
+        # targeted repository. 422 is the right
+        # semantic: the request is well-formed but
+        # the underlying state cannot satisfy it.
+        ApiErrorCode.INVALID_REF.value: 422,
+        # v2.1.1: the request reached the application
+        # but failed to satisfy for an unexpected
+        # reason. The response carries a non-PII
+        # ``correlation_id`` in ``details``; the
+        # full traceback lives in the local log only.
+        ApiErrorCode.INTERNAL_UNEXPECTED.value: 500,
     }
     return mapping.get(code, 500)
 

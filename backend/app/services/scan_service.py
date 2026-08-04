@@ -33,8 +33,20 @@ from app.utils.datetime import utcnow
 from app.utils.errors import ApiError, ApiErrorCode
 
 # Legal scan transitions: ``from -> set of legal ``to`` statuses.
+# v2.1.1: a queued scan can transition directly to
+# ``FAILED`` when the intake itself fails (e.g. the
+# repository cannot be resolved, the archive cannot be
+# extracted, or an unhandled exception is sanitised
+# into ``INTERNAL_UNEXPECTED``). Without this
+# transition the scan would be left in a non-terminal
+# ``QUEUED`` state, which surfaces to the UI as a
+# misleading "running" or "queued" scan after the
+# intake has already failed. The transition is
+# deliberately a one-way move to a terminal state so
+# the scan row never reverts to a non-terminal
+# status.
 _SCAN_TRANSITIONS: dict[ScanStatus, frozenset[ScanStatus]] = {
-    ScanStatus.QUEUED: frozenset({ScanStatus.RUNNING, ScanStatus.CANCELLED}),
+    ScanStatus.QUEUED: frozenset({ScanStatus.RUNNING, ScanStatus.CANCELLED, ScanStatus.FAILED}),
     ScanStatus.RUNNING: frozenset(
         {ScanStatus.COMPLETED, ScanStatus.PARTIAL, ScanStatus.FAILED, ScanStatus.CANCELLED}
     ),

@@ -20,7 +20,7 @@ point. It:
   7. Generates ``BUILD-MANIFEST.json``.
   8. Generates ``SHA256SUMS.txt``.
   9. Zips the portable directory into
-     ``dist/windows/Lockverity-2.1.0-windows-x64-portable.zip``.
+     ``dist/windows/Lockverity-2.1.1-windows-x64-portable.zip``.
  10. Runs the packaged smoke tests against the
      generated ZIP (unless ``--skip-smoke``).
  11. Emits a structured JSON report on stdout
@@ -71,7 +71,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 BACKEND_ROOT = REPO_ROOT / "backend"
 PYINSTALLER_DIR = BACKEND_ROOT / "pyinstaller"
 DEFAULT_OUTPUT_DIR = REPO_ROOT / "build" / "packaging"
-DEFAULT_PORTABLE_NAME = "Lockverity-2.1.0-windows-x64-portable"
+DEFAULT_PORTABLE_NAME = "Lockverity-2.1.1-windows-x64-portable"
 PORTABLE_ZIP_NAME = f"{DEFAULT_PORTABLE_NAME}.zip"
 
 # Source tree roots that are bundled into the portable

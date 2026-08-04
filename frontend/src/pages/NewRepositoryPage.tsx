@@ -3,7 +3,7 @@ import { useState } from "react";
 import { useNavigate } from "react-router";
 
 import { api } from "@/api/api";
-import { ApiClientError, categorizeError, describeError } from "@/api/client";
+import { ApiClientError, categorizeError } from "@/api/client";
 import { DataCompletenessNotice } from "@/components/DataCompletenessNotice";
 import { ErrorState } from "@/components/ErrorState";
 import { Notification } from "@/components/Notification";
@@ -211,6 +211,8 @@ function errorTitleFor(category: ReturnType<typeof categorizeError>): string {
   switch (category) {
     case "validation":
       return "The repository URL was rejected by the server";
+    case "invalid_ref":
+      return "The requested branch, tag, or commit was not found";
     case "rate_limited":
       return "GitHub rate limit reached";
     case "provider_unavailable":
@@ -223,9 +225,17 @@ function errorTitleFor(category: ReturnType<typeof categorizeError>): string {
     case "forbidden":
     case "unauthorized":
       return "Repository not accessible";
+    case "not_found":
+      return "Repository could not be accessed";
+    case "internal_unexpected":
+      return "An internal error occurred";
+    case "server":
+      return "Server error";
     case "cancelled":
       return "Request cancelled";
     default:
-      return `Could not add repository (${describeError("") || "unknown error"})`;
+      // v2.1.1: never claim "Unknown error" when the
+      // backend has supplied a classified message.
+      return "Could not add repository";
   }
 }

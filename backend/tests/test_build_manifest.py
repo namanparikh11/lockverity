@@ -27,7 +27,7 @@ from pathlib import Path
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-PORTABLE_NAME = "Lockverity-2.1.0-windows-x64-portable"
+PORTABLE_NAME = "Lockverity-2.1.1-windows-x64-portable"
 DEFAULT_PACKAGING_DIR = REPO_ROOT / "build" / "packaging"
 DEFAULT_MANIFEST_PATH = DEFAULT_PACKAGING_DIR / PORTABLE_NAME / "BUILD-MANIFEST.json"
 SHA_40_RE = re.compile(r"^[0-9a-f]{40}$")

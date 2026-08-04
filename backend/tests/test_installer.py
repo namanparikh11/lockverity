@@ -44,7 +44,7 @@ APPROVED_FAVICON_ICO = REPO_ROOT / "frontend" / "public" / "favicon.ico"
 DOCS_FILE = REPO_ROOT / "docs" / "windows-installer.md"
 
 STABLE_APP_ID = "{E5B0C0F4-7C42-4D6A-9B17-1A2B3C4D5E6F}"
-APP_VERSION = "2.1.0"
+APP_VERSION = "2.1.1"
 
 # In the new provenance design, the build script captures
 # the installer build's current ``git rev-parse HEAD`` at
@@ -111,10 +111,10 @@ class TestInstallerSourceContract:
             "MyAppName must be defined as 'Lockverity'"
         )
 
-    def test_app_version_2_1_0(self) -> None:
+    def test_app_version_2_1_1(self) -> None:
         text = _iss_text()
-        assert re.search(r'#define\s+MyAppVersion\s+"2\.1\.0"', text), (
-            "MyAppVersion must be the v2.1.0 accepted version"
+        assert re.search(r'#define\s+MyAppVersion\s+"2\.1\.1"', text), (
+            "MyAppVersion must be the v2.1.1 accepted version"
         )
         assert re.search(r"AppVersion=\{#MyAppVersion\}", text), (
             "AppVersion must reference MyAppVersion"

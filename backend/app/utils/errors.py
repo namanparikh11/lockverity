@@ -30,6 +30,15 @@ class ApiErrorCode(str, Enum):
     # cleaned up). The route must return this code
     # before creating a broken queued scan.
     RESCAN_SOURCE_UNAVAILABLE = "rescan_source_unavailable"
+    # v2.1.1: a syntactically-valid ref (branch, tag or
+    # full commit SHA) that does not exist on the
+    # targeted repository. The intake distinguishes
+    # this from ``NOT_FOUND`` (which is the "URL is
+    # wrong / private repository / repository does not
+    # exist" classification); the two are different
+    # user-facing failure modes and need distinct
+    # actionable messages.
+    INVALID_REF = "invalid_ref"
     # v2.1.1: a request reached the application but the
     # server failed to satisfy it for an unexpected
     # reason (a programmer error, an unhandled

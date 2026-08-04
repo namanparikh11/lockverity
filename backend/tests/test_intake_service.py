@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import io
 import json
+import re
 import tarfile
 import zipfile
 from typing import Any
@@ -421,11 +422,17 @@ def test_intake_internal_error_has_correlation_id(
     assert "simulated" not in safe_message
     assert "RuntimeError" not in safe_message
     # The correlation id is a short hex token under
-    # ``details.correlation_id``.
+    # ``details.correlation_id``. ``secrets.token_hex(8)``
+    # produces 8 random bytes encoded as a 16-character
+    # lowercase hex string (``^[0-9a-f]{16}$``); the
+    # contract is that the id is exactly 16 lowercase hex
+    # characters long so an operator can grep the runtime
+    # log for the same id without false positives.
     assert exc.value.details is not None
     cid = exc.value.details.get("correlation_id")
     assert isinstance(cid, str)
-    assert len(cid) >= 8
+    assert len(cid) == 16
+    assert re.fullmatch(r"[0-9a-f]{16}", cid) is not None
 
 
 def test_intake_github_token_not_in_response(
@@ -516,3 +523,505 @@ def test_intake_upload_rejects_oversized(app_config, workspace_root) -> None:
         with pytest.raises(ApiError) as exc:
             service.intake_upload(upload=[body], archive_filename="big.zip")
     assert exc.value.code == ApiErrorCode.ARCHIVE_UNSAFE.value
+
+
+# ---------------------------------------------------------------------------
+# v2.1.1 acceptance: invalid_ref (valid-looking but missing ref) on a
+# known-existing public repository is a distinct failure mode from
+# "repository not found / private". The two must never be conflated.
+# ---------------------------------------------------------------------------
+
+
+def _queue_github_metadata(
+    fake_client: _FakeClient, *, sha: str, default_branch: str = "main"
+) -> None:
+    """Queue the repository-metadata + branch 200 responses used by the
+    invalid-ref tests. The branch response is intentionally followed
+    by a 404 from the branch lookup so ``_resolve_ref_to_sha`` ends
+    up at the "both 404" branch.
+    """
+    fake_client.queue(
+        "/repos/octocat/Hello-World",
+        _FakeResponse(
+            200,
+            json.dumps(
+                {
+                    "default_branch": default_branch,
+                    "visibility": "public",
+                    "archived": False,
+                }
+            ).encode("utf-8"),
+            {"Content-Type": "application/json"},
+        ),
+    )
+
+
+def test_intake_github_handles_invalid_ref_missing_branch(
+    app_config, workspace_root, fake_client: _FakeClient
+) -> None:
+    """A valid-looking branch that does not exist on a public repo
+    is ``invalid_ref``, not ``not_found``.
+    """
+    _queue_github_metadata(fake_client, sha="0123456789abcdef0123456789abcdef01234567")
+    # Both branch and tag lookups 404. The fake client
+    # already maps 404 -> http_not_found, which ``_resolve_ref_to_sha``
+    # now distinguishes from a real "repository missing" failure.
+    fake_client.queue(
+        "/repos/octocat/Hello-World/branches/definitely-not-a-real-lockverity-branch",
+        _FakeResponse(404, b"{}", {"Content-Type": "application/json"}),
+    )
+    fake_client.queue(
+        "/repos/octocat/Hello-World/git/refs/tags/definitely-not-a-real-lockverity-branch",
+        _FakeResponse(404, b"{}", {"Content-Type": "application/json"}),
+    )
+    with _db_session.SessionLocal() as s:
+        service = IntakeService(s)
+        with pytest.raises(ApiError) as exc:
+            service.intake_github(
+                GitHubIntakeRequest(
+                    canonical_url="https://github.com/octocat/Hello-World",
+                    requested_ref="definitely-not-a-real-lockverity-branch",
+                )
+            )
+    assert exc.value.code == ApiErrorCode.INVALID_REF.value
+    assert "branch, tag, or commit" in exc.value.message
+    assert "Check the ref" in exc.value.message
+    # The original provider code stays in ``details`` for diagnostics.
+    assert exc.value.details is not None
+    assert exc.value.details.get("code") == "github_invalid_ref"
+
+
+def test_intake_github_handles_invalid_ref_missing_tag(
+    app_config, workspace_root, fake_client: _FakeClient
+) -> None:
+    """A valid-looking tag that does not exist on a public repo is
+    also ``invalid_ref``.
+    """
+    _queue_github_metadata(fake_client, sha="0123456789abcdef0123456789abcdef01234567")
+    fake_client.queue(
+        "/repos/octocat/Hello-World/branches/v9.9.9-typo",
+        _FakeResponse(404, b"{}", {"Content-Type": "application/json"}),
+    )
+    fake_client.queue(
+        "/repos/octocat/Hello-World/git/refs/tags/v9.9.9-typo",
+        _FakeResponse(404, b"{}", {"Content-Type": "application/json"}),
+    )
+    with _db_session.SessionLocal() as s:
+        service = IntakeService(s)
+        with pytest.raises(ApiError) as exc:
+            service.intake_github(
+                GitHubIntakeRequest(
+                    canonical_url="https://github.com/octocat/Hello-World",
+                    requested_ref="v9.9.9-typo",
+                )
+            )
+    assert exc.value.code == ApiErrorCode.INVALID_REF.value
+
+
+def test_intake_github_handles_malformed_full_sha(
+    app_config, workspace_root, fake_client: _FakeClient
+) -> None:
+    """A 40-character ref that is uppercase hex (not lowercase) is
+    a syntactically valid branch/tag ref name (the ``_REF_RE``
+    allows uppercase) but not a valid SHA. It reaches the
+    GitHub ref-lookup path; both branch and tag lookups return
+    404, so the failure mode is ``invalid_ref`` (not
+    ``validation_error``).
+
+    The distinction matters: a malformed SHA that LOOKS like a
+    SHA (e.g. ``Z`` * 40) is not the same as
+    ``-leading-dash`` (which ``is_valid_ref`` rejects before
+    any GitHub call). The hotfix keeps the two failure modes
+    distinct so the UI can render the right actionable message.
+    """
+    _queue_github_metadata(fake_client, sha="0123456789abcdef0123456789abcdef01234567")
+    fake_client.queue(
+        f"/repos/octocat/Hello-World/branches/{'Z' * 40}",
+        _FakeResponse(404, b"{}", {"Content-Type": "application/json"}),
+    )
+    fake_client.queue(
+        f"/repos/octocat/Hello-World/git/refs/tags/{'Z' * 40}",
+        _FakeResponse(404, b"{}", {"Content-Type": "application/json"}),
+    )
+    with _db_session.SessionLocal() as s:
+        service = IntakeService(s)
+        with pytest.raises(ApiError) as exc:
+            service.intake_github(
+                GitHubIntakeRequest(
+                    canonical_url="https://github.com/octocat/Hello-World",
+                    requested_ref="Z" * 40,  # 40 chars but not lowercase hex
+                )
+            )
+    assert exc.value.code == ApiErrorCode.INVALID_REF.value
+
+
+def test_intake_github_handles_valid_full_sha(
+    app_config, workspace_root, fake_client: _FakeClient
+) -> None:
+    """A valid lowercase 40-char SHA on a public repo is accepted;
+    the tarball endpoint is hit and the scan reaches ``READY``.
+    """
+    sha = "0123456789abcdef0123456789abcdef01234567"
+    _queue_github_metadata(fake_client, sha=sha)
+    # A SHA-typed ref bypasses the branches/tags lookup and
+    # goes straight to the tarball endpoint.
+    fake_client.queue(
+        f"/octocat/Hello-World/tar.gz/{sha}",
+        _FakeResponse(
+            200,
+            _build_tarball_bytes(),
+            {"Content-Type": "application/x-gzip"},
+        ),
+    )
+    with _db_session.SessionLocal() as s:
+        service = IntakeService(s)
+        result = service.intake_github(
+            GitHubIntakeRequest(
+                canonical_url="https://github.com/octocat/Hello-World",
+                requested_ref=sha,
+            )
+        )
+        s.commit()
+    assert result.workspace.state == WorkspaceState.READY
+
+
+# ---------------------------------------------------------------------------
+# v2.1.1 acceptance: direct database cleanup assertions for every failed
+# intake path. After failure, the database must not contain a misleading
+# running scan or a READY workspace; retrying the same repository must
+# be safe; a classified 404 must not create a partial scan; an internal
+# exception must not leave an orphan scan record.
+# ---------------------------------------------------------------------------
+
+
+def _no_running_or_queued_scan_rows(session) -> None:
+    """Assert that no scan row is in a misleading non-terminal state.
+
+    The intake flow creates ``ScanRun`` rows with status ``queued``
+    while it works; a failed intake must roll back the row or move
+    it to a terminal state. The terminal states are ``completed``,
+    ``failed``, ``cancelled``, ``partial``, and the orchestrator
+    states ``running`` / ``succeeded``. Anything else is a leak.
+    """
+    from app.models.scan_run import ScanStatus
+
+    session.expire_all()
+    rows = session.query(  # type: ignore[attr-defined]
+        __import__("app.models.scan_run", fromlist=["ScanRun"]).ScanRun
+    ).all()
+    terminal = {
+        ScanStatus.COMPLETED.value,
+        ScanStatus.FAILED.value,
+        ScanStatus.CANCELLED.value,
+        ScanStatus.PARTIAL.value,
+    }
+    for row in rows:
+        assert row.status in terminal, (
+            f"scan row id={row.id} left in non-terminal status {row.status!r}"
+        )
+
+
+def _no_ready_workspace_rows(session) -> None:
+    from app.models.workspace import WorkspaceState
+
+    rows = session.query(  # type: ignore[attr-defined]
+        __import__("app.models.workspace", fromlist=["Workspace"]).Workspace
+    ).all()
+    for row in rows:
+        assert row.state != WorkspaceState.READY.value, (
+            f"workspace id={row.id} left in READY state after failed intake"
+        )
+
+
+def test_intake_404_does_not_create_workspace_or_scan(
+    app_config, workspace_root, fake_client: _FakeClient
+) -> None:
+    """A classified 404 must not create a partial workspace or scan.
+
+    A failing intake must NOT leave a ``Workspace`` /
+    ``ScanRun`` row in a misleading non-terminal
+    state; otherwise the UI shows a misleading
+    "running" or "queued" scan. The function may either
+    roll back the partial rows or transition them to a
+    terminal state (``failed``); both are acceptable.
+    """
+    fake_client.queue(
+        "/repos/octocat/Hello-World",
+        _FakeResponse(404, b"{}", {"Content-Type": "application/json"}),
+    )
+    with _db_session.SessionLocal() as s:
+        service = IntakeService(s)
+        with pytest.raises(ApiError):
+            service.intake_github(
+                GitHubIntakeRequest(canonical_url="https://github.com/octocat/Hello-World")
+            )
+        _no_ready_workspace_rows(s)
+        _no_running_or_queued_scan_rows(s)
+
+
+def test_intake_invalid_ref_does_not_create_workspace_or_scan(
+    app_config, workspace_root, fake_client: _FakeClient
+) -> None:
+    """An ``invalid_ref`` failure must also avoid leaving a
+    non-terminal workspace or scan. A 404 from the branches
+    AND tags APIs on a known-existing public repo is the
+    canonical ``invalid_ref`` case.
+    """
+    _queue_github_metadata(fake_client, sha="0123456789abcdef0123456789abcdef01234567")
+    fake_client.queue(
+        "/repos/octocat/Hello-World/branches/nope",
+        _FakeResponse(404, b"{}", {"Content-Type": "application/json"}),
+    )
+    fake_client.queue(
+        "/repos/octocat/Hello-World/git/refs/tags/nope",
+        _FakeResponse(404, b"{}", {"Content-Type": "application/json"}),
+    )
+    with _db_session.SessionLocal() as s:
+        service = IntakeService(s)
+        with pytest.raises(ApiError) as exc:
+            service.intake_github(
+                GitHubIntakeRequest(
+                    canonical_url="https://github.com/octocat/Hello-World",
+                    requested_ref="nope",
+                )
+            )
+        assert exc.value.code == ApiErrorCode.INVALID_REF.value
+        _no_ready_workspace_rows(s)
+        _no_running_or_queued_scan_rows(s)
+
+
+def test_intake_internal_error_does_not_leave_orphan(
+    app_config, workspace_root, fake_client: _FakeClient, monkeypatch
+) -> None:
+    """An ``INTERNAL_UNEXPECTED`` must not leave a READY workspace
+    or a queued/running scan. The workspace is transitioned to
+    ``FAILED`` for diagnostics; the scan is moved to
+    ``FAILED`` (a terminal state) so the UI does not show a
+    misleading running scan.
+    """
+    import app.services.intake_service as intake_service_mod
+
+    def _raise(*_args: Any, **_kwargs: Any) -> Any:
+        raise RuntimeError("simulated non-archive exception")
+
+    monkeypatch.setattr(intake_service_mod, "intake_tar_gz", _raise)
+    sha = "0123456789abcdef0123456789abcdef01234567"
+    fake_client.queue(
+        "/repos/octocat/Hello-World",
+        _FakeResponse(
+            200,
+            json.dumps(
+                {
+                    "default_branch": "main",
+                    "visibility": "public",
+                    "archived": False,
+                }
+            ).encode("utf-8"),
+            {"Content-Type": "application/json"},
+        ),
+    )
+    fake_client.queue(
+        "/repos/octocat/Hello-World/branches/main",
+        _FakeResponse(
+            200,
+            json.dumps({"name": "main", "commit": {"sha": sha}}).encode("utf-8"),
+            {"Content-Type": "application/json"},
+        ),
+    )
+    fake_client.queue(
+        f"/octocat/Hello-World/tar.gz/{sha}",
+        _FakeResponse(
+            200,
+            _build_tarball_bytes(),
+            {"Content-Type": "application/x-gzip"},
+        ),
+    )
+    with _db_session.SessionLocal() as s:
+        service = IntakeService(s)
+        with pytest.raises(ApiError) as exc:
+            service.intake_github(
+                GitHubIntakeRequest(canonical_url="https://github.com/octocat/Hello-World")
+            )
+        assert exc.value.code == ApiErrorCode.INTERNAL_UNEXPECTED.value
+        _no_ready_workspace_rows(s)
+        _no_running_or_queued_scan_rows(s)
+
+
+def test_intake_404_retry_is_safe(app_config, workspace_root, fake_client: _FakeClient) -> None:
+    """Retrying a 404 with the same canonical URL is safe: the
+    second attempt must not collide with any leftover state and
+    must not leave a misleading running scan.
+    """
+    fake_client.queue(
+        "/repos/octocat/Hello-World",
+        _FakeResponse(404, b"{}", {"Content-Type": "application/json"}),
+    )
+    fake_client.queue(
+        "/repos/octocat/Hello-World",
+        _FakeResponse(404, b"{}", {"Content-Type": "application/json"}),
+    )
+    with _db_session.SessionLocal() as s:
+        service = IntakeService(s)
+        for _ in range(2):
+            with pytest.raises(ApiError) as exc:
+                service.intake_github(
+                    GitHubIntakeRequest(canonical_url="https://github.com/octocat/Hello-World")
+                )
+            assert exc.value.code == ApiErrorCode.NOT_FOUND.value
+            _no_ready_workspace_rows(s)
+            _no_running_or_queued_scan_rows(s)
+
+
+# ---------------------------------------------------------------------------
+# v2.1.1 acceptance: correlation-ID log contract. The ID returned in
+# the response envelope MUST equal the ID written to the local log;
+# the traceback is in the log only; secrets / paths / upstream bodies
+# are absent from the response.
+# ---------------------------------------------------------------------------
+
+
+def test_intake_internal_error_correlation_id_log_contract(
+    app_config, workspace_root, fake_client: _FakeClient, monkeypatch, caplog
+) -> None:
+    """The correlation id in the response equals the one in the
+    rotating runtime log, the traceback is log-only, and the
+    response carries no upstream body, no path, no token.
+    """
+    import app.services.intake_service as intake_service_mod
+
+    def _raise(*_args: Any, **_kwargs: Any) -> Any:
+        raise RuntimeError("simulated non-archive exception")
+
+    monkeypatch.setattr(intake_service_mod, "intake_tar_gz", _raise)
+    sha = "0123456789abcdef0123456789abcdef01234567"
+    fake_client.queue(
+        "/repos/octocat/Hello-World",
+        _FakeResponse(
+            200,
+            json.dumps(
+                {
+                    "default_branch": "main",
+                    "visibility": "public",
+                    "archived": False,
+                }
+            ).encode("utf-8"),
+            {"Content-Type": "application/json"},
+        ),
+    )
+    fake_client.queue(
+        "/repos/octocat/Hello-World/branches/main",
+        _FakeResponse(
+            200,
+            json.dumps({"name": "main", "commit": {"sha": sha}}).encode("utf-8"),
+            {"Content-Type": "application/json"},
+        ),
+    )
+    fake_client.queue(
+        f"/octocat/Hello-World/tar.gz/{sha}",
+        _FakeResponse(
+            200,
+            _build_tarball_bytes(),
+            {"Content-Type": "application/x-gzip"},
+        ),
+    )
+    caplog.set_level("ERROR", logger="lockverity")
+    with _db_session.SessionLocal() as s:
+        service = IntakeService(s)
+        with pytest.raises(ApiError) as exc:
+            service.intake_github(
+                GitHubIntakeRequest(canonical_url="https://github.com/octocat/Hello-World")
+            )
+        s.rollback()
+    # Response correlation id format
+    response_cid = exc.value.details.get("correlation_id")
+    assert re.fullmatch(r"[0-9a-f]{16}", response_cid) is not None
+    # Log contains the same id
+    log_blob = "\n".join(record.getMessage() for record in caplog.records)
+    log_blob_full = (
+        log_blob
+        + "\n"
+        + "\n".join(getattr(record, "exc_text", "") or "" for record in caplog.records)
+    )
+    assert response_cid in log_blob, (
+        f"correlation id {response_cid!r} must appear in the runtime log"
+    )
+    # The traceback is in the log
+    assert "RuntimeError" in log_blob_full or "Traceback" in log_blob_full, (
+        "the full traceback must be written to the local log"
+    )
+    # The traceback is NOT in the response message
+    assert "Traceback" not in exc.value.message
+    assert "RuntimeError" not in exc.value.message
+    # The response message has no upstream body, no filesystem path,
+    # no simulated marker, and no provider token.
+    assert "simulated" not in exc.value.message
+    assert "_internal" not in exc.value.message
+    assert "x-access-token" not in exc.value.message
+    assert "ghp_" not in exc.value.message
+
+
+def test_intake_internal_error_no_secrets_in_response_details(
+    app_config, workspace_root, fake_client: _FakeClient, monkeypatch
+) -> None:
+    """The response ``details`` envelope is never asked to carry
+    secrets. The hotfix only emits ``correlation_id`` and ``kind``;
+    the captured tests assert no other keys are present.
+    """
+    import app.services.intake_service as intake_service_mod
+
+    def _raise(*_args: Any, **_kwargs: Any) -> Any:
+        raise RuntimeError("simulated non-archive exception")
+
+    monkeypatch.setattr(intake_service_mod, "intake_tar_gz", _raise)
+    sha = "0123456789abcdef0123456789abcdef01234567"
+    fake_client.queue(
+        "/repos/octocat/Hello-World",
+        _FakeResponse(
+            200,
+            json.dumps(
+                {
+                    "default_branch": "main",
+                    "visibility": "public",
+                    "archived": False,
+                }
+            ).encode("utf-8"),
+            {"Content-Type": "application/json"},
+        ),
+    )
+    fake_client.queue(
+        "/repos/octocat/Hello-World/branches/main",
+        _FakeResponse(
+            200,
+            json.dumps({"name": "main", "commit": {"sha": sha}}).encode("utf-8"),
+            {"Content-Type": "application/json"},
+        ),
+    )
+    fake_client.queue(
+        f"/octocat/Hello-World/tar.gz/{sha}",
+        _FakeResponse(
+            200,
+            _build_tarball_bytes(),
+            {"Content-Type": "application/x-gzip"},
+        ),
+    )
+    with _db_session.SessionLocal() as s:
+        service = IntakeService(s)
+        with pytest.raises(ApiError) as exc:
+            service.intake_github(
+                GitHubIntakeRequest(canonical_url="https://github.com/octocat/Hello-World")
+            )
+    details = exc.value.details
+    assert set(details.keys()) <= {"correlation_id", "kind"}, (
+        f"unexpected keys in details: {sorted(details.keys())!r}"
+    )
+    assert isinstance(details["correlation_id"], str)
+    assert re.fullmatch(r"[0-9a-f]{16}", details["correlation_id"]) is not None
+    # ``kind`` records which intake path raised the
+    # failure; the bounded set is ``github`` for the
+    # GitHub URL flow, ``upload`` for the archive
+    # upload flow, and the corresponding extraction
+    # stage (``tar_gz`` / ``zip``) when the failure
+    # happened AFTER the scan was created (e.g. the
+    # simulated ``RuntimeError`` in this test fires
+    # inside ``intake_tar_gz``).
+    assert details["kind"] in {"github", "upload", "tar_gz", "zip"}

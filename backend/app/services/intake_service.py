@@ -278,6 +278,16 @@ class IntakeService:
                 failure_code=exc.code,
                 failure_summary=exc.message,
             )
+            # v2.1.1: a failed intake must NOT leave the
+            # scan row in a non-terminal state. The scan
+            # is moved to ``FAILED`` (a terminal state)
+            # alongside the workspace so the UI does not
+            # show a misleading "running" or "queued" scan
+            # after the intake has already failed. The
+            # ``failure_code`` / ``failure_summary`` mirror
+            # the workspace values so the operator sees the
+            # same diagnostic in both surfaces.
+            self._transition_intake_scan_to_failed(workspace, exc.code, exc.message)
             self._workspaces.cleanup(workspace)
             try:
                 self._session.commit()
@@ -317,6 +327,17 @@ class IntakeService:
                 failure_code="archive_internal_error",
                 failure_summary=str(exc)[:2048],
             )
+            # v2.1.1: same terminal-state guarantee for
+            # the ``INTERNAL_UNEXPECTED`` branch. The scan
+            # is moved to ``FAILED`` so the UI does not
+            # show a misleading "running" or "queued" scan
+            # after the intake has already failed. The
+            # ``failure_summary`` is the safe ``str(exc)``
+            # cap so the row never carries an unbounded
+            # string.
+            self._transition_intake_scan_to_failed(
+                workspace, "archive_internal_error", str(exc)[:2048]
+            )
             self._workspaces.cleanup(workspace)
             try:
                 self._session.commit()
@@ -329,6 +350,11 @@ class IntakeService:
             # ``failure_summary`` and the rotating runtime
             # log; the client envelope only carries the
             # bounded message and the correlation id.
+            # ``secrets.token_hex(8)`` produces 8 random
+            # bytes encoded as a 16-character lowercase
+            # hex string. The format is documented as
+            # ``^[0-9a-f]{16}$`` and is used as the
+            # operator-facing log/response correlation id.
             correlation_id = secrets.token_hex(8)
             logger.exception(
                 "intake internal error (correlation_id=%s, kind=%s)",
@@ -455,6 +481,50 @@ class IntakeService:
         )
         return scan
 
+    def _transition_intake_scan_to_failed(
+        self,
+        workspace: Workspace,
+        failure_code: str,
+        failure_summary: str,
+    ) -> None:
+        """Move the scan attached to ``workspace`` to ``FAILED``.
+
+        v2.1.1: a failed intake must NOT leave the scan row
+        in a non-terminal state. The scan is moved to
+        ``FAILED`` (a terminal state) alongside the
+        workspace so the UI does not show a misleading
+        "running" or "queued" scan after the intake has
+        already failed. The ``failure_code`` /
+        ``failure_summary`` mirror the workspace values
+        so the operator sees the same diagnostic in both
+        surfaces. The method is a no-op when no scan is
+        attached (which is the case for archive uploads
+        that fail before the scan is created).
+        """
+        # The Workspace model exposes the foreign key
+        # under ``scan_run_id`` (not ``scan_id``); the
+        # name ``scan_id`` is the public API name on
+        # the related pydantic schemas only.
+        scan_id = getattr(workspace, "scan_run_id", None)
+        if scan_id is None:
+            return
+        # ``transition_scan`` validates the state machine
+        # (``QUEUED -> FAILED`` is legal) and persists the
+        # change. The function commits internally; the
+        # surrounding try/except in the caller also
+        # commits the workspace transition in the same
+        # transaction so the two surfaces stay
+        # consistent.
+        from app.models.scan_run import ScanStatus
+
+        scan_service.transition_scan(
+            self._session,
+            scan_id,
+            target=ScanStatus.FAILED,
+            failure_code=failure_code,
+            failure_summary=failure_summary,
+        )
+
 
 def _to_visibility(value: str) -> RepositoryVisibility:
     value = (value or "").lower()
@@ -486,6 +556,25 @@ def _github_error_to_api_error(exc: GitHubIntakeError) -> ApiError:
             "Repository could not be accessed. "
             "Confirm that the URL exists and is public. "
             "Private repositories are not supported in this version."
+        )
+    elif exc.code in {"github_invalid_ref"}:
+        # v2.1.1: the repository was successfully
+        # resolved (so it exists and is public) but the
+        # supplied ref was not a branch, tag or commit
+        # SHA on that repository. The user-facing
+        # message is distinct from the
+        # "repository could not be accessed" message
+        # above so the operator can tell the two
+        # failure modes apart from a single response.
+        # The ``details.ref`` carries the requested
+        # ref (already known-safe by the time it
+        # reached this code path) and ``code``
+        # carries the precise provider code for
+        # diagnostics.
+        code = ApiErrorCode.INVALID_REF
+        safe_message = (
+            "The requested branch, tag, or commit could not be found on "
+            "the repository. Check the ref and try again."
         )
     elif exc.code in {"github_rate_limited"}:
         code = ApiErrorCode.RATE_LIMITED

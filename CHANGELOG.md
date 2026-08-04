@@ -15,6 +15,121 @@ and six release assets remain unchanged on
 ``checkpoint-v2.1.0-public-release``; v2.1.1 is not yet
 published.
 
+### Acceptance corrections (commit 2 of the v2.1.1 hotfix)
+
+- **Frontend error taxonomy never renders "Unknown
+  error."** The v2.1.1 first commit fixed the
+  backend-side error envelope; this commit
+  extends the fix to the browser. The frontend
+  ``categorizeError`` helper now recognises
+  ``not_found``, ``invalid_ref``, ``internal_unexpected``,
+  and the ``archive_unsafe`` / ``path_unsafe``
+  400-class envelopes, and the
+  ``errorTitleFor`` / ``actionErrorTitleFor``
+  helpers carry a case for every category. The
+  default catch-all no longer claims
+  "Could not start a scan (Unknown error.)" —
+  it renders a generic "Could not start a scan"
+  title with the backend's safe message in the
+  body. The ``ErrorState`` component accepts an
+  optional ``description`` override so callers
+  can append the correlation id for
+  ``internal_unexpected`` envelopes.
+
+- **``internal_unexpected`` correlation id is shown
+  to the operator.** The ``correlationIdFromError``
+  helper extracts the 16-character lowercase hex
+  id (``secrets.token_hex(8)`` produces 8 random
+  bytes = 16 hex chars) from the response
+  ``details`` envelope. The AnalyzePage,
+  NewRepositoryPage, and ScanActions components
+  render ``Reference: <id>. Open Diagnostics or
+  inspect the local runtime log.`` so the
+  operator can grep the local log for the same
+  id.
+
+- **``invalid_ref`` is a distinct, actionable
+  failure mode from the repository-not-accessed
+  case.** ``_resolve_ref_to_sha`` now raises
+  ``github_invalid_ref`` (mapped to a new
+  ``ApiErrorCode.INVALID_REF = "invalid_ref"``)
+  when both the branch and tag APIs return 404
+  on a known-existing public repository. The
+  404 repository case remains mapped to
+  ``ApiErrorCode.NOT_FOUND`` so a private
+  repository is still classified as
+  "Repository could not be accessed" (and the
+  message intentionally does not reveal whether
+  the private repository actually exists).
+
+- **State machine: ``QUEUED → FAILED`` is a legal
+  transition.** The historical
+  ``_SCAN_TRANSITIONS`` table only allowed
+  ``QUEUED → RUNNING`` or ``QUEUED → CANCELLED``;
+  the hotfix adds ``QUEUED → FAILED`` so a
+  failed intake can move the scan row to a
+  terminal state alongside the workspace. The
+  intake service's
+  ``_transition_intake_scan_to_failed`` helper
+  makes the move, mirroring the workspace
+  ``failure_code`` / ``failure_summary`` so the
+  operator sees the same diagnostic in both
+  surfaces. The transition is a one-way move to
+  a terminal state; the scan row never reverts
+  to a non-terminal status.
+
+- **Failed-start database cleanup is direct, not
+  inferred.** New tests in
+  ``tests/test_intake_service.py`` assert via
+  direct SQLAlchemy queries that after a 404,
+  an ``invalid_ref``, an
+  ``INTERNAL_UNEXPECTED``, or a retried 404
+  with the same canonical URL, the database
+  contains no READY workspace and no scan row
+  in a non-terminal state. The contract is
+  "either the rows are absent (transaction
+  rolled back) or they are in a terminal
+  state (FAILED)"; both are acceptable and
+  the tests cover both shapes.
+
+- **Packaging surfaces aligned.** The Inno Setup
+  ``MyAppVersion`` directive, the portable
+  builder's ``DEFAULT_PORTABLE_NAME`` and
+  documentation references, the installer
+  builder's ``APP_VERSION`` and ``PAYLOAD_NAME``
+  constants, and the
+  ``test_installer.py`` / ``test_build_manifest.py``
+  packaging tests are all updated from
+  ``2.1.0`` to ``2.1.1``. The ``app/_version.py``
+  constant remains the single source of truth
+  for the runtime-reported version. The
+  ``backend/pyproject.toml`` Python package
+  version (``0.2.0``) and the
+  ``frontend/package.json`` frontend package
+  version (``0.4.0``) are intentionally NOT
+  bumped: they track the package distribution
+  version, not the product version.
+
+- **Documentation updates.** The README
+  "Current release" header and Version table
+  cell, the ``frontend/src/pages/AboutPage.tsx``
+  hero, the ``frontend/src/pages/DemoHomePage.tsx``
+  description, the
+  ``frontend/src/__tests__/version_about.test.tsx``
+  test mock and assertions, the
+  ``CHANGELOG.md`` v2.1.1 hotfix section, and
+  the ``RELEASE_NOTES.md`` v2.1.1 Status section
+  all reference ``v2.1.1``. The v2.1.0 download
+  links, the v2.1.0 asset hashes, and the
+  v2.1.0 historical references in the
+  ``What v2.1.0 does not include`` section
+  remain as historical context and are not
+  rewritten.
+
+### Preserved (commit 1 of the v2.1.1 hotfix)
+
+- **OpenSSF Scorecard partial scans remain Partial.**
+
 ### Fixed
 
 - **Public self-scan of the Lockverity repository now

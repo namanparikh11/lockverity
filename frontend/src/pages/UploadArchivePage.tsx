@@ -2,7 +2,7 @@ import { useRef, useState } from "react";
 import { useNavigate } from "react-router";
 
 import { api } from "@/api/api";
-import { ApiClientError, categorizeError, describeError } from "@/api/client";
+import { ApiClientError, categorizeError } from "@/api/client";
 import { ConfirmationDialog } from "@/components/ConfirmationDialog";
 import { DataCompletenessNotice } from "@/components/DataCompletenessNotice";
 import { ErrorState } from "@/components/ErrorState";
@@ -202,9 +202,15 @@ function errorTitleFor(category: ReturnType<typeof categorizeError>): string {
     case "forbidden":
     case "unauthorized":
       return "Upload not permitted";
+    case "internal_unexpected":
+      return "An internal error occurred";
+    case "server":
+      return "Server error";
     case "cancelled":
       return "Upload cancelled";
     default:
-      return `Could not upload archive (${describeError("") || "unknown error"})`;
+      // v2.1.1: never claim "Unknown error" when the
+      // backend has supplied a classified message.
+      return "Could not upload archive";
   }
 }

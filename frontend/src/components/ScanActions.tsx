@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router";
 
 import { api } from "@/api/api";
-import { ApiClientError, categorizeError, describeError } from "@/api/client";
+import { ApiClientError, categorizeError } from "@/api/client";
 import { TERMINAL_SCAN_STATUSES } from "@/api/scanPolling";
 import type { Scan } from "@/api/types";
 import { ConfirmationDialog } from "@/components/ConfirmationDialog";
@@ -270,6 +270,8 @@ function actionErrorTitleFor(
   if (pending === "start") {
     if (category === "validation")
       return "Scan cannot be started from its current state";
+    if (category === "internal_unexpected")
+      return "An internal error occurred";
     return "Could not start the scan";
   }
   if (pending === "cancel") {
@@ -284,5 +286,10 @@ function actionErrorTitleFor(
     if (category === "validation") return "Scan request rejected by the server";
     return "Could not create a new scan";
   }
-  return `Could not perform the action (${describeError("") || "unknown error"})`;
+  // v2.1.1: the catch-all no longer claims
+  // ``Unknown error`` when the backend has already
+  // supplied a classified message. The body's
+  // ``describeError`` call still renders the safe
+  // backend message; the title is a generic catch-all.
+  return "Could not perform the action";
 }
