@@ -45,7 +45,8 @@ production deployment belongs in a separate deployment runbook
 - a defect-fix pass on real release-blocking issues found in
   the v1.9 audit (rescan error-envelope mapping, dead code in
   the diagnostics service);
-- a stable version bump to `2.0.6`.
+- a stable version bump to `2.0.6` (subsequent releases
+  continued this work through `2.1.0`).
 
 v2.0 introduces **no new product feature** and **no new
 provider**. The version bump signals that the prior milestones
@@ -54,8 +55,11 @@ on a single command.
 
 ## 2. Supported local workflow
 
-The supported review workflow is the v2.0.6 demo flow, which
-v2.0 does not change:
+The supported review workflow is the v2.1.0 demo flow, which
+v2.0 did not change and v2.1.0 extended (the v2.1 single-port
+runtime, the v2.1 cross-platform CLI, the v2.1 Windows
+portable, and the v2.1 Windows installer are additive on top
+of the v0.5–v2.0.6 surface):
 
 1. **Generate the demo database** with the deterministic
    loader:
@@ -645,10 +649,10 @@ step halts the release.
       `scripts/verify_release.py` is the canonical command
       sequence. There is no second source of truth.
 - [ ] **`docs/release-checklist.md` updated.** This document
-      reflects the v2.0 step plan, prerequisites, and
+      reflects the v2.1 step plan, prerequisites, and
       boundaries.
 - [ ] **Version bumped.** `backend/app/_version.py` and the
-      frontend version/about test agree on `2.0.6`. The
+      frontend version/about test agree on `2.1.0`. The
       README, CHANGELOG, and RELEASE_NOTES reference the
       same version.
 - [ ] **Backend verification passes.** `pytest`, `ruff
@@ -773,7 +777,7 @@ not perform that change.
 - `docs/provider-honesty.md` — provider availability policy.
 - `docs/demo-pack.md` — 60-second reviewer walkthrough and
   the public/private recommendation.
-- `README.md` — current milestone, run-the-demo steps, and
-  the "What v2.0 does not include" list.
+- `README.md` — current milestone, download and install
+  instructions, and the "What v2.1.0 does not include" list.
 - `CHANGELOG.md` — version history.
 - `RELEASE_NOTES.md` — reviewer-facing status.

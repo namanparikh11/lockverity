@@ -1,4 +1,4 @@
-# Lockverity Windows portable package (v2.1 Part B3A)
+# Lockverity Windows portable package
 
 The Lockverity Windows portable package is a
 self-contained, single-folder, no-installer distribution
@@ -11,10 +11,13 @@ extract to any user-controlled directory and run without
 administrator rights and without a separately installed
 Python or Node.js runtime.
 
-This document describes the artefact shipped by the
-``v2.1.0`` Part B3A milestone. It is the operator
-reference for the portable package and the maintainer
-reference for the build pipeline.
+This document is the operator reference for the Windows
+portable and the maintainer reference for the build
+pipeline. The portable is the v2.1.0 Windows x64
+portable; for the v2.1.0 Windows installer see
+[`docs/windows-installer.md`](windows-installer.md). For
+the central download and install guide see
+[`docs/install.md`](install.md).
 
 ## TL;DR
 
@@ -210,10 +213,9 @@ behaviour for any unsigned executable. The operator
 can verify the package integrity using the
 ``SHA256SUMS.txt`` file and the documented
 ``BUILD-MANIFEST.json`` and then click "More info"
-followed by "Run anyway" to proceed. A future Part
-B3B/C/D milestone may introduce code signing; until
-then the SmartScreen prompt is the operator-visible
-contract.
+followed by "Run anyway" to proceed. A future release
+track may introduce code signing; until then the
+SmartScreen prompt is the operator-visible contract.
 
 ## Antivirus false-positive reporting
 
@@ -228,11 +230,14 @@ and reference the ``SHA256SUMS.txt`` plus the
 ``BUILD-MANIFEST.json``; the source commit SHA is
 verifiable on the public GitHub repository.
 
-## Not yet a Windows installer
+## Not a Windows installer
 
-The Part B3A portable is a "drop anywhere" artefact.
-It is not yet a Windows installer (no MSI, no NSIS,
-no Squirrel). Installing the portable into
+The portable is a "drop anywhere" artefact. The v2.1.0
+release also ships a per-user Windows installer for
+operators who prefer a Start Menu entry and a registered
+uninstall path; see
+[`docs/windows-installer.md`](windows-installer.md) for
+the installer reference. Installing the portable into
 ``Program Files`` is supported but not recommended
 because the runtime home continues to live under
 ``%LOCALAPPDATA%\Lockverity`` and the user
@@ -326,12 +331,11 @@ canonical PyInstaller inputs. Do not commit
 auto-generated mutable spec output; the committed
 specs are reviewed and pinned.
 
-## What is not in Part B3A
+## What the portable does not include
 
 The following items are explicit future work and are
-**not** included in Part B3A:
+**not** included in the v2.1.0 portable:
 
-* Windows installer (MSI / NSIS / Squirrel).
 * Code signing and SmartScreen reputation building.
 * Automatic update mechanism.
 * Linux or macOS packaging.
@@ -342,8 +346,12 @@ The following items are explicit future work and are
 * Cloud sync, multi-user, or authentication.
 * Telemetry, crash reporting, or outbound analytics.
 
-Part B3B and later will address these on a separate
-release track.
+The v2.1.0 Windows installer is a separate distribution
+that uses Inno Setup; see
+[`docs/windows-installer.md`](windows-installer.md). Code
+signing, automatic updates, and additional packaging
+targets are separate deliverables that may be addressed
+on later release tracks.
 
 ## Verifying the artefact
 

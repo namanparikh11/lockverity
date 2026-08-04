@@ -1,12 +1,12 @@
-# Lockverity v2.1 — Windows x64 per-user installer
+# Lockverity v2.1.0 — Windows x64 per-user installer
 
-The Lockverity v2.1 Windows installer is a per-user, x64, self-contained
-EXE that installs the accepted Part B3A portable payload
-(`Lockverity-2.1.0-windows-x64-portable.zip`) into
-`%LOCALAPPDATA%\Programs\Lockverity`. The installer does **not** modify
-the operator's `PATH`, does **not** install a Windows service, does
-**not** register an autorun entry, does **not** add a firewall rule,
-and does **not** require administrator privilege.
+The Lockverity v2.1.0 Windows installer is a per-user, x64,
+self-contained EXE that installs the accepted Windows portable
+payload (`Lockverity-2.1.0-windows-x64-portable.zip`) into
+`%LOCALAPPDATA%\Programs\Lockverity`. The installer does **not**
+modify the operator's `PATH`, does **not** install a Windows
+service, does **not** register an autorun entry, does **not** add
+a firewall rule, and does **not** require administrator privilege.
 
 ### Accepted v2.1 B3A portable payload (supersession ledger)
 

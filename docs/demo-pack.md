@@ -1,6 +1,6 @@
-# Lockverity — Local-First Release Candidate Demo Pack
+# Lockverity — Local-First Release Demo Pack
 
-This is the v2.0.6 portfolio demo pack. It is a one-page
+This is the v2.1.0 portfolio demo pack. It is a one-page
 reviewer reference: the current version, the demo command
 flow, the screenshot list, the 60-second demo script, the
 "what to say" + "what not to claim" framing, and the current
@@ -11,48 +11,66 @@ For the full reviewer walkthrough see
 screenshot checklist and manual capture instructions see
 [`docs/screenshots.md`](screenshots.md). For the
 release-validation checklist see
-[`docs/release-checklist.md`](release-checklist.md).
+[`docs/release-checklist.md`](release-checklist.md). For the
+download and install guide see
+[`docs/install.md`](install.md).
 
 ## Current version
 
-`v2.0.6` — Historical labels and stage-outcome clarity.
+`v2.1.0` — Local runtime brand polish, single-port
+production runtime, cross-platform local runtime CLI, Windows
+x64 portable package, and Windows x64 per-user installer.
 
-The current milestone is a narrowly scoped,
-field-testing-driven patch that ships two real
-usability defects uncovered by a v2.0.5 field-test
-run. v2.0.6 does not introduce a new feature. The first
-defect is a historical-label defect: v0.x-v2.0.4
-uploaded repositories have ``Repository.original_filename
-= NULL`` and the v2.0.5 list endpoint rendered the bounded
-opaque fallback ``Uploaded archive · upload/<short-key>``
-as the primary label. v2.0.6 introduces
-``get_repository_historical_filenames`` in
-``backend/app/repositories/repository_repo.py``: a single
-batched query that resolves a per-repository historical
-archive filename from the persisted
-``Workspace.archive_filename`` rows. The second defect is
-a stage-outcome presentation defect: v0.5-v2.0.5 rendered
-every stage ``failure_summary`` string with the red
-``"Failure: "`` prefix. v2.0.6 adds an additive
-``message_severity`` field on ``ScanStageRead``
-(``error`` / ``warning`` / ``info`` / ``none``) computed at
-the API boundary from the existing structured fields; the
-visible text never begins with ``"Failure: "`` for an
-``info`` or ``warning`` severity row. The v2.0.5
-comparison-stability and repository-identification
-release, the v2.0.4 BOM compatibility repair, the v2.0.3
-ruff pin + ``.gitattributes`` first-run reproducibility,
-the v2.0.2 nested-manifest discovery fix, the v2.0.1
-per-repository scan filter, and the v2.0 release-validation
-script all carry over verbatim; v2.0.6 does not change
-any of them. The v1.9 provider-health and
-operational-diagnostics page, the v1.8 repository history
-and comparison workflow, the v1.7 findings workbench, the
-v1.6.1 workspace-preserving rescan repair, the v1.6 scan
-workbench, the v1.5 guided intake, and the v1.0 Markdown
-evidence report remain in place. No new providers, no
-new export standards, no new evidence contracts, no new
-API endpoints, no migration.
+The current release is a focused additive release that ships:
+
+- **v2.1 Part A** — original Lockverity brand assets, favicon
+  closure, concise About page, Findings filter alignment, and
+  bounded visual polish. The brand mark is a hand-authored
+  interlocking L and V that suggests an evidence link; it is
+  not generated from a raster concept and is not derived from
+  any third-party logo asset.
+- **v2.1 Part B1** — single-port production runtime. The
+  FastAPI app can host the built React UI from the same host
+  and port as the API when `LOCKVERITY_SERVE_FRONTEND=true` is
+  set in a production environment. The two-port development
+  workflow is unchanged.
+- **v2.1 Part B2** — cross-platform local runtime CLI. The
+  `lockverity` command is the supported operator path for
+  starting, stopping, and inspecting the local instance on
+  Windows, macOS, and Linux. The CLI never shells out with
+  `shell=True`; the default bind is loopback only.
+- **v2.1 Part B3A** — Windows x64 portable package. A
+  self-contained ZIP that bundles the FastAPI backend, the
+  cross-platform `lockverity-cli` command, the React frontend,
+  the Alembic migrations, and the approved Part A brand
+  assets. No separately installed Python or Node.js is
+  required; no administrator rights; no Windows service,
+  scheduled task, or registry autorun.
+- **v2.1 Part B3B** — Windows x64 per-user installer. A
+  self-contained, per-user, no-UAC, no-admin EXE that
+  installs the accepted Part B3A portable payload into
+  `%LOCALAPPDATA%\Programs\Lockverity`. The installer does not
+  modify the operator's `PATH`, does not install a Windows
+  service, does not register an autorun entry, does not add a
+  firewall rule, and does not require administrator privilege.
+
+The v0.5–v2.0.6 surface area is preserved verbatim: the v0.5
+evidence-aware comparison, the v0.6 / v0.7 CycloneDX 1.7
+export, the v0.8 component drilldown, the v0.9 evidence search,
+the v1.0 Markdown evidence report, the v1.5 guided intake,
+the v1.6 scan workbench, the v1.6.1 workspace-preserving
+rescan repair, the v1.7 findings workbench, the v1.8
+repository history and comparison workflow, the v1.9
+provider-health and operational-diagnostics page, the v2.0
+release-validation script, the v2.0.1 per-repository scan
+filter, the v2.0.2 nested-manifest discovery fix, the v2.0.3
+ruff pin + `.gitattributes` first-run reproducibility, the
+v2.0.4 BOM compatibility repair, the v2.0.5 comparison
+stability and repository identification release, and the
+v2.0.6 historical-label and stage-outcome presentation
+fixes all carry over. No new providers, no new export
+standards, no new evidence contracts, no new API endpoints,
+no migration.
 
 ## How to run the demo
 
@@ -299,7 +317,7 @@ The demo deliberately does not show:
   default; no custom API origin is accepted.)
 - A **multi-tenant deployment.** The application has no
   authentication, no per-tenant data, and no hosted
-  control plane. See "What v2.0.6 does not include" in
+  control plane. See "What v2.1.0 does not include" in
   the About page or `RELEASE_NOTES.md`.
 - A **vulnerability verdict.** The CycloneDX 1.7 export
   and the Markdown report are evidence exports, not

@@ -4,16 +4,17 @@
 
 | Version | Supported          |
 | ------- | ------------------ |
-| v2.0.x  | Yes                |
-| v0.5 - v1.9 | Best-effort, no backports |
+| v2.1.x  | Yes                |
+| v2.0.x  | Best-effort, no feature backports |
+| v0.5 – v1.9 | No                 |
 | < v0.5  | No                 |
 
-Lockverity is in a `v2.0` local-first release-candidate line. Until
-`v2.0` reaches its `1.0` (long-term support) milestone, the project
+Lockverity is in a `v2.1` local-first release line. Until
+`v2.1` reaches its `1.0` (long-term support) milestone, the project
 does not commit to long-term compatibility promises; the data
 model, the API, and the file formats may change between minor
 versions. Security fixes are backported to the current
-`v2.0.x` line only.
+`v2.1.x` line only.
 
 ## Responsible disclosure
 

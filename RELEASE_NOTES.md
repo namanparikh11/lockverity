@@ -29,96 +29,48 @@ The product is built around three guarantees:
   dependency graph is reported as `partial`, never
   `complete`.
 
-## Status — local-first release candidate
+## Status — v2.1.0 local-first release
 
-The repository is a **local-first release candidate**,
-not a production SaaS, not a hosted service, and not a
-CI vendor. The current milestone (`v2.0.6`) is a
-narrowly scoped historical-label and stage-outcome
-clarity repair on top of `v2.0.5`. v2.0.6 does not add
-a new product feature or a new provider; it ships two
-real usability defects uncovered by a v2.0.5 field-test
-run. The first is a historical-label defect: v0.x-v2.0.4
-uploaded repositories have
-`Repository.original_filename = NULL` and the v2.0.5
-list endpoint rendered the bounded opaque fallback
-`Uploaded archive · upload/<short-key>` as the primary
-label. v2.0.6 derives a per-repository historical
-archive filename from the persisted
-`Workspace.archive_filename` rows in a single batched
-query, surfaces that filename as the primary label for
-historical rows, and extends the search parameter to
-match historical filenames too. The second is a
-stage-outcome presentation defect: v0.5-v2.0.5 rendered
-every stage `failure_summary` string with the red
-`"Failure: "` prefix, but several normal no-data
-outcomes (no OSV advisories returned, no workflow
-files discovered, no components available to enrich,
-parser warnings) are completed-stage honest reports,
-not stage-execution failures. v2.0.6 adds an additive
-`message_severity` field (`"error"` / `"warning"` /
-`"info"` / `"none"`) computed at the API boundary
-from the existing structured fields; the visible text
-never begins with `"Failure: "` for `"info"` or
-`"warning"` severity rows. The field is derived, not
-persisted, and uses a closed allow-list of known legacy
-reason codes (never a broad substring rule).
+The repository is a **local-first release**, not a production
+SaaS, not a hosted service, and not a CI vendor. The current
+release is **Lockverity v2.1.0**, a focused additive release that
+ships:
 
-The v2.0.5 fix is two localised changes plus a
-reversible migration. The comparison fix introduces
-``_nullable_key_sort_key`` in
-``app.services.comparison_service`` and applies it
-to the four ``sorted(set(...))`` (and one
-``sorted(set(...) & set(...))``) call sites whose
-keys legitimately contain ``None``; the original
-identity tuple is not mutated (``None`` and ``""``
-remain distinct in the underlying dict), and
-equality continues to use the original tuple. The
-repository-identification fix adds a nullable
-``original_filename`` column on ``repositories``,
-populated for new uploads with the basename of the
-client-supplied filename (sanitised via
-``basename_safely`` so an absolute path the client
-sends never reaches the database), extends the list
-endpoint to return a ``RepositoryWithSummary`` shape
-with ``display_name``, ``canonical_identity``, and a
-per-row ``summary`` (``scan_count``,
-``eligible_comparison_scan_count``, ``latest_scan``)
-computed by a single batched query, and extends the
-``search`` parameter to match a bounded set of
-persisted fields and resolve pure-integer or ``#N``
-tokens to the parent repository of scan ``N``. The
-v0.5 contract is unchanged; the v0.5 forbidden
-wording (``security improved``, ``fixed``,
-``remediated``, ``risk increased``, ``risk
-decreased``) is still absent from every response.
-(`PackageJsonParser` and `PackageLockJsonParser`
-rejected `package.json` files prefixed with a UTF-8
-BOM — produced by Notepad on Windows and many other
-editors — as invalid JSON, dropping every direct
-dependency declared in the affected file) and the
-regression tests that pin the fix. The v2.0.4 fix
-is a two-line change in
-`backend/app/parsers/npm.py`:
-`content.decode("utf-8")` →
-`content.decode("utf-8-sig")`. The BOM is stripped
-transparently; the rest of the JSON is parsed as
-ordinary UTF-8; no other manifest types are touched;
-the no-BOM control path is unchanged. The v2.0.4
-contract preserves the v2.0.3 boundary preservation
-in full. The v2.0 release-validation script and the
-v2.0.1/v2.0.2 acceptance flows are documented in
-[`docs/release-checklist.md`](docs/release-checklist.md).
-The v2.0 surface area includes the v1.9
-provider-health and operational-diagnostics page,
-the v1.8 repository history and comparison workflow,
-the v1.7 findings workbench, the v1.6.1 workspace-
-preserving rescan repair, the v1.6 scan workbench, the
-v1.5 guided intake, the v1.0 Markdown evidence
-report, the v0.9 evidence search, the v0.8 component
-drilldown, the v0.7 CycloneDX preview, the v0.6
-CycloneDX 1.7 export, and the v0.5 evidence-aware
-comparison. There is:
+- **v2.1 Part A** — original Lockverity brand assets, favicon
+  closure, concise About page, Findings filter alignment, and
+  bounded visual polish. The brand mark is a hand-authored
+  interlocking L and V that suggests an evidence link; it is not
+  generated from a raster concept and is not derived from any
+  third-party logo asset. See
+  [`docs/brand-assets.md`](docs/brand-assets.md).
+- **v2.1 Part B1** — single-port production runtime. The FastAPI
+  app can host the built React UI from the same host and port as
+  the API when `LOCKVERITY_SERVE_FRONTEND=true` is set in a
+  production environment. The two-port development workflow is
+  unchanged.
+- **v2.1 Part B2** — cross-platform local runtime CLI. The
+  `lockverity` command is the supported operator path for
+  starting, stopping, and inspecting the local instance on
+  Windows, macOS, and Linux. The CLI never shells out with
+  `shell=True`; the default bind is loopback only.
+- **v2.1 Part B3A** — Windows x64 portable package. A
+  self-contained ZIP that bundles the FastAPI backend, the
+  cross-platform `lockverity-cli` command, the React frontend,
+  the Alembic migrations, and the approved Part A brand assets.
+  No separately installed Python or Node.js is required; no
+  administrator rights; no Windows service, scheduled task, or
+  registry autorun. See
+  [`docs/windows-portable.md`](docs/windows-portable.md).
+- **v2.1 Part B3B** — Windows x64 per-user installer. A
+  self-contained, per-user, no-UAC, no-admin EXE that installs
+  the accepted Part B3A portable payload into
+  `%LOCALAPPDATA%\Programs\Lockverity`. The installer does not
+  modify the operator's `PATH`, does not install a Windows
+  service, does not register an autorun entry, does not add a
+  firewall rule, and does not require administrator privilege.
+  See [`docs/windows-installer.md`](docs/windows-installer.md).
+
+There is:
 
 - **No multi-tenancy** and no authentication. A reviewer runs
   the application on their own laptop.
@@ -259,7 +211,7 @@ The provider-honesty policy is in
 - **Continuous / scheduled scans.** Scans are explicit
   operator actions (manual trigger, archive upload, or
   `api`).
-- **Private GitHub repository analysis.** v2.0.6 is
+- **Private GitHub repository analysis.** v2.1.0 is
   public-only; the `LOCKVERITY_GITHUB_TOKEN` environment
   variable is honoured for public rate limits but private
   endpoints are out of scope.
