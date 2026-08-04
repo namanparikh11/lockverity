@@ -35,7 +35,23 @@ def create_repository(
     payload: RepositoryCreate,
     session: DBSession,
 ) -> RepositoryRead:
-    repo = repository_service.create_repository_from_url(session, payload.canonical_url)
+    # v2.1.1: route through the safe wrapper so an
+    # unhandled exception is sanitised into the
+    # documented ``INTERNAL_UNEXPECTED`` envelope with a
+    # non-PII 16-character hex correlation id. The
+    # primary bundled-UI path is
+    # ``POST /repositories/github`` (the v1.5 guided
+    # intake endpoint), which has the same wrapper
+    # applied at the service layer; this route retains
+    # the legacy ``POST /repositories`` shape for
+    # backwards compatibility and applies the same
+    # safe-error boundary as defence in depth so an
+    # external client (curl, scripts, or the
+    # ``api.createRepository`` helper) never sees a
+    # raw traceback.
+    repo = repository_service.safe_create_repository_from_url(
+        session, payload.canonical_url
+    )
     return RepositoryRead.model_validate(repo)
 
 

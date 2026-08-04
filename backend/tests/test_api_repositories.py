@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import re
+
 import pytest
 from app.main import app
 from fastapi.testclient import TestClient
@@ -99,3 +101,74 @@ def test_get_repository_ok(client) -> None:
     r2 = client.get(f"/api/v1/repositories/{rid}")
     assert r2.status_code == 200
     assert r2.json()["id"] == rid
+
+
+# ---------------------------------------------------------------------------
+# v2.1.1: defence-in-depth safe wrapper for the legacy
+# ``POST /repositories`` endpoint. The primary bundled-UI path
+# is ``POST /repositories/github``; the legacy endpoint is
+# retained for backwards compatibility and is wrapped with the
+# same safe-error boundary so external clients (curl, scripts,
+# the prior ``api.createRepository`` helper) never see a raw
+# traceback or a half-committed row.
+# ---------------------------------------------------------------------------
+
+
+def test_legacy_endpoint_returns_internal_unexpected_with_correlation_id(
+    client, monkeypatch
+) -> None:
+    """End-to-end: a simulated database write failure on
+    the legacy ``POST /repositories`` route returns the
+    documented ``INTERNAL_UNEXPECTED`` envelope with a
+    16-character lowercase hex ``correlation_id``.
+    """
+
+    def _raise_db_error(*_args, **_kwargs):
+        raise RuntimeError(
+            "simulated db write failure from the legacy route"
+        )
+
+    # Patch the INNER service call so the failure happens
+    # AFTER the wrapper's try/except is entered but BEFORE
+    # the inner call commits. This mirrors the
+    # packaged-runtime acceptance failure mode: a write
+    # to a read-only database. The safe wrapper must
+    # sanitise the RuntimeError into the documented
+    # ``INTERNAL_UNEXPECTED`` envelope.
+    monkeypatch.setattr(
+        "app.services.repository_service.create_repository_from_url",
+        _raise_db_error,
+    )
+
+    r = client.post(
+        "/api/v1/repositories",
+        json={"canonical_url": "https://github.com/octocat/Hello-World"},
+    )
+    assert r.status_code == 500
+    body = r.json()
+    assert body["error"]["code"] == "internal_unexpected"
+    cid = body["error"]["details"]["correlation_id"]
+    assert re.fullmatch(r"[0-9a-f]{16}", cid) is not None
+    assert body["error"]["details"]["kind"] == "repository"
+    # The response carries no path, no token, no raw exception.
+    msg = body["error"]["message"]
+    assert "RuntimeError" not in msg
+    assert "simulated" not in msg
+    assert "Traceback" not in msg
+
+
+def test_legacy_endpoint_classified_errors_preserved(client) -> None:
+    """End-to-end: a non-GitHub URL on the legacy
+    ``POST /repositories`` route still returns the
+    classified ``validation_error`` envelope (the safe
+    wrapper does not collapse classified errors into
+    ``INTERNAL_UNEXPECTED``).
+    """
+    r = client.post(
+        "/api/v1/repositories",
+        json={"canonical_url": "https://example.com/octocat/Hello-World"},
+    )
+    assert r.status_code == 422
+    body = r.json()
+    assert body["error"]["code"] == "validation_error"
+    assert "is not a valid public GitHub URL" in body["error"]["message"]

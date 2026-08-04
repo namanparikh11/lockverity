@@ -6,6 +6,10 @@ import { api } from "@/api/api";
 import { ApiClientError, categorizeError } from "@/api/client";
 import { DataCompletenessNotice } from "@/components/DataCompletenessNotice";
 import { ErrorState } from "@/components/ErrorState";
+import {
+  intakeErrorDescriptionFor,
+  intakeErrorTitleFor,
+} from "@/components/intakeErrorFormatting";
 import { Notification } from "@/components/Notification";
 import { PageHeader } from "@/components/PageHeader";
 
@@ -49,12 +53,23 @@ export function NewRepositoryPage() {
     if (!validate()) return;
     setSubmitting(true);
     try {
-      const repo = await api.createRepository({
+      // v2.1.1: submit through the canonical GitHub intake
+      // endpoint so the page receives the same
+      // ``IntakeResult`` shape, the same classified
+      // error taxonomy, and the same ``internal_unexpected``
+      // correlation-id envelope as the guided
+      // ``/analyze`` page. The legacy
+      // ``POST /repositories`` endpoint is retained for
+      // backwards compatibility (other clients and
+      // scripts) and is wrapped with the same
+      // safe-error boundary as defence in depth; see
+      // ``backend/app/api/repositories.py``.
+      const result = await api.createRepositoryGithub({
         canonical_url: url.trim(),
         requested_ref: ref.trim() || undefined,
       });
-      setSuccessId(repo.id);
-      window.setTimeout(() => navigate(`/repositories/${repo.id}`), 400);
+      setSuccessId(result.repository.id);
+      window.setTimeout(() => navigate(`/scans/${result.scan.id}`), 400);
     } catch (err) {
       setError(err);
     } finally {
@@ -147,7 +162,8 @@ export function NewRepositoryPage() {
               {error instanceof ApiClientError ? (
                 <ErrorState
                   error={error}
-                  title={errorTitleFor(categorizeError(error))}
+                  title={intakeErrorTitleFor(categorizeError(error))}
+                  description={intakeErrorDescriptionFor(error)}
                 />
               ) : (
                 <ErrorState error={error} title="Could not add repository" />
@@ -205,37 +221,4 @@ export function NewRepositoryPage() {
       </div>
     </>
   );
-}
-
-function errorTitleFor(category: ReturnType<typeof categorizeError>): string {
-  switch (category) {
-    case "validation":
-      return "The repository URL was rejected by the server";
-    case "invalid_ref":
-      return "The requested branch, tag, or commit was not found";
-    case "rate_limited":
-      return "GitHub rate limit reached";
-    case "provider_unavailable":
-      return "Could not reach GitHub";
-    case "network":
-    case "timeout":
-      return "Network problem";
-    case "duplicate":
-      return "Repository already registered";
-    case "forbidden":
-    case "unauthorized":
-      return "Repository not accessible";
-    case "not_found":
-      return "Repository could not be accessed";
-    case "internal_unexpected":
-      return "An internal error occurred";
-    case "server":
-      return "Server error";
-    case "cancelled":
-      return "Request cancelled";
-    default:
-      // v2.1.1: never claim "Unknown error" when the
-      // backend has supplied a classified message.
-      return "Could not add repository";
-  }
 }

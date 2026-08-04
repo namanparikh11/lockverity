@@ -11,6 +11,9 @@ that records the user's intent to analyze a given public URL.
 
 from __future__ import annotations
 
+import contextlib
+import logging
+import secrets
 from collections.abc import Sequence
 
 from sqlalchemy.exc import IntegrityError
@@ -26,6 +29,8 @@ from app.utils.repo_url import (
     RepositoryUrlError,
     normalize_github_url,
 )
+
+logger = logging.getLogger("lockverity.repository_service")
 
 
 def normalize_input_url(url: str) -> NormalizedRepositoryUrl:
@@ -79,6 +84,61 @@ def create_repository_from_url(session: Session, url: str) -> Repository:
             details={"canonical_url": normalized.canonical_url},
         ) from exc
     return repo
+
+
+def safe_create_repository_from_url(session: Session, url: str) -> Repository:
+    """Defence-in-depth safe wrapper around :func:`create_repository_from_url`.
+
+    v2.1.1: the legacy ``POST /repositories`` endpoint remains
+    reachable for backwards compatibility (other clients, scripts,
+    curl, the prior ``/repositories/new`` form, etc.). The v1.5
+    guided-intake page submits through
+    ``POST /repositories/github`` instead, so the legacy endpoint
+    is not the primary bundled-UI path; this wrapper exists to
+    keep the legacy endpoint safe in case an unhandled exception
+    ever escapes the inner service call.
+
+    Contract mirrors :meth:`IntakeService.intake_github`:
+
+    - classified ``ApiError`` instances are re-raised as-is
+      (``validation_error``, ``duplicate``, etc.);
+    - any other ``Exception`` is sanitised into the documented
+      ``INTERNAL_UNEXPECTED`` envelope with a non-PII
+      16-character lowercase hex ``correlation_id``;
+    - the full traceback is logged with the same id so an
+      operator can cross-reference the response and the log;
+    - the response carries no path, token, raw exception, or
+      upstream body;
+    - the SQLAlchemy session is rolled back best-effort so
+      a half-written row does not survive a failed write.
+    """
+    try:
+        return create_repository_from_url(session, url)
+    except ApiError:
+        # Classified: ``validation_error`` from URL
+        # normalisation, ``duplicate`` from the concurrent
+        # insert race. Re-raise without modification so the
+        # inner handler owns the message and the
+        # ``details`` envelope.
+        raise
+    except Exception as exc:
+        correlation_id = secrets.token_hex(8)
+        logger.exception(
+            "repository_create internal error (correlation_id=%s, kind=%s)",
+            correlation_id,
+            "repository",
+        )
+        with contextlib.suppress(Exception):
+            session.rollback()
+        raise ApiError(
+            ApiErrorCode.INTERNAL_UNEXPECTED,
+            "An internal error occurred. See Diagnostics for the "
+            "correlation id and the runtime log for the full trace.",
+            details={
+                "correlation_id": correlation_id,
+                "kind": "repository",
+            },
+        ) from exc
 
 
 def get_repository_or_404(session: Session, repository_id: int) -> Repository:
