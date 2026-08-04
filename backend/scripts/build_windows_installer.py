@@ -80,17 +80,23 @@ ISCC_PATHS = (
     Path("C:/Program Files (x86)/Inno Setup 6/ISCC.exe"),
     Path("C:/Program Files/Inno Setup 6/ISCC.exe"),
 )
-# Required source-identity pin. Tracked source may pin the
-# payload's source identity, product version, schema, architecture
-# and filenames — but the installer build script MUST NOT pin
-# any generated binary hash (the portable ZIP, the EXEs, etc.).
-# Every generated SHA-256 is read from the payload's own
-# ``SHA256SUMS.txt`` and ``BUILD-MANIFEST.json`` at build time
-# and written to the external ``INSTALLER-MANIFEST.json``. This
-# keeps a single source commit valid across any number of
-# portable rebuilds (timestamps, bootloader versions, etc.),
-# removing the "rebuild -> source-commit -> rebuild" cycle.
-EXPECTED_PAYLOAD_SOURCE_COMMIT = "c9b4bb5bcfb14f3143d72e3ba11d21e4490d8f09"
+# The expected payload source identity is the build's own
+# current git HEAD — not a pinned B3A source commit. The
+# payload's ``BUILD-MANIFEST.json`` ``source_commit`` must
+# match the installer build's current ``git rev-parse HEAD``;
+# the installer then records that same HEAD as both
+# ``installer_source_commit`` and ``payload_source_commit``
+# in the generated ``INSTALLER-MANIFEST.json``. This makes
+# the installer provenance a single consistent value
+# (the build-time HEAD) rather than two independently
+# maintained values.
+#
+# The expected source_commit is captured at the top of
+# ``main()`` via ``_git_head_full()`` and passed into
+# ``_verify_payload_zip``. There is no tracked constant for
+# it: removing the constant from tracked Python source is
+# the explicit fix for the previous
+# "rebuild -> source-commit -> rebuild" cycle.
 # A regular expression for a full 40-character lowercase hex
 # git commit SHA. Used to assert that ``source_commit`` fields
 # in any generated manifest are well-formed before they enter
@@ -242,17 +248,25 @@ def _read_payload_sha256sums(payload_root: Path) -> dict[str, str]:
     return out
 
 
-def _verify_payload_zip(payload_zip: Path) -> dict[str, object]:
+def _verify_payload_zip(
+    payload_zip: Path,
+    expected_payload_source_commit: str,
+) -> dict[str, object]:
     """Verify the accepted B3A portable payload and return the
     short summary used by the install manifest.
 
     The verification is split into two orthogonal checks:
 
     1. **Identity** — read the payload's ``BUILD-MANIFEST.json``
-       and assert that ``source_commit`` equals
-       ``EXPECTED_PAYLOAD_SOURCE_COMMIT`` and that ``version``
-       equals ``APP_VERSION``. This is the only source-identity
-       pin tracked Python code may keep.
+       and assert that ``source_commit`` equals the installer
+       build's current ``git rev-parse HEAD`` (the same value
+       that will be recorded as ``installer_source_commit`` in
+       the generated ``INSTALLER-MANIFEST.json``) and that
+       ``version`` equals ``APP_VERSION``. There is no tracked
+       Python constant pinning a specific B3A source commit;
+       the installer build always verifies the payload was
+       built from the same clean source tree the installer is
+       being built from.
     2. **Integrity** — read the payload's ``SHA256SUMS.txt`` and
        re-hash every file at the recorded relative path. The
        expected SHA-256 for every file is read from the
@@ -267,6 +281,11 @@ def _verify_payload_zip(payload_zip: Path) -> dict[str, object]:
             "Restore the accepted B3A portable ZIP before building the "
             "installer. Do not rebuild the application."
         )
+    if not _GIT_SHA1_RE.match(expected_payload_source_commit):
+        raise SystemExit(
+            "ERROR: expected payload source_commit is not a full 40-char SHA: "
+            f"{expected_payload_source_commit!r}"
+        )
     actual_zip_sha = _sha256_of(payload_zip)
     payload_root = payload_zip.parent / PAYLOAD_NAME
     if not payload_root.is_dir():
@@ -277,11 +296,13 @@ def _verify_payload_zip(payload_zip: Path) -> dict[str, object]:
     if not manifest_path.is_file():
         raise SystemExit(f"ERROR: BUILD-MANIFEST.json not found in payload at {manifest_path}.")
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-    if manifest.get("source_commit") != EXPECTED_PAYLOAD_SOURCE_COMMIT:
+    if manifest.get("source_commit") != expected_payload_source_commit:
         raise SystemExit(
-            "ERROR: payload source_commit does not match the accepted B3A SHA.\n"
-            f"  expected: {EXPECTED_PAYLOAD_SOURCE_COMMIT}\n"
-            f"  actual:   {manifest.get('source_commit')}\n"
+            "ERROR: payload source_commit does not match the installer build's HEAD.\n"
+            f"  expected (installer HEAD): {expected_payload_source_commit}\n"
+            f"  actual   (payload manifest): {manifest.get('source_commit')}\n"
+            "Rebuild the portable from a clean checkout of the same HEAD that the "
+            "installer is being built from."
         )
     if manifest.get("version") != APP_VERSION:
         raise SystemExit(
@@ -539,7 +560,7 @@ def _write_installer_manifest(
         "product": "Lockverity",
         "version": APP_VERSION,
         "installer_source_commit": installer_source_commit,
-        "payload_source_commit": EXPECTED_PAYLOAD_SOURCE_COMMIT,
+        "payload_source_commit": payload_summary["payload_source_commit"],
         "payload_zip": payload_zip.name,
         "payload_zip_sha256": payload_summary["payload_zip_sha256"],
         "payload_build_manifest_sha256": payload_summary["build_manifest_sha256"],
@@ -820,7 +841,10 @@ def main(argv: list[str] | None = None) -> int:
             if d.exists():
                 shutil.rmtree(d, ignore_errors=True)
 
-    payload_summary = _verify_payload_zip(args.payload_zip)
+    payload_summary = _verify_payload_zip(
+        args.payload_zip,
+        _git_head_full(),
+    )
     _log(
         "payload",
         f"accepted B3A payload verified (zip_sha256={payload_summary['payload_zip_sha256'][:12]}..., source_commit={payload_summary['payload_source_commit']})",
@@ -869,7 +893,7 @@ def main(argv: list[str] | None = None) -> int:
         "machine": f"{platform.machine().lower()}",
         "platform": sys.platform,
         "installer_source_commit": installer_source_commit,
-        "payload_source_commit": EXPECTED_PAYLOAD_SOURCE_COMMIT,
+        "payload_source_commit": payload_summary["payload_source_commit"],
         "inno_setup_compiler": str(iscc),
         "inno_setup_compiler_sha256": _sha256_of(iscc),
         "installer_filename": installer_exe.name,

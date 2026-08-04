@@ -46,13 +46,16 @@ DOCS_FILE = REPO_ROOT / "docs" / "windows-installer.md"
 STABLE_APP_ID = "{E5B0C0F4-7C42-4D6A-9B17-1A2B3C4D5E6F}"
 APP_VERSION = "2.1.0"
 
-# The payload's source identity is the only generated-binary
-# hash *adjacent* value tracked Python code may keep. The
-# payload's portable ZIP, the EXE SHA-256 values, the
-# INSTALLER-MANIFEST.json fields, and the SHA256SUMS.txt
-# entries are all read at build / acceptance time from the
-# payload's own generated manifests.
-EXPECTED_PAYLOAD_SOURCE_COMMIT = "c9b4bb5bcfb14f3143d72e3ba11d21e4490d8f09"
+# In the new provenance design, the build script captures
+# the installer build's current ``git rev-parse HEAD`` at
+# build time and verifies that the payload's
+# ``BUILD-MANIFEST.json`` ``source_commit`` equals that HEAD.
+# There is no tracked Python constant pinning a specific B3A
+# source commit. The payload's portable ZIP, the EXE
+# SHA-256 values, the ``INSTALLER-MANIFEST.json`` fields,
+# and the ``SHA256SUMS.txt`` entries are all read at build
+# / acceptance time from the payload's own generated
+# manifests.
 
 # Historical generated-hash literals kept solely as
 # "forbidden literals" used by the regression tests to
@@ -926,29 +929,30 @@ class TestBuildScriptContract:
         ``INSTALLER-MANIFEST.json`` / ``SHA256SUMS.txt``.
         """
         text = _build_text()
-        # The source identity and product version are the
-        # only generated-hash *adjacent* values tracked Python
-        # code may keep.
-        assert EXPECTED_PAYLOAD_SOURCE_COMMIT in text, (
-            f"Build script must pin payload source_commit {EXPECTED_PAYLOAD_SOURCE_COMMIT!r}"
-        )
+        # The product version is the only generated-hash
+        # *adjacent* value tracked Python code may keep. The
+        # source identity is captured at build time via
+        # ``_git_head_full()`` (not pinned).
         assert APP_VERSION in text, f"Build script must pin product version {APP_VERSION!r}"
-        # No exact generated binary hash may live in a tracked
+        assert "_git_head_full()" in text, (
+            "Build script must capture the current git HEAD via _git_head_full()"
+        )
+        # No exact generated value may live in a tracked
         # Python constant. We assert this by checking that the
         # previous-generation constant names are gone. The
         # build script's hash constants must be limited to the
-        # source-identity pin (EXPECTED_PAYLOAD_SOURCE_COMMIT),
-        # the product version (APP_VERSION), the AppId, and
+        # product version (APP_VERSION), the AppId, and
         # build-time configuration (port hints, paths, etc.).
         for forbidden_name in (
             "EXPECTED_PAYLOAD_ZIP_SHA256",
             "EXPECTED_LOCKVERITY_EXE_SHA256",
             "EXPECTED_LOCKVERITY_CLI_EXE_SHA256",
+            "EXPECTED_PAYLOAD_SOURCE_COMMIT",
         ):
             assert f"{forbidden_name} = " not in text, (
                 f"Build script must not declare a module-level "
                 f"constant {forbidden_name!r} that pins a "
-                "generated binary hash"
+                "generated value or a specific source commit"
             )
 
     def test_build_script_uses_subprocess_without_shell_true(self) -> None:
@@ -1286,14 +1290,17 @@ class TestProvenanceDesign:
 
     def test_installer_accepts_payload_with_matching_source_commit(self) -> None:
         """The installer build script must accept a payload whose
-        ``BUILD-MANIFEST.json`` ``source_commit`` equals
-        ``EXPECTED_PAYLOAD_SOURCE_COMMIT``. This is a static
-        check on the build script's verification logic.
+        ``BUILD-MANIFEST.json`` ``source_commit`` equals the
+        installer build's current ``git rev-parse HEAD`` (the
+        same value that will be recorded as
+        ``installer_source_commit`` in the generated
+        ``INSTALLER-MANIFEST.json``). This is a static check on
+        the build script's verification logic.
         """
         text = _build_text()
-        assert 'manifest.get("source_commit") != EXPECTED_PAYLOAD_SOURCE_COMMIT' in text, (
+        assert 'manifest.get("source_commit") != expected_payload_source_commit' in text, (
             "Build script must reject payloads whose BUILD-MANIFEST.json source_commit "
-            "does not match EXPECTED_PAYLOAD_SOURCE_COMMIT"
+            "does not match the installer build's HEAD"
         )
 
     def test_installer_rejects_mismatched_source_commit(self) -> None:
