@@ -42,8 +42,8 @@ SHA-256, double-click, and follow the wizard.
 | Pick this | If you are a normal Windows user who wants the recommended install path |
 | --- | --- |
 | [Lockverity-2.1.1-windows-x64-setup.exe](https://github.com/namanparikh11/lockverity/releases/download/checkpoint-v2.1.1-public-release/Lockverity-2.1.1-windows-x64-setup.exe) | Windows x64 installer (per-user, no UAC, no admin) |
-| SHA-256 | `136ba35219667e1df1a983a31c6a69d6a592c3e76b4e40b6aecda4945c44f71c` |
-| Size | 31,136,898 bytes |
+| SHA-256 | `5347d891db67b7f1e6f4c2d218867d1791945dcbef0dbb144793fdc10d631596` |
+| Size | 31,136,333 bytes |
 | Privilege mode | per-user, no admin, no UAC |
 | Default install path | `%LOCALAPPDATA%\Programs\Lockverity` |
 | Runtime home | `%LOCALAPPDATA%\Lockverity` |
@@ -57,8 +57,8 @@ SHA-256, double-click, and follow the wizard.
 | Pick this | If you want Lockverity without a formal install |
 | --- | --- |
 | [Lockverity-2.1.1-windows-x64-portable.zip](https://github.com/namanparikh11/lockverity/releases/download/checkpoint-v2.1.1-public-release/Lockverity-2.1.1-windows-x64-portable.zip) | Windows x64 portable (extract anywhere, no install) |
-| SHA-256 | `0efa72236c0e519df6b90b6d9e8689566eb054b26d32228ce2a689c85ecfba0b` |
-| Size | 56,110,788 bytes |
+| SHA-256 | `f0a8447bf7f2e786221d5987b6680a9b5864a197d02ba9dc903d1ff7c9536393` |
+| Size | 56,110,792 bytes |
 | Runtime home | `%LOCALAPPDATA%\Lockverity` (still under LocalAppData) |
 | Status | **Unsigned** (see [SmartScreen / unsigned / antivirus](#smartscreen--unsigned--antivirus)) |
 
