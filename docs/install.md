@@ -77,15 +77,15 @@ only), and self-contained.
 ### Download and verify
 
 1. Download
-   [`Lockverity-2.1.0-windows-x64-setup.exe`](https://github.com/namanparikh11/lockverity/releases/download/checkpoint-v2.1.0-public-release/Lockverity-2.1.0-windows-x64-setup.exe).
+   [`Lockverity-2.1.2-windows-x64-setup.exe`](https://github.com/namanparikh11/lockverity/releases/download/checkpoint-v2.1.2-public-release/Lockverity-2.1.2-windows-x64-setup.exe).
 2. Verify the SHA-256:
 
    ```powershell
-   Get-FileHash .\Lockverity-2.1.0-windows-x64-setup.exe -Algorithm SHA256
+   Get-FileHash .\Lockverity-2.1.2-windows-x64-setup.exe -Algorithm SHA256
    ```
 
    The output hash must equal
-   `5347d891db67b7f1e6f4c2d218867d1791945dcbef0dbb144793fdc10d631596`.
+   `5e47d2bcf0d4e5c2f9654434328c6adecca800161505e775bae01bef121bc8bb`.
    The same value is in
    [`Lockverity-2.1.2-SHA256SUMS.txt`](https://github.com/namanparikh11/lockverity/releases/download/checkpoint-v2.1.2-public-release/Lockverity-2.1.2-SHA256SUMS.txt)
    and in the bundled `INSTALLER-MANIFEST.json` next to the
@@ -225,15 +225,15 @@ task, or registry autorun.
 ### Download and verify
 
 1. Download
-   [`Lockverity-2.1.0-windows-x64-portable.zip`](https://github.com/namanparikh11/lockverity/releases/download/checkpoint-v2.1.0-public-release/Lockverity-2.1.0-windows-x64-portable.zip).
+   [`Lockverity-2.1.2-windows-x64-portable.zip`](https://github.com/namanparikh11/lockverity/releases/download/checkpoint-v2.1.2-public-release/Lockverity-2.1.2-windows-x64-portable.zip).
 2. Verify the SHA-256:
 
    ```powershell
-   Get-FileHash .\Lockverity-2.1.0-windows-x64-portable.zip -Algorithm SHA256
+   Get-FileHash .\Lockverity-2.1.2-windows-x64-portable.zip -Algorithm SHA256
    ```
 
    The output hash must equal
-   `f0a8447bf7f2e786221d5987b6680a9b5864a197d02ba9dc903d1ff7c9536393`.
+   `2713416222a962c14e05a78977c1433fb2a1a2776d428d8034b10a32351ec158`.
    The same value is in
    [`Lockverity-2.1.2-windows-x64-portable-SHA256SUMS.txt`](https://github.com/namanparikh11/lockverity/releases/download/checkpoint-v2.1.2-public-release/Lockverity-2.1.2-windows-x64-portable-SHA256SUMS.txt)
    and in the bundled `SHA256SUMS.txt` inside the ZIP.
@@ -427,8 +427,8 @@ Every release asset has a SHA-256 in the external
 [`Lockverity-2.1.2-SHA256SUMS.txt`](https://github.com/namanparikh11/lockverity/releases/download/checkpoint-v2.1.2-public-release/Lockverity-2.1.2-SHA256SUMS.txt):
 
 ```
-5347d891db67b7f1e6f4c2d218867d1791945dcbef0dbb144793fdc10d631596  Lockverity-2.1.2-windows-x64-setup.exe
-f0a8447bf7f2e786221d5987b6680a9b5864a197d02ba9dc903d1ff7c9536393  Lockverity-2.1.2-windows-x64-portable.zip
+5e47d2bcf0d4e5c2f9654434328c6adecca800161505e775bae01bef121bc8bb  Lockverity-2.1.2-windows-x64-setup.exe
+2713416222a962c14e05a78977c1433fb2a1a2776d428d8034b10a32351ec158  Lockverity-2.1.2-windows-x64-portable.zip
 0584c02bcba6bc89f78f39b988bdc47b48370a727719e628ad8ea05e1421cef4  INSTALLER-MANIFEST.json
 3930297439251db303ac8de427087dc80973972925184a7bbd7c8de69d5b2679  BUILD-MANIFEST.json
 ```
