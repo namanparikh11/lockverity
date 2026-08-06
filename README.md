@@ -29,7 +29,7 @@ republished.
 | --- | --- |
 | Version | `2.1.2` |
 | Release tag | [`checkpoint-v2.1.2-public-release`](https://github.com/namanparikh11/lockverity/releases/tag/checkpoint-v2.1.2-public-release) |
-| Source commit | `c76e8fe253ddbaa5da0b1c37070c32dda3f9305c` |
+| Source commit | `fe6ceecfa1d49201880c42831abd71caa73e5c1f` |
 | Published | 2026-08-06 |
 | Latest release | https://github.com/namanparikh11/lockverity/releases/latest |
 | Previous release | [`checkpoint-v2.1.1-public-release`](https://github.com/namanparikh11/lockverity/releases/tag/checkpoint-v2.1.1-public-release) (2026-08-04) |

@@ -7,6 +7,14 @@ underlying data model and Alembic migrations are stable.
 
 ## v2.1.2 — Windows application icon and signing readiness (published 2026-08-06)
 
+The hotfix was tagged and published as
+``checkpoint-v2.1.2-public-release`` after a hash-alignment
+cycle that moved the tag from the docs-finalization HEAD
+``c76e8fe`` to the final main HEAD ``fe6ceec``. The published
+artifacts all carry ``fe6ceec`` as their
+``source_commit`` / ``installer_source_commit`` /
+``payload_source_commit`` field.
+
 A narrow Windows-only hotfix that fixes the **Settings →
 Installed apps** icon (the registry ``DisplayIcon`` value the
 Windows shell renders) and prepares the build for a future
