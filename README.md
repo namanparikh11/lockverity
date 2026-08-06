@@ -16,24 +16,26 @@ an explicit omission marker.
 ## Current release
 
 **Lockverity v2.1.2** — Narrow Windows-only hotfix for the
-Settings → Installed apps icon and signing-readiness hooks.
-The hotfix is in development on
-``hotfix/v2.1.2-windows-icon-signing-readiness``; the v2.1.2
-GitHub release is **not** published yet. v2.1.1 remains the
-**current published** release and continues to resolve from
-its GitHub Release URL; v2.1.0 remains the previous published
-release. Neither is republished.
+Settings → Installed apps icon, the canonical Windows ICO
+size set, the Inno Setup ``UninstallDisplayIcon`` path,
+and Authenticode signing-readiness hooks. The v2.1.2
+GitHub release is **public** on the
+``checkpoint-v2.1.2-public-release`` tag. v2.1.1 is the
+previous published release (tag unchanged); v2.1.0 is
+the release before that (tag unchanged). Neither is
+republished.
 
 | Field | Value |
 | --- | --- |
 | Version | `2.1.2` |
-| In-tree branch | [`hotfix/v2.1.2-windows-icon-signing-readiness`](../../tree/hotfix/v2.1.2-windows-icon-signing-readiness) |
-| Status | In development (not yet tagged or published) |
-| Latest published release | https://github.com/namanparikh11/lockverity/releases/latest |
-| Current published release | [`checkpoint-v2.1.1-public-release`](https://github.com/namanparikh11/lockverity/releases/tag/checkpoint-v2.1.1-public-release) (2026-08-04) |
-| Previous published release | [`checkpoint-v2.1.0-public-release`](https://github.com/namanparikh11/lockverity/releases/tag/checkpoint-v2.1.0-public-release) |
+| Release tag | [`checkpoint-v2.1.2-public-release`](https://github.com/namanparikh11/lockverity/releases/tag/checkpoint-v2.1.2-public-release) |
+| Source commit | `fbe0f7e3a53b2ed4bfe16f3acac1e2c8d2f0d1b2` |
+| Published | 2026-08-06 |
+| Latest release | https://github.com/namanparikh11/lockverity/releases/latest |
+| Previous release | [`checkpoint-v2.1.1-public-release`](https://github.com/namanparikh11/lockverity/releases/tag/checkpoint-v2.1.1-public-release) (2026-08-04) |
+| Older release | [`checkpoint-v2.1.0-public-release`](https://github.com/namanparikh11/lockverity/releases/tag/checkpoint-v2.1.0-public-release) |
 
-What v2.1.2 will change (when published):
+What v2.1.2 fixes:
 
 - **Settings → Installed apps shows the Lockverity icon.**
   v2.1.0 and v2.1.1 declared
@@ -41,9 +43,13 @@ What v2.1.2 will change (when published):
   that does not exist on disk (the launcher is installed
   under ``{app}\app\``) and that omitted the explicit
   ``,0`` icon index. v2.1.2 fixes the path to
-  ``{app}\app\Lockverity.exe,0`` and rebuilds the
-  canonical Windows ICO with the full size set the
-  Windows shell queries (16/24/32/48/64/128/256).
+  ``{app}\app\Lockverity.exe,0``.
+- **Complete multi-resolution Windows ICO.** The
+  canonical ICO at ``backend/pyinstaller/favicon-exe.ico``
+  is regenerated from the approved 1024x1024 source
+  PNG with the full size set the Windows shell queries
+  (16/24/32/48/64/128/256). v2.1.0 and v2.1.1 shipped
+  only ``{16, 32, 48, 256}``.
 - **Consistent installer, executable, shortcut and
   uninstaller branding.** The same canonical ICO is
   used as ``SetupIconFile``, bundled at the install
@@ -55,16 +61,19 @@ What v2.1.2 will change (when published):
   the documented env-var contract for a future
   trusted Authenticode provider. When all env vars
   are unset the build is unchanged: still functional,
-  still unsigned, no code-signing integration. v2.1.2
-  is *infrastructure*, not an integration; a signed
-  v2.1.2 binary requires a future trusted provider to
-  be configured at build time.
+  still unsigned, no code-signing integration.
 
-What v2.1.2 will **not** claim: see the
-[v2.1.1 release notes](RELEASE_NOTES.md#status--v212-in-development)
-for the full non-claims list (no signed binaries, no
-private-repository support, no republish of v2.1.0 or
-v2.1.1).
+What v2.1.2 does **not** claim (preserved contracts):
+
+- v2.1.2 does **not** add a code signature. The
+  Windows build remains unsigned; operators may see
+  ``Unknown publisher`` or SmartScreen warnings.
+  Verify the SHA-256 hash before installing.
+- v2.1.2 does not change the v2.1.0 or v2.1.1
+  release assets. Both tags and their six assets
+  each remain unchanged and continue to resolve
+  from the original release URLs.
+- v2.1.2 does not claim private-repository support.
 
 ## Download and install
 
@@ -100,6 +109,18 @@ the [`INSTALLER-MANIFEST.json`](https://github.com/namanparikh11/lockverity/rele
 and the
 [`Lockverity-2.1.1-SHA256SUMS.txt`](https://github.com/namanparikh11/lockverity/releases/download/checkpoint-v2.1.1-public-release/Lockverity-2.1.1-SHA256SUMS.txt)
 attached to the GitHub Release.
+
+### Previous v2.1.1 release (historical)
+
+The v2.1.1 release remains on the
+``checkpoint-v2.1.1-public-release`` tag with all six
+original assets. v2.1.2 is a code-only hotfix on top of
+v2.1.1; the v2.1.1 binaries are not republished.
+
+| Asset | SHA-256 | Size |
+| --- | --- | --- |
+| `Lockverity-2.1.1-windows-x64-setup.exe` | `5347d891db67b7f1e6f4c2d218867d1791945dcbef0dbb144793fdc10d631596` | 31,136,333 bytes |
+| `Lockverity-2.1.1-windows-x64-portable.zip` | `f0a8447bf7f2e786221d5987b6680a9b5864a197d02ba9dc903d1ff7c9536393` | 56,110,792 bytes |
 
 ### Previous v2.1.0 release (historical)
 

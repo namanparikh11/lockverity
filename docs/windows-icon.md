@@ -105,7 +105,7 @@ Name: "{group}\{#MyAppDisplayName}"; \
   same brand icon the launcher EXE shows in
   File Explorer.
 
-## v2.1.0 / v2.1.1 regression fixed by v2.1.2
+## v2.1.0 / v2.1.1 regression fixed by v2.1.2 (published 2026-08-06)
 
 The v2.1.0 / v2.1.1 ``UninstallDisplayIcon`` was:
 
@@ -125,7 +125,9 @@ Two defects:
 
 v2.1.2 fixes the path to
 ``{app}\app\Lockverity.exe,0`` and rebuilds the
-canonical ICO with the full size set.
+canonical ICO with the full size set. The v2.1.2
+release is published on
+``checkpoint-v2.1.2-public-release``.
 
 ## How the icon ends up in the PyInstaller launcher
 

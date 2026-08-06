@@ -5,15 +5,16 @@ follow [Semantic Versioning](https://semver.org/). Lockverity is
 pre-1.0 in the sense that the public API may evolve; the
 underlying data model and Alembic migrations are stable.
 
-## v2.1.2 — Windows application icon and signing readiness
+## v2.1.2 — Windows application icon and signing readiness (published 2026-08-06)
 
 A narrow Windows-only hotfix that fixes the **Settings →
 Installed apps** icon (the registry ``DisplayIcon`` value the
 Windows shell renders) and prepares the build for a future
 trusted Authenticode signer. The hotfix is *not* a feature
-release and ships no signed binaries. v2.1.1 is the current
-public release; v2.1.0 remains the previous public release;
-both are unchanged on disk and are not re-published.
+release and ships no signed binaries. v2.1.1 is the previous
+public release; v2.1.0 is the release before that; both
+remain on their original tags with all six assets
+unchanged and are not re-published.
 
 ### Icon regression fixed
 

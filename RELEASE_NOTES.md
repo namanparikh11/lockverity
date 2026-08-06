@@ -29,7 +29,7 @@ The product is built around three guarantees:
   dependency graph is reported as `partial`, never
   `complete`.
 
-## Status — v2.1.1 public release (current)
+## Status — v2.1.1 public release (previous)
 
 The current **published** release is **Lockverity
 v2.1.1**, on the annotated tag
@@ -102,16 +102,19 @@ What v2.1.1 does **not** do (preserved contracts):
   ``Unknown publisher`` or SmartScreen warnings.
   Verify the SHA-256 hash before installing.
 
-## Status — v2.1.2 (in development)
+## Status — v2.1.2 public release (current)
 
-A narrow Windows-only hotfix is in development on
-``hotfix/v2.1.2-windows-icon-signing-readiness``.
-v2.1.1 remains the **current** published release;
-v2.1.0 remains the previous published release;
-both are unchanged. v2.1.2 is **not** published
-yet.
+The current **published** release is **Lockverity v2.1.2**,
+on the annotated tag
+``checkpoint-v2.1.2-public-release``
+(2026-08-06). The v2.1.2 hotfix is a narrow Windows-only
+correction plus Authenticode signing-readiness infrastructure.
+v2.1.1 remains on the
+``checkpoint-v2.1.1-public-release`` tag; v2.1.0
+remains on ``checkpoint-v2.1.0-public-release``.
+Neither is re-published or replaced.
 
-What v2.1.2 will change:
+What v2.1.2 fixes:
 
 - **Settings → Installed apps shows the Lockverity
   icon.** The v2.1.0 and v2.1.1 installers declared
@@ -146,22 +149,19 @@ What v2.1.2 will change:
   build is unchanged: still functional, still
   unsigned, no code-signing integration.
 
-What v2.1.2 will **not** claim:
+What v2.1.2 does **not** do (preserved contracts):
 
-- v2.1.2 will **not** add a code signature. No
-  Authenticode certificate is procured, no signing
-  provider is contacted, no PFX is bundled, and
-  no self-signed production certificate is
-  generated. The hotfix is *infrastructure*, not
-  an integration. A signed v2.1.2 binary
-  requires a future trusted provider to be
-  configured at build time.
-- v2.1.2 will not change the v2.1.0 or v2.1.1
+- v2.1.2 does **not** add a code signature. The
+  Windows build remains unsigned; operators may
+  see ``Unknown publisher`` or SmartScreen
+  warnings. Verify the SHA-256 hash before
+  installing.
+- v2.1.2 does not change the v2.1.0 or v2.1.1
   release assets. Both tags and their six assets
   each remain unchanged and continue to resolve
   from the original release URLs.
-- v2.1.2 will not claim private-repository support
-  and will not claim the Windows build is
+- v2.1.2 does not claim private-repository support
+  and does not claim the Windows build is
   code-signed.
 
 ## Status — v2.1.0 local-first release (historical)
