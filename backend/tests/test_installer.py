@@ -44,7 +44,7 @@ APPROVED_FAVICON_ICO = REPO_ROOT / "frontend" / "public" / "favicon.ico"
 DOCS_FILE = REPO_ROOT / "docs" / "windows-installer.md"
 
 STABLE_APP_ID = "{E5B0C0F4-7C42-4D6A-9B17-1A2B3C4D5E6F}"
-APP_VERSION = "2.1.1"
+APP_VERSION = "2.1.2"
 
 # In the new provenance design, the build script captures
 # the installer build's current ``git rev-parse HEAD`` at
@@ -111,10 +111,10 @@ class TestInstallerSourceContract:
             "MyAppName must be defined as 'Lockverity'"
         )
 
-    def test_app_version_2_1_1(self) -> None:
+    def test_app_version_2_1_2(self) -> None:
         text = _iss_text()
-        assert re.search(r'#define\s+MyAppVersion\s+"2\.1\.1"', text), (
-            "MyAppVersion must be the v2.1.1 accepted version"
+        assert re.search(r'#define\s+MyAppVersion\s+"2\.1\.2"', text), (
+            "MyAppVersion must be the v2.1.2 accepted version"
         )
         assert re.search(r"AppVersion=\{#MyAppVersion\}", text), (
             "AppVersion must reference MyAppVersion"
@@ -291,6 +291,125 @@ class TestInstallerSourceContract:
             "Installer must use the approved favicon-exe.ico as its icon"
         )
         assert APPROVED_ICON.is_file(), f"Approved icon missing: {APPROVED_ICON}"
+
+    def test_uninstall_display_icon_points_at_installed_payload(self) -> None:
+        """The ``UninstallDisplayIcon`` registry value must point at
+        the **actual installed** graphical launcher
+        (``{app}\\app\\Lockverity.exe`` -- the inner ``app\\``
+        payload directory, not the install root) and must
+        include an explicit ``,0`` icon index so the Windows
+        shell reads the Lockverity brand icon.
+
+        Regression: v2.1.0 and v2.1.1 declared
+        ``UninstallDisplayIcon={app}\\{#MyAppExeName}`` (no
+        payload subdir, no icon index). The bare ``{app}``
+        path pointed at a file that does not exist (the
+        launcher is installed under ``{app}\\app\\``), so
+        Windows Settings -> Installed apps showed the
+        generic application icon. v2.1.2 fixes the path and
+        the icon index.
+        """
+        text = _iss_text()
+        match = re.search(
+            r"^\s*UninstallDisplayIcon\s*=\s*(.+?)\s*$",
+            text,
+            re.MULTILINE,
+        )
+        assert match is not None, "Installer must declare UninstallDisplayIcon in [Setup]"
+        value = match.group(1)
+        assert "{app}" in value, (
+            f"UninstallDisplayIcon must use the {{app}} constant, got: {value!r}"
+        )
+        # Must include the payload subdir (either via the
+        # ``{#MyAppPayloadDir}`` define or the literal
+        # ``app\\``). A bare ``{app}\\{#MyAppExeName}``
+        # would point at a file that does not exist.
+        assert "{#MyAppPayloadDir}" in value or "app\\" in value, (
+            f"UninstallDisplayIcon must include the inner {{app}}\\app\\ "
+            f"subdirectory (the actual install location of Lockverity.exe); got: {value!r}"
+        )
+        # Must include the actual exe name.
+        assert "{#MyAppExeName}" in value, (
+            f"UninstallDisplayIcon must reference {{#MyAppExeName}} (Lockverity.exe); got: {value!r}"
+        )
+        # Must include an explicit icon index. The v2.1.0 /
+        # v2.1.1 regression was the missing ``,0`` suffix
+        # which caused the shell to fall back to the generic
+        # icon for some user accounts.
+        assert ",0" in value, (
+            f"UninstallDisplayIcon must include an explicit icon index ',0' so the "
+            f"Windows shell reads the Lockverity brand icon (the first icon group "
+            f"from the PE); got: {value!r}"
+        )
+
+    def test_setup_icon_file_canonical(self) -> None:
+        """The ``SetupIconFile`` directive must point at the
+        canonical Lockverity ICO that has the full
+        ``{16, 24, 32, 48, 64, 128, 256}`` Windows shell
+        size set. A truncated ICO (only 16/32/48/256) causes
+        the Windows shell to fall back to the generic
+        application icon for 24/64/128 queries.
+        """
+        text = _iss_text()
+        match = re.search(
+            r"^\s*SetupIconFile\s*=\s*(.+?)\s*$",
+            text,
+            re.MULTILINE,
+        )
+        assert match is not None, "Installer must declare SetupIconFile in [Setup]"
+        value = match.group(1)
+        assert value.endswith("favicon-exe.ico"), (
+            f"SetupIconFile must point at the canonical Lockverity ICO "
+            f"favicon-exe.ico; got: {value!r}"
+        )
+        # The file must exist on disk.
+        assert APPROVED_ICON.is_file(), f"Canonical ICO missing: {APPROVED_ICON}"
+        # The file must be a valid ICO with the full
+        # canonical size set. We assert this in-process by
+        # reading the ICO header (no Pillow dependency in
+        # the installer tests).
+        import struct
+
+        data = APPROVED_ICON.read_bytes()
+        assert data[:4] == b"\x00\x00\x01\x00", (
+            f"{APPROVED_ICON} is not a valid ICO file (magic mismatch)"
+        )
+        count = struct.unpack_from("<H", data, 4)[0]
+        sizes: set[int] = set()
+        for index in range(count):
+            offset = 6 + 16 * index
+            w = data[offset]
+            _h = data[offset + 1]
+            sizes.add(w if w else 256)
+        # Strip duplicates from height (square sizes).
+        canonical = {16, 24, 32, 48, 64, 128, 256}
+        assert canonical.issubset(sizes), (
+            f"Canonical ICO is missing sizes: {canonical - sizes}; "
+            f"the Windows shell will fall back to the generic icon."
+        )
+
+    def test_uses_approved_lockverity_icon_does_not_invent_uninstalliconfile(self) -> None:
+        """Regression: the v2.1.2 spec draft mentioned
+        ``UninstallIconFile=<canonical ICO>`` but Inno Setup
+        6.7.3 has no such [Setup] directive. The uninstaller
+        EXE icon is inherited from ``SetupIconFile`` in
+        Inno Setup 6.7.3. The installer source must not
+        invent a non-existent directive that the compiler
+        would reject with ``Unrecognized [Setup] section
+        directive "UninstallIconFile"``.
+        """
+        text = _iss_text()
+        # Strip comment lines so explanatory prose in the
+        # .iss does not trip the assertion.
+        code_lines = [
+            line for line in text.splitlines() if line.strip() and not line.lstrip().startswith(";")
+        ]
+        code_text = "\n".join(code_lines)
+        assert "UninstallIconFile" not in code_text, (
+            "Installer source must not declare an UninstallIconFile directive; "
+            "Inno Setup 6.7.3 does not recognise that name. The uninstaller EXE icon "
+            "is inherited from SetupIconFile."
+        )
 
     def test_creates_start_menu_shortcut(self) -> None:
         text = _iss_text()

@@ -5,6 +5,13 @@ point. It:
 
   1. Verifies Windows x64 and the supported Python
      version.
+
+The v2.1.2 hotfix re-points the default portable
+filename at ``Lockverity-2.1.2-windows-x64-portable``
+and the build output directory at
+``build/packaging/Lockverity-2.1.2-windows-x64-portable.zip``.
+The v2.1.1 portable is preserved on disk and is not
+rebuilt by this script.
   2. Verifies the build dependencies (PyInstaller,
      pip-licenses) are installed in the calling
      virtual environment.
@@ -20,7 +27,7 @@ point. It:
   7. Generates ``BUILD-MANIFEST.json``.
   8. Generates ``SHA256SUMS.txt``.
   9. Zips the portable directory into
-     ``dist/windows/Lockverity-2.1.1-windows-x64-portable.zip``.
+     ``dist/windows/Lockverity-2.1.2-windows-x64-portable.zip``.
  10. Runs the packaged smoke tests against the
      generated ZIP (unless ``--skip-smoke``).
  11. Emits a structured JSON report on stdout
@@ -71,7 +78,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 BACKEND_ROOT = REPO_ROOT / "backend"
 PYINSTALLER_DIR = BACKEND_ROOT / "pyinstaller"
 DEFAULT_OUTPUT_DIR = REPO_ROOT / "build" / "packaging"
-DEFAULT_PORTABLE_NAME = "Lockverity-2.1.1-windows-x64-portable"
+DEFAULT_PORTABLE_NAME = "Lockverity-2.1.2-windows-x64-portable"
 PORTABLE_ZIP_NAME = f"{DEFAULT_PORTABLE_NAME}.zip"
 
 # Source tree roots that are bundled into the portable

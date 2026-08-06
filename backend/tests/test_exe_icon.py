@@ -1,23 +1,27 @@
-"""Tests for the v2.1 Part B3A packaging-derivative ICO.
+"""Tests for the v2.1.2 canonical Windows ICO.
 
-The approved ``frontend/public/favicon.ico`` is the
-brand-board web favicon; it contains only the
+The approved brand asset is the
+``frontend/public/favicon-source.png`` ``1024x1024``
+RGBA source. The brand-board web favicon at
+``frontend/public/favicon.ico`` contains the
 ``16x16``, ``32x32`` and ``48x48`` entries the
-browser needs. The Windows executable resource also
-needs a ``256x256`` entry to render correctly at high
-DPI.
-
-The derivative ICO at
+browser needs. The canonical Windows ICO at
 ``backend/pyinstaller/favicon-exe.ico`` is a
-mechanical re-packaging of the approved web favicon's
-small entries plus a Lanczos downscale of the
-approved 1024x1024 PNG source to 256x256. The
-approved brand assets are not modified.
+mechanical re-packaging of the approved source:
+
+  - 16, 32, 48 entries are lifted from the
+    hand-tuned brand-favicon (so the Windows shell
+    shows the exact same glyph the browser does);
+  - 24, 64, 128, 256 entries are Pillow Lanczos
+    downscales of the approved 1024x1024 PNG.
+
+The approved brand assets are never modified.
 
 The tests in this module verify:
 
   1. The derivative file exists and is a valid ICO.
-  2. The derivative has ``16/32/48/256`` entries.
+  2. The derivative has the full canonical size set
+     ``{16, 24, 32, 48, 64, 128, 256}``.
   3. The approved web favicon is unchanged (the
      derivative is a *copy*, not a re-render).
   4. The 256x256 entry is a PNG payload (the
@@ -102,16 +106,44 @@ class TestApprovedFaviconUnchanged:
 
 
 class TestDerivativeIcoStructure:
-    """The derivative ICO has the required 16/32/48/256 entries."""
+    """The derivative ICO has the full canonical Windows size set."""
 
     def test_derivative_is_valid_ico(self, regenerated_derivative: Path) -> None:
         data = regenerated_derivative.read_bytes()
         assert data[:4] == b"\x00\x00\x01\x00"
 
-    def test_derivative_has_required_sizes(self, regenerated_derivative: Path) -> None:
+    def test_derivative_has_canonical_size_set(self, regenerated_derivative: Path) -> None:
+        """The canonical Windows size set is ``{16, 24, 32, 48, 64, 128, 256}``.
+
+        The Windows shell queries these sizes (and only
+        these sizes) when rendering the application
+        icon for the taskbar, Start tile, Installed
+        apps list, File Explorer and the uninstaller
+        UI. A missing entry causes the shell to fall
+        back to the generic application icon, which is
+        the regression that v2.1.2 fixes. The set is
+        ``{16, 24, 32, 48, 64, 128, 256}`` -- the union
+        of every shell size Windows 10/11 queries.
+        """
         data = regenerated_derivative.read_bytes()
         sizes = {entry[0] for entry in _parse_ico_sizes(data)}
-        assert sizes == {16, 32, 48, 256}
+        assert sizes == {16, 24, 32, 48, 64, 128, 256}, (
+            f"Canonical Windows ICO size set mismatch: {sorted(sizes)}; "
+            "the Windows shell will fall back to the generic "
+            "application icon for any missing size."
+        )
+
+    def test_derivative_superset_size(self, regenerated_derivative: Path) -> None:
+        """Convenience assertion: every size in the documented
+        canonical set is present (defence-in-depth for
+        the superset-relation check above)."""
+        data = regenerated_derivative.read_bytes()
+        sizes = {entry[0] for entry in _parse_ico_sizes(data)}
+        for required in (16, 24, 32, 48, 64, 128, 256):
+            assert required in sizes, (
+                f"Canonical Windows ICO is missing the {required}x{required} entry; "
+                "the Windows shell will fall back to the generic application icon."
+            )
 
     def test_derivative_256_entry_is_png(self, regenerated_derivative: Path) -> None:
         """The 256x256 entry is a PNG payload.

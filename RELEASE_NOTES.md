@@ -102,6 +102,68 @@ What v2.1.1 does **not** do (preserved contracts):
   ``Unknown publisher`` or SmartScreen warnings.
   Verify the SHA-256 hash before installing.
 
+## Status — v2.1.2 (in development)
+
+A narrow Windows-only hotfix is in development on
+``hotfix/v2.1.2-windows-icon-signing-readiness``.
+v2.1.1 remains the **current** published release;
+v2.1.0 remains the previous published release;
+both are unchanged. v2.1.2 is **not** published
+yet.
+
+What v2.1.2 will change:
+
+- **Settings → Installed apps shows the Lockverity
+  icon.** The v2.1.0 and v2.1.1 installers declared
+  ``UninstallDisplayIcon={app}\Lockverity.exe`` --
+  a path that does not exist on disk (the launcher
+  is installed under ``{app}\app\``) and that
+  omitted the explicit ``,0`` icon index. v2.1.2
+  fixes the path to ``{app}\app\Lockverity.exe,0``
+  and rebuilds the canonical Windows ICO with the
+  full size set the Windows shell queries
+  (16/24/32/48/64/128/256).
+- **Consistent installer, executable, shortcut and
+  uninstaller branding.** The same canonical ICO is
+  used as ``SetupIconFile``, bundled at the
+  install root, and referenced by the Start Menu
+  and desktop shortcuts via the ``IconFilename``
+  directive. The uninstaller EXE icon is inherited
+  from ``SetupIconFile`` (Inno Setup 6.7.3
+  contract).
+- **Authenticode signing-readiness hooks.** A
+  **disabled-by-default** ``_authenticode_sign.py``
+  helper exposes the documented env-var contract
+  for a future trusted Authenticode provider
+  (``LOCKVERITY_SIGNTOOL_PATH``,
+  ``LOCKVERITY_SIGNTOOL_PFX``,
+  ``LOCKVERITY_SIGNTOOL_PFX_PASSWORD``,
+  ``LOCKVERITY_SIGNTOOL_TIMESTAMP_URL``, ...). The
+  helper signs ``Lockverity.exe`` ->
+  ``lockverity-cli.exe`` -> ``unins000.exe`` ->
+  installer EXE, with SHA-256 and RFC 3161
+  timestamping. When all env vars are unset the
+  build is unchanged: still functional, still
+  unsigned, no code-signing integration.
+
+What v2.1.2 will **not** claim:
+
+- v2.1.2 will **not** add a code signature. No
+  Authenticode certificate is procured, no signing
+  provider is contacted, no PFX is bundled, and
+  no self-signed production certificate is
+  generated. The hotfix is *infrastructure*, not
+  an integration. A signed v2.1.2 binary
+  requires a future trusted provider to be
+  configured at build time.
+- v2.1.2 will not change the v2.1.0 or v2.1.1
+  release assets. Both tags and their six assets
+  each remain unchanged and continue to resolve
+  from the original release URLs.
+- v2.1.2 will not claim private-repository support
+  and will not claim the Windows build is
+  code-signed.
+
 ## Status — v2.1.0 local-first release (historical)
 
 The repository is a **local-first release**, not a production

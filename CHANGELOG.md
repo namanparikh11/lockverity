@@ -5,6 +5,125 @@ follow [Semantic Versioning](https://semver.org/). Lockverity is
 pre-1.0 in the sense that the public API may evolve; the
 underlying data model and Alembic migrations are stable.
 
+## v2.1.2 — Windows application icon and signing readiness
+
+A narrow Windows-only hotfix that fixes the **Settings →
+Installed apps** icon (the registry ``DisplayIcon`` value the
+Windows shell renders) and prepares the build for a future
+trusted Authenticode signer. The hotfix is *not* a feature
+release and ships no signed binaries. v2.1.1 is the current
+public release; v2.1.0 remains the previous public release;
+both are unchanged on disk and are not re-published.
+
+### Icon regression fixed
+
+The v2.1.0 and v2.1.1 installers declared
+``UninstallDisplayIcon={app}\Lockverity.exe`` (no payload
+subdir, no icon index). Two defects:
+
+1. The path pointed at a file that does not exist on disk
+   because the launcher is installed under ``{app}\app\``
+   (the inner payload subdir, not the install root). The
+   Windows shell silently fell back to the generic
+   application icon.
+2. The directive did not include an explicit ``,0`` icon
+   index, so some user accounts rendered the wrong icon
+   group from the PE.
+
+v2.1.2 fixes both: the directive now reads
+``{app}\app\Lockverity.exe,0`` and the underlying ICO has
+the full canonical size set.
+
+### Canonical Windows ICO (16/24/32/48/64/128/256)
+
+The canonical Windows ICO at
+``backend/pyinstaller/favicon-exe.ico`` is regenerated
+from the approved brand assets
+(``frontend/public/favicon-source.png`` 1024×1024 RGBA
+plus the hand-tuned 16/32/48 brand-favicon entries).
+The new entry set covers every size the documented
+Windows 10/11 shell queries — taskbar, Start tile,
+Installed apps, File Explorer, uninstaller UI — so
+the shell never falls back to the generic icon for a
+missing size.
+
+### Authenticode signing readiness hooks
+
+Disabled by default. The v2.1.2 hotfix ships the
+**infrastructure** to sign the Lockverity Windows
+binaries (``Lockverity.exe``, ``lockverity-cli.exe``,
+``unins000.exe``, the final installer EXE) once a
+trusted Authenticode certificate is provisioned via
+the documented environment variables:
+
+- ``LOCKVERITY_SIGNTOOL_PATH``
+- ``LOCKVERITY_SIGNTOOL_PFX``
+- ``LOCKVERITY_SIGNTOOL_PFX_PASSWORD``
+- ``LOCKVERITY_SIGNTOOL_TIMESTAMP_URL``
+- ``LOCKVERITY_SIGNTOOL_DESCRIPTION``
+- ``LOCKVERITY_SIGNTOOL_URL``
+
+When all env vars are unset the build remains
+functional and unsigned. No certificate material is
+tracked, no PFX is bundled, no private key is
+committed, and no self-signed production certificate
+is generated. The release remains unsigned until an
+operator explicitly enables the hooks by setting the
+documented env vars.
+
+### Signing approach (when enabled)
+
+SHA-256 + RFC 3161 timestamping. The default
+timestamp authority is ``http://timestamp.digicert.com``.
+The signing helper signs ``Lockverity.exe`` first,
+then ``lockverity-cli.exe``, then ``unins000.exe``,
+then the final installer EXE (the order matters
+because the counter-signature chain anchors on the
+first sign and later signs reference it). After
+signing, ``signtool verify /pa`` confirms a single
+valid signature on each file.
+
+### Files changed
+
+- ``backend/scripts/generate_exe_icon.py`` — produce
+  the canonical 7-size set.
+- ``backend/tests/test_exe_icon.py`` — assert the full
+  canonical size set.
+- ``backend/pyinstaller/lockverity.spec`` — point
+  ``icon=`` at the canonical ICO; expanded
+  explanatory comment.
+- ``backend/installer/lockverity.iss`` — bump
+  ``MyAppVersion`` to ``2.1.2``; fix
+  ``UninstallDisplayIcon`` to ``{app}\app\Lockverity.exe,0``.
+- ``backend/scripts/build_windows_installer.py`` — bump
+  ``APP_VERSION`` to ``2.1.2``, payload name to
+  ``Lockverity-2.1.2-windows-x64-portable``.
+- ``backend/scripts/build_windows_portable.py`` — bump
+  default portable name to ``Lockverity-2.1.2-windows-x64-portable``.
+- ``backend/app/_version.py`` — bump to ``2.1.2``.
+- ``backend/scripts/_authenticode_sign.py`` — **new**:
+  disabled-by-default signing readiness helper.
+- ``backend/tests/test_signing_readiness.py`` — **new**:
+  16 deterministic tests for the signing hooks,
+  certificate-material guard, and password-leak guard.
+
+### What v2.1.2 does **not** claim
+
+- **The release is not signed.** The signing hooks are
+  *infrastructure*, not an integration. A signed
+  v2.1.2 binary requires a future trusted Authenticode
+  provider to be configured at build time.
+- **The release is not a code-signing integration.**
+  No certificate is procured, no signing provider is
+  contacted, no PFX is bundled.
+- **v2.1.1 and v2.1.0 are unchanged.** The v2.1.0
+  release tag, release body, and six release assets
+  remain on ``checkpoint-v2.1.0-public-release``;
+  the v2.1.1 release tag, release body, and six
+  release assets remain on
+  ``checkpoint-v2.1.1-public-release``. Neither is
+  re-published or replaced.
+
 ## v2.1.1 — Public-repository scan intake and error taxonomy
 
 A targeted hotfix for the v2.1.0 public-repository scan

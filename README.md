@@ -15,24 +15,56 @@ an explicit omission marker.
 
 ## Current release
 
-**Lockverity v2.1.1** — Hotfix release for the public-repository
-scan intake. The Windows x64 installer, Windows x64 portable
-package, single-port production runtime, cross-platform local
-runtime CLI, original brand assets, and concise About page are
-unchanged from v2.1.0; this hotfix is a code-only correction
-plus an actionable error taxonomy and a repository-intake
-consistency closure. The published v2.1.0 release assets remain
-in place under the original ``checkpoint-v2.1.0-public-release``
-tag and continue to resolve from the original release URL.
+**Lockverity v2.1.2** — Narrow Windows-only hotfix for the
+Settings → Installed apps icon and signing-readiness hooks.
+The hotfix is in development on
+``hotfix/v2.1.2-windows-icon-signing-readiness``; the v2.1.2
+GitHub release is **not** published yet. v2.1.1 remains the
+**current published** release and continues to resolve from
+its GitHub Release URL; v2.1.0 remains the previous published
+release. Neither is republished.
 
 | Field | Value |
 | --- | --- |
-| Version | `2.1.1` |
-| Release tag | [`checkpoint-v2.1.1-public-release`](https://github.com/namanparikh11/lockverity/releases/tag/checkpoint-v2.1.1-public-release) |
-| Published | 2026-08-04 |
-| Source commit | `925d152fe72cacdfee9d4519058946df4b86b214` |
-| Latest release | https://github.com/namanparikh11/lockverity/releases/latest |
-| Previous release | [`checkpoint-v2.1.0-public-release`](https://github.com/namanparikh11/lockverity/releases/tag/checkpoint-v2.1.0-public-release) |
+| Version | `2.1.2` |
+| In-tree branch | [`hotfix/v2.1.2-windows-icon-signing-readiness`](../../tree/hotfix/v2.1.2-windows-icon-signing-readiness) |
+| Status | In development (not yet tagged or published) |
+| Latest published release | https://github.com/namanparikh11/lockverity/releases/latest |
+| Current published release | [`checkpoint-v2.1.1-public-release`](https://github.com/namanparikh11/lockverity/releases/tag/checkpoint-v2.1.1-public-release) (2026-08-04) |
+| Previous published release | [`checkpoint-v2.1.0-public-release`](https://github.com/namanparikh11/lockverity/releases/tag/checkpoint-v2.1.0-public-release) |
+
+What v2.1.2 will change (when published):
+
+- **Settings → Installed apps shows the Lockverity icon.**
+  v2.1.0 and v2.1.1 declared
+  ``UninstallDisplayIcon={app}\Lockverity.exe`` -- a path
+  that does not exist on disk (the launcher is installed
+  under ``{app}\app\``) and that omitted the explicit
+  ``,0`` icon index. v2.1.2 fixes the path to
+  ``{app}\app\Lockverity.exe,0`` and rebuilds the
+  canonical Windows ICO with the full size set the
+  Windows shell queries (16/24/32/48/64/128/256).
+- **Consistent installer, executable, shortcut and
+  uninstaller branding.** The same canonical ICO is
+  used as ``SetupIconFile``, bundled at the install
+  root, and referenced by the Start Menu and desktop
+  shortcuts via the ``IconFilename`` directive.
+- **Authenticode signing-readiness hooks.** A
+  disabled-by-default helper
+  (``backend/scripts/_authenticode_sign.py``) exposes
+  the documented env-var contract for a future
+  trusted Authenticode provider. When all env vars
+  are unset the build is unchanged: still functional,
+  still unsigned, no code-signing integration. v2.1.2
+  is *infrastructure*, not an integration; a signed
+  v2.1.2 binary requires a future trusted provider to
+  be configured at build time.
+
+What v2.1.2 will **not** claim: see the
+[v2.1.1 release notes](RELEASE_NOTES.md#status--v212-in-development)
+for the full non-claims list (no signed binaries, no
+private-repository support, no republish of v2.1.0 or
+v2.1.1).
 
 ## Download and install
 

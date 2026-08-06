@@ -70,15 +70,19 @@ FROZEN_BUNDLE_DATA: list[tuple[str, str]] = [
     # at launch so the web UI can serve the brand
     # favicon unchanged.
     (str(REPO_ROOT / "frontend" / "public" / "favicon.ico"), "favicon.ico"),
-    # The packaging-derivative ICO (16/32/48/256)
+    # The canonical Windows ICO (16/24/32/48/64/128/256)
     # is bundled alongside the approved ICO for
-    # future Windows shell integrations. It is a
+    # Windows shell integrations. It is a mechanical
     # Lanczos downscale of the approved 1024x1024
-    # source PNG; the original brand assets are not
+    # source PNG plus the hand-tuned 16/32/48 brand
+    # entries; the original brand assets are not
     # modified. The PyInstaller ``icon=`` argument
-    # below uses this derivative so the executable
-    # resource has a 256x256 entry the Windows shell
-    # can render at high DPI.
+    # below uses this canonical ICO so the executable
+    # resource has the full set of sizes the Windows
+    # shell queries (16/24/32/48/64/128/256). Missing
+    # any of those sizes causes the shell to fall back
+    # to the generic application icon -- the regression
+    # v2.1.2 fixes.
     (str(BACKEND_ROOT / "pyinstaller" / "favicon-exe.ico"), "favicon-exe.ico"),
     # The brand PNG assets used by the launcher and
     # bundled for downstream components that need them.
@@ -210,15 +214,17 @@ exe = EXE(  # type: ignore[name-defined]  # noqa: F821
     # The approved application icon. The file is the
     # same ``favicon.ico`` the Part A brand board
     # shipped. PyInstaller embeds it as the Windows
-    # executable's icon resource. The derivative
-    # ``favicon-exe.ico`` (16/32/48/256) is the
-    # icon resource actually used here so the
+    # executable's icon resource. The canonical
+    # ``favicon-exe.ico`` (16/24/32/48/64/128/256) is
+    # the icon resource actually used here so the
     # Windows shell can render the executable at
-    # high DPI; the approved web favicon (16/32/48)
-    # is bundled at the frozen root for the
-    # single-port UI to serve. The conversion is a
-    # documented mechanical Lanczos downscale of
-    # the approved 1024x1024 source PNG; see
+    # every documented shell size (taskbar, Start,
+    # Installed apps, File Explorer, uninstaller UI).
+    # The approved web favicon (16/32/48) is bundled
+    # at the frozen root for the single-port UI to
+    # serve. The conversion is a documented mechanical
+    # Lanczos downscale of the approved 1024x1024
+    # source PNG; see
     # ``scripts/generate_exe_icon.py`` and
     # ``tests/test_exe_icon.py``.
     icon=str(BACKEND_ROOT / "pyinstaller" / "favicon-exe.ico"),

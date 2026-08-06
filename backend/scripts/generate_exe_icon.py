@@ -1,26 +1,38 @@
-"""Generate the v2.1 Part B3A executable icon (packaging derivative).
+"""Generate the v2.1.2 Windows executable icon (canonical packaging ICO).
 
-The approved ``frontend/public/favicon.ico`` is the
-brand-board web favicon and contains only the
-``16x16``, ``32x32`` and ``48x48`` entries the
-browser needs. The Windows executable resource
-*also* needs a ``256x256`` entry to render correctly
-in the Windows shell at high DPI. The brand assets
-themselves are not modified; the function generates
-a packaging-only ICO file at
-``backend/pyinstaller/favicon-exe.ico`` that
-re-packages the existing ``16/32/48`` entries plus a
-freshly-downscaled ``256x256`` entry sourced from
-the approved ``frontend/public/favicon-source.png``
-(``1024x1024``).
+The approved brand asset is the
+``frontend/public/favicon-source.png`` ``1024x1024``
+RGBA source. The brand-board web favicon at
+``frontend/public/favicon.ico`` contains only the
+``16x16``, ``32x32`` and ``48x48`` entries the browser
+needs. The canonical Windows ICO at
+``backend/pyinstaller/favicon-exe.ico`` re-packages
+those approved small entries plus a set of
+freshly-downscaled PNG entries sized for the Windows
+shell:
+
+  - 16x16   (Windows taskbar / small icon view)
+  - 24x24   (classic Windows desktop / Explorer toolbar)
+  - 32x32   (default Windows shell icon view)
+  - 48x48   (legacy / medium icon view)
+  - 64x64   (large icon view)
+  - 128x128 (extra-large icon view)
+  - 256x256 (Windows shell high-DPI / "Large Icons" view)
+
+Every non-approved size is a Pillow Lanczos downscale
+of the approved 1024x1024 source. The approved
+``frontend/public/favicon-source.png`` and the
+approved ``frontend/public/favicon.ico`` are never
+modified.
 
 The function is the single chokepoint for the
 mechanical ICO construction so a future maintainer can
 audit the conversion without re-deriving the math.
 
 The conversion is documented in
-``docs/windows-portable.md`` and is exercised by
-``tests/test_exe_icon.py``.
+``docs/windows-icon.md`` and is exercised by
+``tests/test_exe_icon.py`` and
+``tests/test_installer.py``.
 """
 
 from __future__ import annotations
@@ -35,6 +47,18 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 APPROVED_ICO = REPO_ROOT / "frontend" / "public" / "favicon.ico"
 APPROVED_PNG = REPO_ROOT / "frontend" / "public" / "favicon-source.png"
 DERIVATIVE_ICO = REPO_ROOT / "backend" / "pyinstaller" / "favicon-exe.ico"
+
+# The full canonical size set for the Windows ICO. These
+# are the sizes the Windows shell queries when rendering
+# the application icon (taskbar, Start tile, Installed
+# apps, File Explorer, etc.). The set covers every shell
+# size the documented Windows 10/11 shell requests
+# without a missing-entry fallback to the generic
+# application icon. All sizes are square; the source
+# 1024x1024 PNG is downscaled with the highest-quality
+# Pillow filter (LANCZOS) to preserve the brand geometry
+# and aspect ratio.
+CANONICAL_ICON_SIZES: tuple[int, ...] = (16, 24, 32, 48, 64, 128, 256)
 
 
 def _parse_ico(data: bytes) -> list[tuple[int, int, bytes]]:
@@ -137,37 +161,65 @@ def _png_to_png_ico_entry(png_bytes: bytes, target_size: int) -> tuple[int, int,
         return target_size, target_size, buffer.getvalue()
 
 
+def _approved_favicon_sizes(approved_ico: Path) -> set[int]:
+    """Return the set of square sizes present in the approved ICO.
+
+    The function is a thin helper used by
+    :func:`build_exe_icon` to decide which entries
+    can be lifted from the brand-favicon (16/32/48)
+    and which must be downscaled from the
+    1024x1024 PNG. The brand-favicon entries are
+    hand-tuned and identical to the ones the
+    browser serves; the PNG downscaled entries are
+    mechanical Lanczos outputs.
+    """
+    return {w for (w, _h, _raw) in _parse_ico(approved_ico.read_bytes())}
+
+
 def build_exe_icon(
     *,
     approved_ico: Path = APPROVED_ICO,
     approved_png: Path = APPROVED_PNG,
     derivative_ico: Path = DERIVATIVE_ICO,
+    sizes: tuple[int, ...] = CANONICAL_ICON_SIZES,
 ) -> Path:
     """Build ``derivative_ico`` from the approved sources.
 
     The function is the documented entry point. It
-    reads the approved web favicon (16/32/48), reads
-    the approved 1024x1024 PNG, downscales the PNG
-    to 256x256, and writes a single ICO file that
-    contains all four entries.
+    writes a single ICO file that contains every
+    size in ``sizes`` (default: the canonical
+    16/24/32/48/64/128/256 set the Windows shell
+    queries). For sizes present in the approved
+    web favicon the function lifts the brand-board
+    hand-tuned entry; for every other size it
+    Lanczos-downscales the approved 1024x1024 PNG.
+    The result is a single coherent set of brand
+    entries that all share the same geometry.
 
     The function is intentionally narrow: it does
-    not draw, recolor, or reinterpret the brand; the
-    256x256 entry is a Lanczos downscale of the
-    approved source pixels.
+    not draw, recolor, or reinterpret the brand;
+    every entry is a mechanical downscale of the
+    approved source pixels (or an exact copy of a
+    brand-favicon entry).
     """
     if not approved_ico.is_file():
         raise FileNotFoundError(f"approved ICO not found: {approved_ico}")
     if not approved_png.is_file():
         raise FileNotFoundError(f"approved PNG source not found: {approved_png}")
-    original_entries = _parse_ico(approved_ico.read_bytes())
-    small_entries = [(w, h, raw) for (w, h, raw) in original_entries if w < 256]
-    if not small_entries:
-        raise ValueError(f"approved ICO {approved_ico} has no < 256 entries; refusing to overwrite")
+    if not sizes:
+        raise ValueError("sizes must contain at least one entry")
+    for size in sizes:
+        if size < 1 or size > 256:
+            raise ValueError(f"size {size} is out of range (1..256)")
+    approved_entries = {w: (w, h, raw) for (w, h, raw) in _parse_ico(approved_ico.read_bytes())}
     png_bytes = approved_png.read_bytes()
-    large_entry = _png_to_png_ico_entry(png_bytes, 256)
-    all_entries = [*small_entries, large_entry]
-    ico_bytes = _build_ico(all_entries)
+    entries: list[tuple[int, int, bytes]] = []
+    for target_size in sizes:
+        if target_size in approved_entries:
+            entries.append(approved_entries[target_size])
+        else:
+            entries.append(_png_to_png_ico_entry(png_bytes, target_size))
+    ico_bytes = _build_ico(entries)
     derivative_ico.parent.mkdir(parents=True, exist_ok=True)
     derivative_ico.write_bytes(ico_bytes)
     return derivative_ico
