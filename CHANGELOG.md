@@ -9,11 +9,22 @@ underlying data model and Alembic migrations are stable.
 
 The hotfix was tagged and published as
 ``checkpoint-v2.1.2-public-release`` after a hash-alignment
-cycle that moved the tag from the docs-finalization HEAD
-``c76e8fe`` to the final main HEAD ``fe6ceec``. The published
-artifacts all carry ``fe6ceec`` as their
-``source_commit`` / ``installer_source_commit`` /
-``payload_source_commit`` field.
+cycle that walked the tag through ``c76e8fe`` (docs-finalization
+HEAD) → ``fe6ceec`` (first hash-alignment HEAD) → ``2aa8729``
+(final main HEAD). The published release tag, the
+GitHub release, and all six release assets are
+authoritatively attached to
+``2aa8729832ac94093966a67d2f3f76c0e2110d15``; the
+``BUILD-MANIFEST.json`` ``source_commit``, the
+``INSTALLER-MANIFEST.json`` ``installer_source_commit``, and
+the ``INSTALLER-MANIFEST.json`` ``payload_source_commit``
+field all carry ``2aa8729``. The moving of the tag between
+hash-alignment commits was a publication-cycle self-induced
+churn; later releases must not repeat it — see the
+release-process rule in ``docs/release-checklist.md``.
+Later README / CHANGELOG / install-document commits on
+``main`` after the tag do not change the published v2.1.2
+artefacts and do not require a rebuild.
 
 A narrow Windows-only hotfix that fixes the **Settings →
 Installed apps** icon (the registry ``DisplayIcon`` value the

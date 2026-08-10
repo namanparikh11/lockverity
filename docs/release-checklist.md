@@ -781,3 +781,105 @@ not perform that change.
   instructions, and the "What v2.1.0 does not include" list.
 - `CHANGELOG.md` — version history.
 - `RELEASE_NOTES.md` — reviewer-facing status.
+
+## 14. Release-process rule: artifact provenance is immutable
+
+The v2.1.1 and v2.1.2 publication cycles both produced
+self-induced churn: the public release tag was moved
+through one or more hash-alignment commits after the
+first build, the release assets were re-uploaded, and
+the README / CHANGELOG / install-document placeholders
+were edited to match the new hash. The result is three
+different "source commit" values describing one
+release (the manifest field, the README placeholder,
+and the release body), and a publication cycle that
+is harder to defend than a single immutable build.
+
+The rule below is binding for every release from
+v2.1.3 onward. Its purpose is to keep the published
+artefacts, the source-commit references, and the
+documentation all pointing at exactly one immutable
+commit per release.
+
+- **Finalize source and release documents before
+  tagging.** No README, CHANGELOG, ``RELEASE_NOTES``,
+  ``docs/install.md``, ``docs/release-checklist.md``,
+  or other tracked documentation edit that changes a
+  number (source commit, hash, version, published
+  date) is allowed after the public tag is created.
+  The release documentation is the *last* thing
+  edited before tagging, not the *first* thing
+  edited after tagging.
+- **Choose one immutable release source commit.** Pick
+  the final main HEAD that the release tag and the
+  release body will reference. The manifest
+  ``source_commit`` field, the README "Source commit"
+  placeholder, the release body, and the
+  ``INSTALLER-MANIFEST`` ``installer_source_commit`` /
+  ``payload_source_commit`` fields must all equal
+  that one commit. The release tag, the tag object,
+  the release body, and the published assets are
+  then permanently attached to that commit.
+- **Build all artifacts from that commit.** Run
+  ``build_windows_portable.py`` and
+  ``build_windows_installer.py`` (and any future
+  package-format build) from a clean worktree whose
+  HEAD equals the chosen release source commit. The
+  embedded manifest ``source_commit`` is read from
+  ``git rev-parse HEAD`` at build time; any drift
+  between the manifest field and the build HEAD
+  fails the build.
+- **Create the public tag once.** Tag the merge
+  commit with a single ``git tag -a`` invocation
+  and push it with a single ``git push origin
+  refs/tags/<tag>``. Do not run ``git tag -d``,
+  ``git push origin :refs/tags/<tag>``, or
+  ``git push --force`` against a published tag.
+  Once ``releases/latest`` is bound to the tag, the
+  tag is permanent.
+- **Never move a published tag.** A published tag is
+  immutable. If a documentation change is needed
+  after publication, it lands on ``main`` as a
+  separate commit and is described in the README /
+  CHANGELOG as a later documentation update; the
+  tag, the release body, and the release assets are
+  never re-pointed.
+- **Never replace published release assets.** A new
+  release is a new tag + a new release id. Do not
+  delete an asset from a published release and
+  re-upload a different file under the same name.
+  The original SHA-256 in
+  ``Lockverity-<version>-SHA256SUMS.txt`` and the
+  per-asset digest in
+  ``Lockverity-<version>-windows-x64-portable-SHA256SUMS.txt``
+  bind the assets to the release they ship with.
+- **Later documentation commits on ``main`` are
+  allowed.** The README "Source commit" placeholder
+  and the CHANGELOG v2.1.2 narrative identify the
+  *release tag target / artifact source* commit;
+  this value does not need to equal the current
+  ``main`` HEAD after the release is published.
+  The release body, the manifest, the
+  ``SHA256SUMS.txt`` files, and the
+  ``INSTALLER-MANIFEST.json`` remain authoritative.
+  ``main`` may legitimately advance past the
+  release tag target; the published artefacts are
+  unchanged.
+- **Artifact hashes live in the release assets and
+  release body.** The canonical SHA-256 of every
+  artefact is in
+  ``Lockverity-<version>-SHA256SUMS.txt`` and
+  ``Lockverity-<version>-windows-x64-portable-SHA256SUMS.txt``
+  (uploaded to the release alongside the binaries),
+  the structured manifest, and the GitHub release
+  body. README and install-document placeholders
+  are descriptive aids, not the canonical record.
+- **Do not create a self-reference loop.** The chain
+  is one-directional: commit → build → manifest hash
+  → release asset → checksum file → release body.
+  A commit must never reference a hash that was
+  produced by a build that depended on a
+  documentation commit that came after the build
+  HEAD. The rule that closes the loop is "build
+  from the final source commit, then tag once,
+  then stop editing the source commit field."
