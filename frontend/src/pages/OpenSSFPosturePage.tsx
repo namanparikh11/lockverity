@@ -3,6 +3,10 @@ import { useParams } from "react-router";
 
 import { api } from "@/api/api";
 import { isNotImplemented } from "@/api/fallback";
+import {
+  providerWasDisabledByOperator,
+  useProviderObservation,
+} from "@/api/useProviderObservation";
 import type { OpenSSFCheck, PageMeta } from "@/api/types";
 import { DataCompletenessNotice } from "@/components/DataCompletenessNotice";
 import { EmptyState } from "@/components/EmptyState";
@@ -29,6 +33,11 @@ export function OpenSSFPosturePage() {
   const [error, setError] = useState<unknown>(null);
   const [checkId, setCheckId] = useState("");
   const [notImpl, setNotImpl] = useState(false);
+  const openssfObservation = useProviderObservation(sid, "openssf");
+  const openssfDisabled = providerWasDisabledByOperator(openssfObservation);
+  const openssfNotApplicable =
+    openssfObservation?.status === "not_requested" &&
+    openssfObservation.error_code === "not_applicable";
 
   useEffect(() => {
     setPage(1);
@@ -94,10 +103,22 @@ export function OpenSSFPosturePage() {
         <Skeleton rows={5} />
       ) : items.length === 0 ? (
         <EmptyState
-          title={notImpl ? "OpenSSF endpoint not exposed" : "No OpenSSF checks imported"}
+          title={
+            notImpl
+              ? "OpenSSF endpoint not exposed"
+              : openssfDisabled
+                ? "OpenSSF Scorecard was not requested"
+                : openssfNotApplicable
+                  ? "OpenSSF Scorecard is not applicable"
+                  : "No OpenSSF checks imported"
+          }
           description={
             notImpl
               ? "When the backend exposes an OpenSSF endpoint, this table will appear automatically."
+              : openssfDisabled
+                ? "OpenSSF Scorecard was disabled by the operator for this scan. No Scorecard request or cache lookup was made."
+                : openssfNotApplicable
+                  ? "OpenSSF Scorecard repository posture applies only to supported GitHub repositories, not archive uploads."
               : "No OpenSSF Scorecard observations are attached to this scan yet."
           }
         />

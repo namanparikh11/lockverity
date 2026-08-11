@@ -225,7 +225,7 @@ export function DiagnosticsPage() {
                   "Observed state",
                   "Cache state",
                   "Last attempt",
-                  "Last error code",
+                  "Outcome reason/code",
                 ]}
               >
                 {filteredProviders.map((p) => (
@@ -255,7 +255,9 @@ export function DiagnosticsPage() {
                       )}
                     </td>
                     <td className="table-cell font-mono text-xs text-ink-600">
-                      {p.last_error_code ?? "—"}
+                      {p.last_error_code === "disabled_by_operator"
+                        ? "Disabled by operator"
+                        : p.last_error_code ?? "—"}
                     </td>
                   </tr>
                 ))}

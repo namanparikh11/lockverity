@@ -3,10 +3,20 @@ import { Link, useNavigate } from "react-router";
 
 import { api } from "@/api/api";
 import { ApiClientError, categorizeError } from "@/api/client";
+import {
+  defaultExternalEvidenceProviderSelection,
+  providerSelectionPayload,
+} from "@/api/providerSelection";
 import { TERMINAL_SCAN_STATUSES } from "@/api/scanPolling";
-import type { Scan } from "@/api/types";
+import type {
+  ExternalEvidenceProviderSelection,
+  RepositorySourceType,
+  Scan,
+} from "@/api/types";
 import { ConfirmationDialog } from "@/components/ConfirmationDialog";
+import { DataCompletenessNotice } from "@/components/DataCompletenessNotice";
 import { ErrorState } from "@/components/ErrorState";
+import { ExternalEvidenceProviderSelector } from "@/components/ExternalEvidenceProviderSelector";
 
 /**
  * v1.6 scan execution controls.
@@ -55,6 +65,12 @@ export function ScanActions({
   const [pending, setPending] = useState<null | "start" | "cancel" | "rescan">(null);
   const [confirmCancel, setConfirmCancel] = useState(false);
   const [lastRescan, setLastRescan] = useState<{ scan_id: number } | null>(null);
+  const [repositorySourceType, setRepositorySourceType] =
+    useState<RepositorySourceType | null>(null);
+  const [providerSelection, setProviderSelection] =
+    useState<ExternalEvidenceProviderSelection>(
+      defaultExternalEvidenceProviderSelection
+    );
   // Synchronous guard for rapid duplicate clicks.
   // The ``pending`` state is React-asynchronous, so
   // two synchronous clicks can both pass the
@@ -69,6 +85,19 @@ export function ScanActions({
     setActionError(null);
   }, [refreshKey]);
 
+  useEffect(() => {
+    const controller = new AbortController();
+    api
+      .getRepository(scan.repository_id)
+      .then((repository) => {
+        if (!controller.signal.aborted) setRepositorySourceType(repository.source_type);
+      })
+      .catch(() => {
+        if (!controller.signal.aborted) setRepositorySourceType(null);
+      });
+    return () => controller.abort();
+  }, [scan.repository_id]);
+
   const actionErrorAction = actionError?.action ?? pending;
 
   const isTerminal = TERMINAL_SCAN_STATUSES.has(scan.status);
@@ -79,7 +108,7 @@ export function ScanActions({
     setActionError(null);
     setPending("start");
     try {
-      await api.runScan(scan.id);
+      await api.runScan(scan.id, providerSelectionPayload(providerSelection));
     } catch (err) {
       setActionError({ error: err, action: "start" });
     } finally {
@@ -124,7 +153,7 @@ export function ScanActions({
       // to the new workbench regardless, where the
       // reviewer can retry-start if needed.
       try {
-        await api.runScan(newScan.id);
+        await api.runScan(newScan.id, providerSelectionPayload(providerSelection));
       } catch (err) {
         // Partial success: the new scan exists but the
         // worker did not start it. The new workbench
@@ -142,6 +171,22 @@ export function ScanActions({
 
   return (
     <div className="space-y-2">
+      {scan.status === "queued" || isTerminal ? (
+        <ExternalEvidenceProviderSelector
+          idPrefix={`scan-${scan.id}-provider`}
+          value={providerSelection}
+          onChange={setProviderSelection}
+          openssfApplicable={repositorySourceType !== "uploaded_archive"}
+          disabled={pending !== null}
+        />
+      ) : null}
+      {isTerminal && repositorySourceType === "github" ? (
+        <DataCompletenessNotice
+          title="GitHub retrieval on rescan"
+          description="A rescan of this GitHub repository contacts GitHub to resolve and download the repository before analysis. This required retrieval is separate from the optional evidence providers above."
+          tone="muted"
+        />
+      ) : null}
       <div className="flex flex-wrap gap-2" data-testid="scan-actions">
         <ActionButton
           label="Start scan"

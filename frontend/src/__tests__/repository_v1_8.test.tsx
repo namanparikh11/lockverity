@@ -352,6 +352,7 @@ describe("repository v1.8 - rescan integration", () => {
         screen.getByTestId("repository-run-another-scan")
       ).toBeInTheDocument();
     });
+    fireEvent.click(screen.getByRole("checkbox", { name: /OSV/i }));
     fireEvent.click(screen.getByTestId("repository-run-another-scan"));
     await waitFor(() => {
       const rescanCall = fetchMock.mock.calls.find((c) =>
@@ -377,6 +378,13 @@ describe("repository v1.8 - rescan integration", () => {
         String(c[0]).match(/\/scans\/\d+\/run/)
       );
       expect(runCall).toBeTruthy();
+      expect(JSON.parse(String(runCall?.[1]?.body))).toEqual({
+        external_evidence_providers: {
+          osv: false,
+          deps_dev: true,
+          openssf: true,
+        },
+      });
     });
   });
 

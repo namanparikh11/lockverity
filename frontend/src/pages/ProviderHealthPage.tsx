@@ -168,6 +168,9 @@ export function ProviderHealthPage() {
                     {entry.redacted_failure_summary}
                   </p>
                 ) : null}
+                {entry.last_error_code === "disabled_by_operator" ? (
+                  <p className="mt-1 text-xs text-ink-500">Disabled by operator</p>
+                ) : null}
                 <p className="mt-1 text-xs text-ink-400">
                   observed across {entry.scans_with_observations} scans
                 </p>
@@ -208,7 +211,7 @@ export function ProviderHealthPage() {
           ) : (
             <>
               <ResponsiveTable
-                headers={["Provider", "Operation", "Status", "HTTP", "Records", "Last error", "Updated"]}
+                headers={["Provider", "Operation", "Status", "HTTP", "Records", "Outcome detail", "Updated"]}
               >
                 {observations.map((obs) => (
                   <tr key={obs.id} className="table-row">
@@ -227,7 +230,7 @@ export function ProviderHealthPage() {
                     </td>
                     <td className="table-cell max-w-md">
                       <p className="text-xs text-ink-500">
-                        {obs.error_summary ?? "—"}
+                        {providerObservationDetail(obs)}
                       </p>
                     </td>
                     <td className="table-cell text-xs text-ink-500">
@@ -245,6 +248,19 @@ export function ProviderHealthPage() {
       ) : null}
     </>
   );
+}
+
+function providerObservationDetail(observation: ProviderObservation): string {
+  if (observation.error_code === "disabled_by_operator") {
+    return "Disabled by operator";
+  }
+  if (observation.error_code === "not_applicable") {
+    return "Not applicable";
+  }
+  if (observation.error_code === "no_components") {
+    return "No applicable components";
+  }
+  return observation.error_summary ?? "—";
 }
 
 function rollupTone(status: ProviderStatus) {

@@ -377,6 +377,9 @@ describe("v1.6 scan workbench + execution controls", () => {
     );
 
     const startButton = await screen.findByTestId("scan-action-start");
+    fireEvent.click(
+      screen.getByRole("checkbox", { name: /OpenSSF Scorecard/i })
+    );
     await act(async () => {
       fireEvent.click(startButton);
     });
@@ -395,6 +398,13 @@ describe("v1.6 scan workbench + execution controls", () => {
       return url.endsWith("/api/v1/scans/12/run") && init?.method === "POST";
     });
     expect(runCalls.length).toBe(1);
+    expect(JSON.parse(String(runCalls[0][1]?.body))).toEqual({
+      external_evidence_providers: {
+        osv: true,
+        deps_dev: true,
+        openssf: false,
+      },
+    });
   });
 
   it("shows a confirmation dialog before cancelling an eligible scan", async () => {
@@ -515,6 +525,7 @@ describe("v1.6 scan workbench + execution controls", () => {
       { timeout: 3000 }
     );
     expect(rescanButton).toHaveTextContent(/run another scan/i);
+    fireEvent.click(screen.getByRole("checkbox", { name: /deps\.dev/i }));
     await act(async () => {
       fireEvent.click(rescanButton);
     });
@@ -532,6 +543,17 @@ describe("v1.6 scan workbench + execution controls", () => {
       return url.endsWith("/api/v1/scans/12") && init?.method !== undefined && init.method !== "GET";
     });
     expect(historicalMutations.length).toBe(0);
+    const runCall = fetchMock.mock.calls.find((args) => {
+      const url = String(args[0]);
+      return url.endsWith("/api/v1/scans/99/run");
+    });
+    expect(JSON.parse(String(runCall?.[1]?.body))).toEqual({
+      external_evidence_providers: {
+        osv: true,
+        deps_dev: false,
+        openssf: true,
+      },
+    });
   });
 
   it("renders the partial-success intake UX when intake succeeds but start fails", async () => {
@@ -630,6 +652,11 @@ describe("v1.6 scan workbench + execution controls", () => {
       fireEvent.change(urlInput, {
         target: { value: "https://github.com/octocat/hello-world" },
       });
+      fireEvent.click(
+        within(
+          screen.getByLabelText("Analyze public GitHub repository form")
+        ).getByRole("checkbox", { name: /OSV/i })
+      );
     });
     await act(async () => {
       fireEvent.click(submitButton);
@@ -655,6 +682,15 @@ describe("v1.6 scan workbench + execution controls", () => {
     });
     // The initial run + one retry = 2 calls to /run.
     expect(runCalls.length).toBe(2);
+    for (const call of runCalls) {
+      expect(JSON.parse(String(call[1]?.body))).toEqual({
+        external_evidence_providers: {
+          osv: false,
+          deps_dev: true,
+          openssf: true,
+        },
+      });
+    }
     // No new repository was created.
     const repoCalls = fetchMock.mock.calls.filter((args) => {
       const u = args[0] as unknown;

@@ -242,6 +242,17 @@ export interface ScanCreatePayload {
   requested_ref?: string;
 }
 
+export interface ExternalEvidenceProviderSelection {
+  osv: boolean;
+  deps_dev: boolean;
+  openssf: boolean;
+}
+
+export interface ScanRunPayload {
+  force?: boolean;
+  external_evidence_providers?: Partial<ExternalEvidenceProviderSelection>;
+}
+
 export interface ScanStage {
   id: number;
   scan_run_id: number;

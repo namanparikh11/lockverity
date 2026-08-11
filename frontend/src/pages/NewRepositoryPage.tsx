@@ -1,6 +1,6 @@
 import { Github, ShieldCheck } from "lucide-react";
 import { useState } from "react";
-import { useNavigate } from "react-router";
+import { Link, useNavigate } from "react-router";
 
 import { api } from "@/api/api";
 import { ApiClientError, categorizeError } from "@/api/client";
@@ -81,7 +81,7 @@ export function NewRepositoryPage() {
     <>
       <PageHeader
         title="Add repository"
-        description="Register a public GitHub repository for analysis. The URL is normalized to a canonical form and no code is fetched or executed."
+        description="Register a public GitHub repository for analysis. Lockverity normalizes the URL, retrieves the repository from GitHub, and treats its contents as data that is never executed."
         breadcrumbs={[
           { label: "Repositories", to: "/repositories" },
           { label: "New" },
@@ -214,9 +214,13 @@ export function NewRepositoryPage() {
           </div>
           <DataCompletenessNotice
             title="What happens next"
-            description="A repository is a database record. When the scan executor is enabled, queueing a scan will fetch the repository metadata, parse manifests, query providers, and write findings. None of this runs until you press 'Queue new scan' on the repository detail page."
+            description="Submitting this form immediately contacts GitHub to resolve repository metadata and download the requested repository tarball, then creates a queued scan. External evidence providers are not contacted until the queued scan is started, when the operator can select OSV, deps.dev, and OpenSSF Scorecard independently."
             tone="muted"
           />
+          <p className="px-1 text-xs text-ink-500">
+            See the <Link to="/privacy" className="link">Privacy policy</Link> for the
+            coordinates sent to GitHub and optional evidence providers.
+          </p>
         </aside>
       </div>
     </>

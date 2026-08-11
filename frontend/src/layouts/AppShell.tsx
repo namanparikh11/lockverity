@@ -12,7 +12,7 @@ import {
   X,
 } from "lucide-react";
 import { useEffect, useState } from "react";
-import { NavLink, Outlet } from "react-router";
+import { Link, NavLink, Outlet } from "react-router";
 
 import { api } from "@/api/api";
 import { LockveritySymbol } from "@/components/LockveritySymbol";
@@ -135,6 +135,11 @@ export function AppShell() {
             </p>
             <p className="mt-1 px-3 text-ink-400">
               Defensive only. Source archives are hostile.
+            </p>
+            <p className="mt-2 px-3">
+              <Link to="/privacy" className="link">
+                Privacy policy
+              </Link>
             </p>
           </div>
         </nav>

@@ -14,6 +14,7 @@ import { NewRepositoryPage } from "@/pages/NewRepositoryPage";
 import { NotFoundPage } from "@/pages/NotFoundPage";
 import { OpenSSFPosturePage } from "@/pages/OpenSSFPosturePage";
 import { ProviderHealthPage } from "@/pages/ProviderHealthPage";
+import { PrivacyPage } from "@/pages/PrivacyPage";
 import { RepositoriesPage } from "@/pages/RepositoriesPage";
 import { RepositoryComparePage } from "@/pages/RepositoryComparePage";
 import { RepositoryDetailsPage } from "@/pages/RepositoryDetailsPage";
@@ -33,6 +34,7 @@ export const router = createBrowserRouter([
       { path: "/analyze", element: <AnalyzePage /> },
       { path: "/demo", element: <DemoHomePage /> },
       { path: "/about", element: <AboutPage /> },
+      { path: "/privacy", element: <PrivacyPage /> },
 
       // Repositories
       { path: "/repositories", element: <RepositoriesPage /> },

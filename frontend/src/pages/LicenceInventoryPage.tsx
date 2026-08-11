@@ -3,6 +3,10 @@ import { useParams } from "react-router";
 
 import { api } from "@/api/api";
 import { isNotImplemented } from "@/api/fallback";
+import {
+  providerWasDisabledByOperator,
+  useProviderObservation,
+} from "@/api/useProviderObservation";
 import type {
   ComponentEnrichment,
   LicenceAssertion,
@@ -61,6 +65,8 @@ export function LicenceInventoryPage() {
     direct_transitive: "all",
   });
   const [notImpl, setNotImpl] = useState(false);
+  const depsObservation = useProviderObservation(sid, "deps_dev");
+  const depsDisabled = providerWasDisabledByOperator(depsObservation);
 
   useEffect(() => {
     setPage(1);
@@ -160,10 +166,18 @@ export function LicenceInventoryPage() {
         <Skeleton rows={6} />
       ) : items.length === 0 ? (
         <EmptyState
-          title={notImpl ? "Licence endpoint not exposed" : "No licence assertions recorded"}
+          title={
+            notImpl
+              ? "Licence endpoint not exposed"
+              : depsDisabled
+                ? "deps.dev was not requested"
+                : "No licence assertions recorded"
+          }
           description={
             notImpl
               ? "When the backend exposes a paginated licence endpoint, this table will appear automatically."
+              : depsDisabled
+                ? "deps.dev package metadata was disabled by the operator for this scan. No deps.dev request or cache lookup was made; local licence analysis may still be available."
               : "No licence assertions were recorded for this scan. The dependency-enrichment stage may not have run yet."
           }
         />
@@ -202,7 +216,7 @@ export function LicenceInventoryPage() {
             <Pagination meta={meta} onPageChange={setPage} />
           </div>
           <div className="mt-4">
-            <EnrichmentSummary scanId={sid} />
+            <EnrichmentSummary scanId={sid} disabledByOperator={depsDisabled} />
           </div>
         </>
       )}
@@ -210,7 +224,13 @@ export function LicenceInventoryPage() {
   );
 }
 
-function EnrichmentSummary({ scanId }: { scanId: number }) {
+function EnrichmentSummary({
+  scanId,
+  disabledByOperator,
+}: {
+  scanId: number;
+  disabledByOperator: boolean;
+}) {
   const [items, setItems] = useState<ComponentEnrichment[] | null>(null);
   const [error, setError] = useState<unknown>(null);
   useEffect(() => {
@@ -248,8 +268,16 @@ function EnrichmentSummary({ scanId }: { scanId: number }) {
   if (items.length === 0) {
     return (
       <DataCompletenessNotice
-        title="No deps.dev enrichment for this scan"
-        description="This scan's components were not enriched. The licence inventory above still reflects the rule engine's findings; provider status is on the provider page."
+        title={
+          disabledByOperator
+            ? "deps.dev was disabled by the operator"
+            : "No deps.dev enrichment for this scan"
+        }
+        description={
+          disabledByOperator
+            ? "No deps.dev request or cache lookup was made. The licence inventory above still reflects local rule-engine findings."
+            : "This scan's components were not enriched. The licence inventory above still reflects the rule engine's findings; provider status is on the provider page."
+        }
         tone="info"
       />
     );

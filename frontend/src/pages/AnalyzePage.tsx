@@ -5,9 +5,14 @@ import { useNavigate } from "react-router";
 import { api } from "@/api/api";
 import { ApiClientError, categorizeError } from "@/api/client";
 import { usePolling } from "@/api/hooks";
-import type { Scan } from "@/api/types";
+import {
+  defaultExternalEvidenceProviderSelection,
+  providerSelectionPayload,
+} from "@/api/providerSelection";
+import type { ExternalEvidenceProviderSelection, Scan } from "@/api/types";
 import { DataCompletenessNotice } from "@/components/DataCompletenessNotice";
 import { ErrorState } from "@/components/ErrorState";
+import { ExternalEvidenceProviderSelector } from "@/components/ExternalEvidenceProviderSelector";
 import { PageHeader } from "@/components/PageHeader";
 import { StatusBadge } from "@/components/StatusBadge";
 import {
@@ -83,6 +88,10 @@ function GitHubIntakeCard() {
   const [startError, setStartError] = useState<unknown>(null);
   const [starting, setStarting] = useState(false);
   const [started, setStarted] = useState(false);
+  const [providerSelection, setProviderSelection] =
+    useState<ExternalEvidenceProviderSelection>(
+      defaultExternalEvidenceProviderSelection
+    );
 
   function validate(): boolean {
     let ok = true;
@@ -123,7 +132,7 @@ function GitHubIntakeCard() {
       // scheduled on the local worker.
       setStarting(true);
       try {
-        await api.runScan(result.scan.id);
+        await api.runScan(result.scan.id, providerSelectionPayload(providerSelection));
         setStarted(true);
       } catch (err) {
         setStartError(err);
@@ -142,7 +151,7 @@ function GitHubIntakeCard() {
     setStartError(null);
     setStarting(true);
     try {
-      await api.runScan(scanId);
+      await api.runScan(scanId, providerSelectionPayload(providerSelection));
       setStarted(true);
     } catch (err) {
       setStartError(err);
@@ -228,6 +237,17 @@ function GitHubIntakeCard() {
           </p>
         ) : null}
       </div>
+      <DataCompletenessNotice
+        title="GitHub retrieval happens before analysis"
+        description="Submitting this repository contacts GitHub to resolve repository metadata and the requested ref, then downloads the repository tarball. GitHub retrieval is required for a GitHub repository scan and is separate from the optional evidence providers below."
+        tone="muted"
+      />
+      <ExternalEvidenceProviderSelector
+        idPrefix="analyze-github-provider"
+        value={providerSelection}
+        onChange={setProviderSelection}
+        disabled={submitting || starting || started}
+      />
       {error ? (
         <div role="alert">
           {error instanceof ApiClientError ? (
@@ -316,6 +336,7 @@ function GitHubIntakeCard() {
             setRefError(null);
             setError(null);
             setScanId(null);
+            setProviderSelection(defaultExternalEvidenceProviderSelection());
           }}
           disabled={submitting}
         >
@@ -350,6 +371,10 @@ function UploadIntakeCard() {
   const [starting, setStarting] = useState(false);
   const [started, setStarted] = useState(false);
   const [dragOver, setDragOver] = useState(false);
+  const [providerSelection, setProviderSelection] =
+    useState<ExternalEvidenceProviderSelection>(
+      defaultExternalEvidenceProviderSelection
+    );
   const inputRef = useRef<HTMLInputElement | null>(null);
 
   function onSelect(next: File | null) {
@@ -380,7 +405,7 @@ function UploadIntakeCard() {
     setStartError(null);
     setStarting(true);
     try {
-      await api.runScan(scanId);
+      await api.runScan(scanId, providerSelectionPayload(providerSelection));
       setStarted(true);
     } catch (err) {
       setStartError(err);
@@ -408,7 +433,7 @@ function UploadIntakeCard() {
       setScanId(result.scan.id);
       setStarting(true);
       try {
-        await api.runScan(result.scan.id);
+        await api.runScan(result.scan.id, providerSelectionPayload(providerSelection));
         setStarted(true);
       } catch (err) {
         setStartError(err);
@@ -484,6 +509,13 @@ function UploadIntakeCard() {
           </p>
         ) : null}
       </div>
+      <ExternalEvidenceProviderSelector
+        idPrefix="analyze-archive-provider"
+        value={providerSelection}
+        onChange={setProviderSelection}
+        openssfApplicable={false}
+        disabled={submitting || starting || started}
+      />
       {error ? (
         <div role="alert">
           {error instanceof ApiClientError ? (
@@ -569,6 +601,7 @@ function UploadIntakeCard() {
             setFile(null);
             setError(null);
             setScanId(null);
+            setProviderSelection(defaultExternalEvidenceProviderSelection());
           }}
           disabled={submitting}
         >

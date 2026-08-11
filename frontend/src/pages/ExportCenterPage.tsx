@@ -403,6 +403,9 @@ function PreviewBody({
 }) {
   const eligible = preview.eligibility.eligible;
   const providerDegraded = preview.eligibility.limitations.includes("provider_degraded");
+  const providerOmitted = preview.eligibility.limitations.includes(
+    "provider_omitted_by_operator"
+  );
   return (
     <section
       aria-label="CycloneDX 1.7 evidence preview"
@@ -458,6 +461,13 @@ function PreviewBody({
           evidence may be partial. The SBOM does not claim a complete dependency graph.
         </PreviewNotice>
       ) : null}
+      {providerOmitted ? (
+        <PreviewNotice tone="info">
+          {providerDegraded
+            ? "One or more providers were omitted by the operator while other requested provider evidence was degraded. The SBOM records both limitations without treating the omission as a failure."
+            : "External provider evidence was not requested by the operator. Local inventory is still exportable; the SBOM records provider coverage as not requested, not degraded or successful."}
+        </PreviewNotice>
+      ) : null}
 
       {expanded ? (
         <div className="mt-3 space-y-3 text-xs text-ink-700">
@@ -508,13 +518,15 @@ function PreviewNotice({
   tone,
   children,
 }: {
-  tone: "warn" | "danger";
+  tone: "info" | "warn" | "danger";
   children: React.ReactNode;
 }) {
   const colour =
-    tone === "warn"
-      ? "border-amber-200 bg-amber-50 text-amber-900"
-      : "border-rose-200 bg-rose-50 text-rose-900";
+    tone === "info"
+      ? "border-ink-200 bg-ink-50 text-ink-800"
+      : tone === "warn"
+        ? "border-amber-200 bg-amber-50 text-amber-900"
+        : "border-rose-200 bg-rose-50 text-rose-900";
   return (
     <p
       className={`mt-3 rounded border px-3 py-2 text-xs ${colour}`}
@@ -666,6 +678,8 @@ function OmissionsList({ omissions }: { omissions: string[] }) {
     no_repository_code_execution: "No repository code is executed.",
     unavailable_provider_data_is_not_converted_to_none:
       "Unavailable provider data is not converted to a 'no findings' verdict.",
+    external_provider_evidence_omitted_by_operator:
+      "External provider evidence omitted by the operator is recorded as not requested.",
   };
   return (
     <div>

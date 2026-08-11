@@ -4,7 +4,12 @@ import { Link, useNavigate, useParams, useSearchParams } from "react-router";
 
 import { api } from "@/api/api";
 import { isNotImplemented } from "@/api/fallback";
+import {
+  defaultExternalEvidenceProviderSelection,
+  providerSelectionPayload,
+} from "@/api/providerSelection";
 import type {
+  ExternalEvidenceProviderSelection,
   PageMeta,
   Repository,
   Scan,
@@ -16,6 +21,7 @@ import { CopyableIdentifier } from "@/components/CopyableIdentifier";
 import { DataCompletenessNotice } from "@/components/DataCompletenessNotice";
 import { EmptyState } from "@/components/EmptyState";
 import { ErrorState } from "@/components/ErrorState";
+import { ExternalEvidenceProviderSelector } from "@/components/ExternalEvidenceProviderSelector";
 import { FilterBar, SelectFilter } from "@/components/FilterBar";
 import { PageHeader } from "@/components/PageHeader";
 import { Pagination } from "@/components/Pagination";
@@ -125,6 +131,10 @@ export function RepositoryDetailsPage() {
   const [error, setError] = useState<unknown>(null);
   const [rescanning, setRescanning] = useState(false);
   const [rescanError, setRescanError] = useState<unknown>(null);
+  const [providerSelection, setProviderSelection] =
+    useState<ExternalEvidenceProviderSelection>(
+      defaultExternalEvidenceProviderSelection
+    );
   const rescanPendingRef = useRef(false);
 
   useEffect(() => {
@@ -200,7 +210,7 @@ export function RepositoryDetailsPage() {
     try {
       const newScan = await api.rescanRepository(repoId);
       try {
-        await api.runScan(newScan.id);
+        await api.runScan(newScan.id, providerSelectionPayload(providerSelection));
       } catch (err) {
         // Partial success: the new scan exists with a
         // fresh workspace, but the worker did not start
@@ -270,6 +280,22 @@ export function RepositoryDetailsPage() {
           </button>
         }
       />
+      <div className="mb-4 space-y-3">
+        <ExternalEvidenceProviderSelector
+          idPrefix={`repository-${repo.id}-provider`}
+          value={providerSelection}
+          onChange={setProviderSelection}
+          openssfApplicable={repo.source_type !== "uploaded_archive"}
+          disabled={rescanning}
+        />
+        {repo.source_type === "github" ? (
+          <DataCompletenessNotice
+            title="GitHub retrieval happens before analysis"
+            description="Running another scan contacts GitHub to resolve and download this repository before analysis. This required retrieval is separate from the optional evidence providers above."
+            tone="muted"
+          />
+        ) : null}
+      </div>
       {rescanError ? (
         <div className="mb-4" data-testid="repository-rescan-error">
           <RescanErrorNotice error={rescanError} />

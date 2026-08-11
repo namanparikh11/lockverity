@@ -31,6 +31,7 @@ import type {
   Scan,
   ScanCreatePayload,
   ScanComparison,
+  ScanRunPayload,
   ScanStage,
   ScanStatus,
   SystemInfoResponse,
@@ -214,8 +215,8 @@ export const api = {
   // the work on the local worker. Already-running scans
   // are rejected with HTTP 409; the UI surfaces the
   // stable error envelope.
-  runScan: (scanId: number) =>
-    apiClient.post<Scan>(`/scans/${scanId}/run`),
+  runScan: (scanId: number, payload?: ScanRunPayload) =>
+    apiClient.post<Scan>(`/scans/${scanId}/run`, payload),
   // v1.6: cancellation. The endpoint accepts an optional
   // ``reason`` field; the UI passes a non-empty string
   // when the user types a custom reason and the empty

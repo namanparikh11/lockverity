@@ -39,6 +39,35 @@ function jsonResponse(body: unknown, status = 200): Response {
   });
 }
 
+function providerObservationResponse(
+  provider: "osv" | "deps_dev",
+  options: { disabled?: boolean } = {}
+): Response {
+  return jsonResponse({
+    items: [
+      {
+        id: 1,
+        scan_run_id: 1,
+        provider,
+        status: options.disabled ? "not_requested" : "available",
+        requested_at: null,
+        completed_at: null,
+        latency_ms: null,
+        http_status: null,
+        cache_status: null,
+        records_returned: 0,
+        error_code: options.disabled ? "disabled_by_operator" : null,
+        error_summary: null,
+        retry_count: 0,
+        rate_limit_remaining: null,
+        fetched_at: null,
+        created_at: "2026-08-11T00:00:00Z",
+      },
+    ],
+    pagination: { page: 1, page_size: 200, total: 1, total_pages: 1 },
+  });
+}
+
 describe("v0.4 vulnerability explorer", () => {
   beforeEach(() => {
     vi.stubGlobal("fetch", vi.fn());
@@ -50,6 +79,7 @@ describe("v0.4 vulnerability explorer", () => {
 
   it("renders the v0.4 provider, ecosystem, alias, and fetched columns", async () => {
     const fetchMock = vi.mocked(globalThis.fetch);
+    fetchMock.mockResolvedValueOnce(providerObservationResponse("osv"));
     fetchMock.mockResolvedValueOnce(
       jsonResponse({
         items: [
@@ -107,6 +137,7 @@ describe("v0.4 vulnerability explorer", () => {
     // must render that as a neutral "Not supplied" badge
     // and must never invent "low" / "medium" / "high".
     const fetchMock = vi.mocked(globalThis.fetch);
+    fetchMock.mockResolvedValueOnce(providerObservationResponse("osv"));
     fetchMock.mockResolvedValueOnce(
       jsonResponse({
         items: [
@@ -160,6 +191,7 @@ describe("v0.4 vulnerability explorer", () => {
 
   it("renders an honest empty state when the backend returns zero rows", async () => {
     const fetchMock = vi.mocked(globalThis.fetch);
+    fetchMock.mockResolvedValueOnce(providerObservationResponse("osv"));
     fetchMock.mockResolvedValueOnce(
       jsonResponse({
         items: [],
@@ -185,6 +217,7 @@ describe("v0.4 vulnerability explorer", () => {
 
   it("renders a real error state on a 5xx response, never a fixture", async () => {
     const fetchMock = vi.mocked(globalThis.fetch);
+    fetchMock.mockResolvedValueOnce(providerObservationResponse("osv"));
     fetchMock.mockResolvedValueOnce(
       jsonResponse(
         {
@@ -216,6 +249,33 @@ describe("v0.4 vulnerability explorer", () => {
       ).toBeNull();
     });
   });
+
+  it("renders an operator-disabled OSV state neutrally", async () => {
+    const fetchMock = vi.mocked(globalThis.fetch);
+    fetchMock.mockResolvedValueOnce(
+      providerObservationResponse("osv", { disabled: true })
+    );
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse({
+        items: [],
+        pagination: { page: 1, page_size: 25, total: 0, total_pages: 0 },
+      })
+    );
+    render(
+      <MemoryRouter initialEntries={["/scans/1/vulnerabilities"]}>
+        <Routes>
+          <Route
+            path="/scans/:scanId/vulnerabilities"
+            element={<VulnerabilityExplorerPage />}
+          />
+        </Routes>
+      </MemoryRouter>
+    );
+    await waitFor(() => {
+      expect(screen.getByText(/OSV was not requested/i)).toBeInTheDocument();
+    });
+    expect(screen.queryByText(/provider unavailable/i)).not.toBeInTheDocument();
+  });
 });
 
 describe("v0.4 licence inventory enrichment summary", () => {
@@ -229,7 +289,8 @@ describe("v0.4 licence inventory enrichment summary", () => {
 
   it("renders the deps.dev enrichment summary when components are enriched", async () => {
     const fetchMock = vi.mocked(globalThis.fetch);
-    // 1) listLicences
+    // 1) persisted provider observation; 2) listLicences.
+    fetchMock.mockResolvedValueOnce(providerObservationResponse("deps_dev"));
     fetchMock.mockResolvedValueOnce(
       jsonResponse({
         items: [
@@ -250,7 +311,7 @@ describe("v0.4 licence inventory enrichment summary", () => {
         pagination: { page: 1, page_size: 50, total: 1, total_pages: 1 },
       })
     );
-    // 2) listEnrichments
+    // 3) listEnrichments
     fetchMock.mockResolvedValueOnce(
       jsonResponse({
         items: [
@@ -292,6 +353,7 @@ describe("v0.4 licence inventory enrichment summary", () => {
 
   it("renders an honest 'not requested' state when no components were enriched", async () => {
     const fetchMock = vi.mocked(globalThis.fetch);
+    fetchMock.mockResolvedValueOnce(providerObservationResponse("deps_dev"));
     fetchMock.mockResolvedValueOnce(
       jsonResponse({
         items: [],
@@ -313,6 +375,33 @@ describe("v0.4 licence inventory enrichment summary", () => {
         screen.getByText("No licence assertions recorded")
       ).toBeTruthy();
     });
+  });
+
+  it("renders operator-disabled provider states neutrally", async () => {
+    const fetchMock = vi.mocked(globalThis.fetch);
+    fetchMock.mockResolvedValueOnce(
+      providerObservationResponse("deps_dev", { disabled: true })
+    );
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse({
+        items: [],
+        pagination: { page: 1, page_size: 50, total: 0, total_pages: 0 },
+      })
+    );
+    render(
+      <MemoryRouter initialEntries={["/scans/1/licences"]}>
+        <Routes>
+          <Route
+            path="/scans/:scanId/licences"
+            element={<LicenceInventoryPage />}
+          />
+        </Routes>
+      </MemoryRouter>
+    );
+    await waitFor(() => {
+      expect(screen.getByText(/deps\.dev was not requested/i)).toBeInTheDocument();
+    });
+    expect(screen.queryByText(/provider unavailable/i)).not.toBeInTheDocument();
   });
 });
 

@@ -20,7 +20,15 @@
  */
 
 import { describe, expect, it, beforeEach, afterEach, vi } from "vitest";
-import { act, render, screen, waitFor, cleanup, fireEvent } from "@testing-library/react";
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router";
 
 import { AppShell } from "@/layouts/AppShell";
@@ -194,6 +202,13 @@ describe("v1.5 guided intake / analyze flow", () => {
       // mock returns a 200 with the scan shape so the
       // scan is recorded as ``started``.
       if (url.match(/\/api\/v1\/scans\/\d+\/run$/) && init?.method === "POST") {
+        expect(JSON.parse(String(init.body))).toEqual({
+          external_evidence_providers: {
+            osv: false,
+            deps_dev: true,
+            openssf: true,
+          },
+        });
         return Promise.resolve(
           jsonResponse({
             id: 42,
@@ -250,11 +265,13 @@ describe("v1.5 guided intake / analyze flow", () => {
 
     const urlInput = screen.getByLabelText(/public github url/i);
     const submitButton = screen.getByRole("button", { name: /^analyze repository$/i });
+    const githubForm = screen.getByLabelText("Analyze public GitHub repository form");
 
     await act(async () => {
       fireEvent.change(urlInput, {
         target: { value: "https://github.com/octocat/hello-world" },
       });
+      fireEvent.click(within(githubForm).getByRole("checkbox", { name: /OSV/i }));
     });
     await act(async () => {
       fireEvent.click(submitButton);
@@ -329,6 +346,13 @@ describe("v1.5 guided intake / analyze flow", () => {
         // v1.6: the page also calls ``/scans/{id}/run`` to
         // schedule execution on the local worker.
         if (url.match(/\/api\/v1\/scans\/\d+\/run$/) && init?.method === "POST") {
+          expect(JSON.parse(String(init.body))).toEqual({
+            external_evidence_providers: {
+              osv: true,
+              deps_dev: false,
+              openssf: true,
+            },
+          });
           return jsonResponse({
             id: 99,
             repository_id: 13,
@@ -376,6 +400,12 @@ describe("v1.5 guided intake / analyze flow", () => {
         </Routes>
       </MemoryRouter>
     );
+
+    const archiveForm = screen.getByLabelText("Analyze uploaded source archive form");
+    expect(
+      within(archiveForm).getByRole("checkbox", { name: /OpenSSF Scorecard/i })
+    ).toBeDisabled();
+    fireEvent.click(within(archiveForm).getByRole("checkbox", { name: /deps\.dev/i }));
 
     // The page hides the file input behind a "Choose file"
     // button. We poke the hidden <input type="file"> directly.

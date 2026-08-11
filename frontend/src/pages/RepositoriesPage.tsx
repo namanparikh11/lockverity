@@ -171,7 +171,7 @@ export function RepositoriesPage() {
         ) : (
           <EmptyState
             title="No repositories yet"
-            description="Add a public GitHub repository or upload a source archive to register it for analysis. The URL is normalized, the canonical form is stored, and no repository code is fetched or executed."
+            description="Add a public GitHub repository or upload a source archive to register it for analysis. GitHub repositories are retrieved for local analysis; repository code and uploaded contents are treated as data and never executed."
             action={
               <div className="flex flex-wrap justify-center gap-2">
                 <Link to="/repositories/new" className="btn-primary">
