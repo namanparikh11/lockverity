@@ -36,6 +36,14 @@ An operator can set `LOCKVERITY_GITHUB_TOKEN` in the local backend environment t
 
 OSV, deps.dev, and OpenSSF Scorecard are independent, request-scoped choices shown before scan execution. Applicable choices default to enabled. A provider disabled by the operator is recorded as not requested, and Lockverity performs no client, cache, or network operation for that provider during that execution attempt. Local manifest, dependency, workflow, and rule analysis continues when all optional evidence providers are disabled.
 
+## Third-party privacy policies
+
+Use of selected external providers is also subject to those providers' privacy policies:
+
+- GitHub: [GitHub General Privacy Statement](https://docs.github.com/en/site-policy/privacy-policies/github-general-privacy-statement).
+- OSV and deps.dev (Google-hosted services): [Google Privacy Policy](https://policies.google.com/privacy).
+- OpenSSF Scorecard: [Linux Foundation Privacy Policy](https://www.linuxfoundation.org/legal/privacy-policy).
+
 ## Telemetry and analytics
 
 Lockverity does not include product telemetry, analytics, advertising identifiers, user accounts, or cloud inference. It does not send local scan results to a Lockverity-operated service.
