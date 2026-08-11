@@ -1,8 +1,8 @@
-# Lockverity v2.1.0 — Windows x64 per-user installer
+# Lockverity v2.1.2 — Windows x64 per-user installer
 
-The Lockverity v2.1.0 Windows installer is a per-user, x64,
+The Lockverity v2.1.2 Windows installer is a per-user, x64,
 self-contained EXE that installs the accepted Windows portable
-payload (`Lockverity-2.1.0-windows-x64-portable.zip`) into
+payload (`Lockverity-2.1.2-windows-x64-portable.zip`) into
 `%LOCALAPPDATA%\Programs\Lockverity`. The installer does **not**
 modify the operator's `PATH`, does **not** install a Windows
 service, does **not** register an autorun entry, does **not** add
@@ -53,7 +53,7 @@ unsigned / SmartScreen / antivirus behaviour you should expect.
 
 | Property | Value |
 |---|---|
-| Filename | `Lockverity-2.1.0-windows-x64-setup.exe` |
+| Filename | `Lockverity-2.1.2-windows-x64-setup.exe` |
 | Architecture | x64 only |
 | Privilege mode | per-user, no admin, no UAC |
 | Default install path | `%LOCALAPPDATA%\Programs\Lockverity` |
@@ -63,7 +63,7 @@ unsigned / SmartScreen / antivirus behaviour you should expect.
 
 ## Interactive install
 
-1. Double-click `Lockverity-2.1.0-windows-x64-setup.exe`.
+1. Double-click `Lockverity-2.1.2-windows-x64-setup.exe`.
 2. The wizard shows the Lockverity licence; click **I accept** to
    continue.
 3. The default install path is
@@ -90,7 +90,7 @@ Silent install is supported via standard Inno Setup switches. The
 operator never sees a UI. No browser is launched in silent mode.
 
 ```powershell
-Lockverity-2.1.0-windows-x64-setup.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /SP- ^
+Lockverity-2.1.2-windows-x64-setup.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /SP- ^
     /DIR="C:\Apps\Lockverity" ^
     /LOG="C:\Temp\lockverity-install.log"
 ```
@@ -252,29 +252,26 @@ Lockverity v2.1.2 is **not code-signed**. The Windows installer
 and the PE executables distributed inside the portable package
 are currently unsigned. This means:
 
-- On a fresh install, **Windows SmartScreen** will show
-  *"Windows protected your PC — Microsoft Defender SmartScreen
-  prevented an unrecognized app from starting. Running this app
-  might put your PC at risk."* Click **More info → Run anyway**
-  to proceed. SmartScreen remembers the choice for the same
-  executable.
-- Some antivirus products will raise a heuristic flag on a
-  freshly downloaded unsigned binary. This is
-  a false positive: the source is committed in this repository
-  and the build is reproducible from the documented
-  `python backend\scripts\build_windows_installer.py` command.
-  Submit the flagged file to your AV vendor as a false positive
-  if it blocks the install.
+- Windows may display **Unknown publisher** and/or a Microsoft
+  Defender SmartScreen warning when an unsigned build is launched.
+- Unsigned or newly distributed binaries may trigger heuristic
+  antivirus detections. Verify the published SHA-256 and provenance;
+  suspected false positives can be submitted to the relevant vendor
+  for review. The documented public installer build command is
+  `python backend\scripts\build_windows_installer.py`.
 - The `INSTALLER-MANIFEST.json` next to the installer records
   the unsigned status honestly. The build script never claims
   Microsoft certification, code signing, or SmartScreen
   reputation.
 
+See the [Code signing policy](code-signing-policy.md) and
+[Privacy policy](privacy.md).
+
 ## Troubleshooting
 
 ### The installer does not start
 
-1. Verify the SHA-256 of `Lockverity-2.1.0-windows-x64-setup.exe`
+1. Verify the SHA-256 of `Lockverity-2.1.2-windows-x64-setup.exe`
    matches the value in `INSTALLER-MANIFEST.json`.
 2. Run the installer with `/LOG=<file>` and inspect the log.
 

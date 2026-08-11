@@ -13,15 +13,15 @@ Python or Node.js runtime.
 
 This document is the operator reference for the Windows
 portable and the maintainer reference for the build
-pipeline. The portable is the v2.1.0 Windows x64
-portable; for the v2.1.0 Windows installer see
+pipeline. The portable is the v2.1.2 Windows x64
+portable; for the v2.1.2 Windows installer see
 [`docs/windows-installer.md`](windows-installer.md). For
 the central download and install guide see
 [`docs/install.md`](install.md).
 
 ## TL;DR
 
-1. Download ``Lockverity-2.1.0-windows-x64-portable.zip``.
+1. Download ``Lockverity-2.1.2-windows-x64-portable.zip``.
 2. Extract it to any directory the user controls
    (for example ``C:\Tools\Lockverity`` or
    ``C:\Users\<you>\Lockverity``).
@@ -45,7 +45,7 @@ PyInstaller generates. The exact internal layout of
 stable.
 
 ```
-Lockverity-2.1.0-windows-x64-portable\
+Lockverity-2.1.2-windows-x64-portable\
   Lockverity.exe                  (windowless graphical launcher)
   lockverity-cli.exe               (console CLI; same commands as source-based lockverity)
   _internal\                       (PyInstaller support files; do not edit)
@@ -206,33 +206,30 @@ launch with a different port.
 
 ## Unsigned-build / SmartScreen warning
 
-The portable package is not code-signed. On first
-launch Windows SmartScreen may show a "Windows
-protected your PC" prompt. This is the expected
-behaviour for any unsigned executable. The operator
-can verify the package integrity using the
-``SHA256SUMS.txt`` file and the documented
-``BUILD-MANIFEST.json`` and then click "More info"
-followed by "Run anyway" to proceed. A future release
-track may introduce code signing; until then the
-SmartScreen prompt is the operator-visible contract.
+The portable package is not code-signed. Windows may
+display **Unknown publisher** and/or a Microsoft Defender
+SmartScreen warning when an unsigned build is launched.
+Verify the package integrity using the ``SHA256SUMS.txt``
+file and the documented ``BUILD-MANIFEST.json`` before
+deciding whether to proceed.
 
-## Antivirus false-positive reporting
+See the [Code signing policy](code-signing-policy.md) and
+[Privacy policy](privacy.md).
 
-Some antivirus products flag PyInstaller-built
-executables as suspicious. The portable package uses
+## Antivirus heuristic detections
+
+Unsigned or newly distributed binaries may trigger heuristic
+antivirus detections. The portable package uses
 the standard PyInstaller onedir layout without UPX or
-any other compression, and the ``SHA256SUMS.txt``
-plus the published Git source make a false positive
-reportable. The recommended course for an operator is
-to submit the false positive to the antivirus vendor
-and reference the ``SHA256SUMS.txt`` plus the
-``BUILD-MANIFEST.json``; the source commit SHA is
+any other compression. Verify the published SHA-256 and
+provenance; suspected false positives can be submitted to
+the relevant vendor for review with the ``SHA256SUMS.txt``
+and ``BUILD-MANIFEST.json``. The source commit SHA is
 verifiable on the public GitHub repository.
 
 ## Not a Windows installer
 
-The portable is a "drop anywhere" artefact. The v2.1.0
+The portable is a "drop anywhere" artefact. The v2.1.2
 release also ships a per-user Windows installer for
 operators who prefer a Start Menu entry and a registered
 uninstall path; see
@@ -338,7 +335,7 @@ specs are reviewed and pinned.
 ## What the portable does not include
 
 The following items are explicit future work and are
-**not** included in the v2.1.0 portable:
+**not** included in the v2.1.2 portable:
 
 * Code signing and SmartScreen reputation building.
 * Automatic update mechanism.
@@ -350,7 +347,7 @@ The following items are explicit future work and are
 * Cloud sync, multi-user, or authentication.
 * Telemetry, crash reporting, or outbound analytics.
 
-The v2.1.0 Windows installer is a separate distribution
+The v2.1.2 Windows installer is a separate distribution
 that uses Inno Setup; see
 [`docs/windows-installer.md`](windows-installer.md). Code
 signing, automatic updates, and additional packaging
@@ -366,5 +363,6 @@ Node and npm versions, the Alembic head, and the
 approved brand-asset hashes are in
 ``BUILD-MANIFEST.json``. The dependency inventory
 (including declared licences) is in
-``THIRD_PARTY_NOTICES.txt``. The build command above
-reproduces the artefact from the recorded inputs.
+``THIRD_PARTY_NOTICES.txt``. The documented public build
+command builds the artefact from the recorded source and inputs;
+deterministic, bit-for-bit reproducibility is not claimed.

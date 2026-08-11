@@ -22,6 +22,15 @@ release.
 | Installer manifest | [INSTALLER-MANIFEST.json](https://github.com/namanparikh11/lockverity/releases/download/checkpoint-v2.1.2-public-release/INSTALLER-MANIFEST.json) |
 | Build manifest | [BUILD-MANIFEST.json](https://github.com/namanparikh11/lockverity/releases/download/checkpoint-v2.1.2-public-release/BUILD-MANIFEST.json) |
 
+## Code signing policy
+
+- [Code signing policy](code-signing-policy.md)
+- [Privacy policy](privacy.md)
+
+Lockverity v2.1.2 is unsigned. Lockverity is preparing an application
+to the SignPath Foundation Open Source code-signing program; no
+SignPath-signed Lockverity release currently exists.
+
 > **Code → Download ZIP** downloads the Lockverity **source code**.
 > It is not the Windows installer and is not the Windows portable.
 > The source ZIP is intended for development and auditing only.
@@ -63,7 +72,7 @@ unchanged. The two Windows-specific fixes are:
 | macOS source setup | Developer or technical operator on macOS |
 | Linux source setup | Developer or technical operator on Linux |
 
-The v2.1.0 release does **not** publish a DMG, PKG, AppImage, DEB,
+The v2.1.2 release does **not** publish a DMG, PKG, AppImage, DEB,
 or RPM asset. macOS and Linux are source-based developer
 workflows; they are not at the same packaged-acceptance level as
 the Windows installer or portable.
@@ -85,7 +94,7 @@ only), and self-contained.
    ```
 
    The output hash must equal
-   `5e47d2bcf0d4e5c2f9654434328c6adecca800161505e775bae01bef121bc8bb`.
+   `6ec50d612c8edb49ab9a7e8cdf20b071a0094070998eee8555ef09bbbdc5af5b`.
    The same value is in
    [`Lockverity-2.1.2-SHA256SUMS.txt`](https://github.com/namanparikh11/lockverity/releases/download/checkpoint-v2.1.2-public-release/Lockverity-2.1.2-SHA256SUMS.txt)
    and in the bundled `INSTALLER-MANIFEST.json` next to the
@@ -104,7 +113,7 @@ per-user **Lockverity** entry under the current user.
 ### Silent install
 
 ```powershell
-Lockverity-2.1.0-windows-x64-setup.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /SP- ^
+Lockverity-2.1.2-windows-x64-setup.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /SP- ^
     /DIR="C:\Apps\Lockverity" ^
     /LOG="C:\Temp\lockverity-install.log"
 ```
@@ -120,20 +129,15 @@ Lockverity-2.1.0-windows-x64-setup.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART 
 
 ### SmartScreen and antivirus
 
-The installer is **not code-signed**. On a fresh install,
-**Windows SmartScreen** will show
-*"Windows protected your PC — Microsoft Defender SmartScreen
-prevented an unrecognized app from starting. Running this app
-might put your PC at risk."* Click **More info → Run anyway** to
-proceed. SmartScreen remembers the choice for the same
-executable.
+The installer is **not code-signed**. Windows may display
+**Unknown publisher** and/or a Microsoft Defender SmartScreen
+warning when an unsigned build is launched.
 
-Some antivirus products will raise a heuristic flag on a freshly
-downloaded unsigned binary. This is a false positive: the source
-is committed in this repository and the build is reproducible
-from `python backend\scripts\build_windows_installer.py`. Submit
-the flagged file to your AV vendor as a false positive if it
-blocks the install.
+Unsigned or newly distributed binaries may trigger heuristic
+antivirus detections. Verify the published SHA-256 and provenance;
+suspected false positives can be submitted to the relevant vendor
+for review. The documented public installer build command is
+`python backend\scripts\build_windows_installer.py`.
 
 ### Where things live after install
 
@@ -233,7 +237,7 @@ task, or registry autorun.
    ```
 
    The output hash must equal
-   `2713416222a962c14e05a78977c1433fb2a1a2776d428d8034b10a32351ec158`.
+   `7b8824e1fa780f46caafef25e84f3249e4f7f5cb11d5c5e22cfcf4491bfe6996`.
    The same value is in
    [`Lockverity-2.1.2-windows-x64-portable-SHA256SUMS.txt`](https://github.com/namanparikh11/lockverity/releases/download/checkpoint-v2.1.2-public-release/Lockverity-2.1.2-windows-x64-portable-SHA256SUMS.txt)
    and in the bundled `SHA256SUMS.txt` inside the ZIP.
@@ -275,7 +279,7 @@ The full portable operator reference is in
 
 ## macOS source setup
 
-Lockverity v2.1.0 does **not** publish a packaged macOS binary
+Lockverity v2.1.2 does **not** publish a packaged macOS binary
 (no `.dmg`, no `.pkg`, no signed `.app`). The macOS workflow is
 **source-based only** and is intended for developers or technical
 operators.
@@ -349,7 +353,7 @@ contract is in [`docs/release-checklist.md` § 4b](release-checklist.md).
 
 ## Linux source setup
 
-Lockverity v2.1.0 does **not** publish a packaged Linux binary
+Lockverity v2.1.2 does **not** publish a packaged Linux binary
 (no `AppImage`, no `.deb`, no `.rpm`, no Flatpak, no Snap). The
 Linux workflow is **source-based only** and is intended for
 developers or technical operators.
@@ -423,15 +427,22 @@ contract is in [`docs/release-checklist.md` § 4b](release-checklist.md).
 
 ## Checksum verification
 
-Every release asset has a SHA-256 in the external
-[`Lockverity-2.1.2-SHA256SUMS.txt`](https://github.com/namanparikh11/lockverity/releases/download/checkpoint-v2.1.2-public-release/Lockverity-2.1.2-SHA256SUMS.txt):
+The authoritative v2.1.2 release tag is
+`checkpoint-v2.1.2-public-release`, and its release source commit is
+`2aa8729832ac94093966a67d2f3f76c0e2110d15`. The authoritative
+published asset values are:
 
-```
-5e47d2bcf0d4e5c2f9654434328c6adecca800161505e775bae01bef121bc8bb  Lockverity-2.1.2-windows-x64-setup.exe
-2713416222a962c14e05a78977c1433fb2a1a2776d428d8034b10a32351ec158  Lockverity-2.1.2-windows-x64-portable.zip
-0584c02bcba6bc89f78f39b988bdc47b48370a727719e628ad8ea05e1421cef4  INSTALLER-MANIFEST.json
-3930297439251db303ac8de427087dc80973972925184a7bbd7c8de69d5b2679  BUILD-MANIFEST.json
-```
+| Asset | SHA-256 | Size |
+| --- | --- | --- |
+| `Lockverity-2.1.2-windows-x64-setup.exe` | `6ec50d612c8edb49ab9a7e8cdf20b071a0094070998eee8555ef09bbbdc5af5b` | 31,227,275 bytes |
+| `Lockverity-2.1.2-windows-x64-portable.zip` | `7b8824e1fa780f46caafef25e84f3249e4f7f5cb11d5c5e22cfcf4491bfe6996` | 56,198,519 bytes |
+| `INSTALLER-MANIFEST.json` | `7e4c0328d6f3357429d8141490e69680357a7df06dfcc88fa8a89a35bf590025` | — |
+| `BUILD-MANIFEST.json` | `e01692940e645e16639a84faf45334c77f22bf8a13a4c099302a24d21b47460b` | — |
+| `Lockverity-2.1.2-SHA256SUMS.txt` | `ec324e6cad86a7a535567f5e0898559d560717df58e8a4a842d7630058306e9d` | — |
+| `Lockverity-2.1.2-windows-x64-portable-SHA256SUMS.txt` | `d297239fe49876d444563d7c116acc7e7d447002fcb26bec419ad2f27a649843` | — |
+
+The release checksum file is
+[`Lockverity-2.1.2-SHA256SUMS.txt`](https://github.com/namanparikh11/lockverity/releases/download/checkpoint-v2.1.2-public-release/Lockverity-2.1.2-SHA256SUMS.txt).
 
 The internal `Lockverity-2.1.2-windows-x64-portable-SHA256SUMS.txt`
 is a separate asset that lists the SHA-256 of every file inside
@@ -476,13 +487,13 @@ The Lockverity v2.1.0 release is **not code-signed**:
 
 - The Windows installer and the PE executables distributed inside
   the portable package are unsigned. The portable ZIP itself does
-  not receive Authenticode signing. Windows SmartScreen will show *"Windows protected
-  your PC"* on first launch. Click **More info → Run anyway**
-  to proceed.
-- Some antivirus products will raise a heuristic flag on a
-  freshly downloaded unsigned binary. This is a false positive:
-  the source is committed in this repository and the build is
-  reproducible from the documented build commands.
+  not receive Authenticode signing. Windows may display
+  **Unknown publisher** and/or a Microsoft Defender SmartScreen
+  warning when an unsigned build is launched.
+- Unsigned or newly distributed binaries may trigger heuristic
+  antivirus detections. Verify the published SHA-256 and provenance;
+  suspected false positives can be submitted to the relevant vendor
+  for review. The source and build commands are public.
 
 The build scripts never claim Microsoft certification, code
 signing, or SmartScreen reputation. The
@@ -578,8 +589,8 @@ Override the path with `--home <path>` (one invocation) or
 | Browser does not open after install | The installer never launches a browser. Invoke `Lockverity.exe` directly to see any error output. |
 | Runtime is not reachable at `http://127.0.0.1:8000/` | Run `lockverity-cli.exe doctor` (or `lockverity doctor` on macOS / Linux). Read `%LOCALAPPDATA%\Lockverity\logs\lockverity.log` (or the equivalent runtime log path). |
 | Reinstall fails with "still running" | Run `lockverity-cli.exe status`; if the recorded PID is dead but the state file remains, run `lockverity-cli.exe stop` and retry. |
-| SmartScreen "Windows protected your PC" | This is the expected behaviour for an unsigned binary. Click **More info → Run anyway**. SmartScreen remembers the choice for the same executable. |
-| Antivirus flags the binary | Submit the flagged file to your AV vendor as a false positive. Reference the `SHA256SUMS.txt` and the `BUILD-MANIFEST.json` from the same release. |
+| SmartScreen or Unknown publisher warning | Windows may display either warning for an unsigned build. Verify the published SHA-256 and provenance before deciding whether to proceed. |
+| Antivirus flags the binary | Verify the published SHA-256 and provenance. Suspected false positives can be submitted to the relevant vendor for review. |
 | Port `8000` is in use by an unrelated process | The runtime refuses to terminate the unrelated process. Stop the conflicting process or launch with `--port <N>`. |
 
 The full installer-specific troubleshooting guide is in
@@ -591,10 +602,10 @@ portable-specific troubleshooting guide is in
 
 | What you downloaded | What it is |
 | --- | --- |
-| `Lockverity-2.1.0-windows-x64-setup.exe` | The Windows installer. Run it to install. |
-| `Lockverity-2.1.0-windows-x64-portable.zip` | The Windows portable. Extract it and run `Lockverity.exe`. |
-| `Lockverity-2.1.0-SHA256SUMS.txt` | SHA-256 checksums of the primary release assets. |
-| `Lockverity-2.1.0-windows-x64-portable-SHA256SUMS.txt` | SHA-256 checksums of the files inside the portable ZIP. |
+| `Lockverity-2.1.2-windows-x64-setup.exe` | The Windows installer. Run it to install. |
+| `Lockverity-2.1.2-windows-x64-portable.zip` | The Windows portable. Extract it and run `Lockverity.exe`. |
+| `Lockverity-2.1.2-SHA256SUMS.txt` | SHA-256 checksums of the primary release assets. |
+| `Lockverity-2.1.2-windows-x64-portable-SHA256SUMS.txt` | SHA-256 checksums of the files inside the portable ZIP. |
 | `INSTALLER-MANIFEST.json` | The installer's source identity, embedded payload identity, code-signing status, and Inno Setup compiler fingerprint. |
 | `BUILD-MANIFEST.json` | The portable's source identity, build timestamp, Python / PyInstaller / Node / npm versions, and approved brand-asset hashes. |
 | `Source code (zip)` / `Source code (tar.gz)` (the `Code → Download ZIP` button) | The Lockverity repository source. Not a packaged application. Use it to develop, audit, or build your own installer / portable. |
@@ -607,11 +618,11 @@ The release assets and the source archive are **not interchangeable**:
 - The source archive requires Python 3.12, Node.js >= 22.22.0,
   the build tooling, and the v2.1 brand assets to produce a
   working build.
-- The release assets are signed by the maintainer only through
-  the per-asset SHA-256 in the external checksum file and the
-  `INSTALLER-MANIFEST.json` / `BUILD-MANIFEST.json`. There is no
+- The release assets can be checked against the per-asset SHA-256
+  values and the `INSTALLER-MANIFEST.json` /
+  `BUILD-MANIFEST.json`. There is no
   Authenticode signature, no GPG signature, and no Apple
-  notarisation in v2.1.0.
+  notarisation in v2.1.2.
 
 ## Cross-references
 
