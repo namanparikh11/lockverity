@@ -267,6 +267,10 @@ Name: "{group}\Lockverity documentation"; Filename: "{app}\docs\windows-installe
     IconFilename: "{app}\{#MyAppPayloadDir}\{#MyAppExeName}"; IconIndex: 0; \
     WorkingDir: "{app}\{#MyAppPayloadDir}"; \
     Comment: "Lockverity installer documentation"
+Name: "{group}\Privacy policy"; Filename: "{app}\docs\privacy.md"; \
+    IconFilename: "{app}\{#MyAppPayloadDir}\{#MyAppExeName}"; IconIndex: 0; \
+    WorkingDir: "{app}\{#MyAppPayloadDir}"; \
+    Comment: "Lockverity privacy policy"
 Name: "{group}\Uninstall {#MyAppDisplayName}"; Filename: "{uninstallexe}"; \
     IconFilename: "{app}\{#MyAppPayloadDir}\{#MyAppExeName}"; IconIndex: 0; \
     WorkingDir: "{app}\{#MyAppPayloadDir}"; \

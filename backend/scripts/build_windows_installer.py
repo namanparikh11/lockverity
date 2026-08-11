@@ -381,6 +381,7 @@ def _stage_payload(payload_root: Path, staging_dir: Path) -> None:
         "BUILD-MANIFEST.json",
         "SHA256SUMS.txt",
         "THIRD_PARTY_NOTICES.txt",
+        "PRIVACY.md",
         "README-PORTABLE.txt",
     ):
         src = payload_root / name
@@ -398,6 +399,7 @@ def _stage_payload(payload_root: Path, staging_dir: Path) -> None:
     docs_dest = root_extra_dest / "docs"
     docs_dest.mkdir(parents=True, exist_ok=True)
     installer_doc = REPO_ROOT / "docs" / "windows-installer.md"
+    privacy_doc = REPO_ROOT / "docs" / "privacy.md"
     # Copy the LICENSE to the staging root so ISCC's
     # ``LicenseFile=LICENSE`` directive (relative to the
     # .iss) resolves at build time. The same LICENSE is
@@ -408,6 +410,8 @@ def _stage_payload(payload_root: Path, staging_dir: Path) -> None:
         shutil.copy2(license_src, staging_dir / "LICENSE")
     if installer_doc.is_file():
         shutil.copy2(installer_doc, docs_dest / "windows-installer.md")
+    if privacy_doc.is_file():
+        shutil.copy2(privacy_doc, docs_dest / "privacy.md")
 
 
 def _build_installer(

@@ -108,6 +108,7 @@ PORTABLE_BUNDLE_LAYOUT: list[tuple[str, str]] = [
     ("frontend/public/brand", "brand"),
     ("LICENSE", "LICENSE"),
     ("docs/windows-portable.md", "README-PORTABLE.txt"),
+    ("docs/privacy.md", "PRIVACY.md"),
 ]
 
 
@@ -1000,6 +1001,7 @@ def _generate_sha256_sums(target: Path) -> dict[str, str]:
         "lockverity-cli.exe",
         "BUILD-MANIFEST.json",
         "LICENSE",
+        "PRIVACY.md",
         "README-PORTABLE.txt",
         "THIRD_PARTY_NOTICES.txt",
     ]

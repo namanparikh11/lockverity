@@ -42,6 +42,8 @@ B3B_ACCEPTANCE_SCRIPT = BACKEND_ROOT / "scripts" / "b3b_acceptance.py"
 APPROVED_ICON = BACKEND_ROOT / "pyinstaller" / "favicon-exe.ico"
 APPROVED_FAVICON_ICO = REPO_ROOT / "frontend" / "public" / "favicon.ico"
 DOCS_FILE = REPO_ROOT / "docs" / "windows-installer.md"
+PRIVACY_FILE = REPO_ROOT / "docs" / "privacy.md"
+PORTABLE_BUILD_SCRIPT = BACKEND_ROOT / "scripts" / "build_windows_portable.py"
 
 STABLE_APP_ID = "{E5B0C0F4-7C42-4D6A-9B17-1A2B3C4D5E6F}"
 APP_VERSION = "2.1.2"
@@ -76,6 +78,21 @@ _HISTORICAL_FORBIDDEN_LOCKVERITY_CLI_EXE_SHA256 = (
 
 def _iss_text() -> str:
     return ISS_SOURCE.read_text(encoding="utf-8", errors="replace")
+
+
+def test_privacy_policy_is_exposed_by_both_windows_packages() -> None:
+    """Static packaging contract; no release artifact is rebuilt."""
+    portable = PORTABLE_BUILD_SCRIPT.read_text(encoding="utf-8")
+    installer = BUILD_SCRIPT.read_text(encoding="utf-8")
+    iss = _iss_text()
+
+    assert PRIVACY_FILE.is_file()
+    assert '("docs/privacy.md", "PRIVACY.md")' in portable
+    assert '"PRIVACY.md"' in portable
+    assert 'privacy_doc = REPO_ROOT / "docs" / "privacy.md"' in installer
+    assert 'docs_dest / "privacy.md"' in installer
+    assert 'Name: "{group}\\Privacy policy"' in iss
+    assert 'Filename: "{app}\\docs\\privacy.md"' in iss
 
 
 def _build_text() -> str:
