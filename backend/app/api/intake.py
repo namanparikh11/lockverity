@@ -85,7 +85,7 @@ def _result_to_read(result: intake_service.IntakeResult) -> IntakeResultRead:
     "/github",
     response_model=IntakeResultRead,
     status_code=status.HTTP_201_CREATED,
-    summary="Register a public GitHub repository and start a scan.",
+    summary="Retrieve a public GitHub repository and prepare a queued scan.",
 )
 def create_github_repository(
     payload: GitHubRepositoryCreate,
@@ -136,13 +136,13 @@ def _spooled_upload_source(spooled) -> Callable[[int], bytes]:
     "/upload",
     response_model=IntakeResultRead,
     status_code=status.HTTP_201_CREATED,
-    summary="Upload a ZIP archive and start a scan.",
+    summary="Upload a ZIP archive and prepare a queued scan.",
 )
 async def create_uploaded_repository(
     session: DBSession,
     file: UploadFile = File(...),
 ) -> IntakeResultRead:
-    """Stream ``file`` to a quarantine, validate it, and start a scan.
+    """Stream ``file`` to a quarantine, validate it, and prepare a queued scan.
 
     The endpoint deliberately accepts only a single file.
     The upload is streamed chunk-by-chunk to the quarantine

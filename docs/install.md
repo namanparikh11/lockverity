@@ -474,8 +474,9 @@ are not republished.
 
 The Lockverity v2.1.0 release is **not code-signed**:
 
-- The Windows installer and the Windows portable are unsigned
-  binaries. Windows SmartScreen will show *"Windows protected
+- The Windows installer and the PE executables distributed inside
+  the portable package are unsigned. The portable ZIP itself does
+  not receive Authenticode signing. Windows SmartScreen will show *"Windows protected
   your PC"* on first launch. Click **More info → Run anyway**
   to proceed.
 - Some antivirus products will raise a heuristic flag on a

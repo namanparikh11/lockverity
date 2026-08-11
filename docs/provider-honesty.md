@@ -6,9 +6,10 @@ the foundation of the product's claim to be evidence-based.
 
 ## Definitions
 
-- **Missing data** - the provider was never queried. This is a
-  legitimate state for a scan that did not reach the relevant
-  stage.
+- **Not requested data** - the provider was never queried. This
+  includes a scan that did not reach the relevant stage and an
+  explicit operator choice recorded as `not_requested` with
+  reason `disabled_by_operator`.
 - **Unavailable data** - the provider was queried and refused or
   could not be reached. The application knows it does not know.
 - **Partial data** - the provider returned some records and
@@ -42,6 +43,9 @@ the foundation of the product's claim to be evidence-based.
 7. A new finding rule that returns a "no findings" verdict must
    declare which provider evidence it relies on. A rule cannot
    declare "no findings" if no provider was queried.
+8. A provider disabled by the operator must be gated before its
+   service, client, cache, or network path. It is not unavailable,
+   failed, degraded, or evidence of zero findings.
 
 ## Implementation
 

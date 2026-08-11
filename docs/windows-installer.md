@@ -238,17 +238,19 @@ controllable.
 - **No automatic updates.** The installer never downloads a
   newer version. Operators update Lockverity manually.
 - **No telemetry / no phone-home.** Lockverity never reports
-  usage data. The only network access is the operator's local
-  browser.
+  usage data to a Lockverity-operated service. GitHub repository
+  intake contacts GitHub, and applicable scan execution can
+  contact the OSV, deps.dev, and OpenSSF Scorecard providers the
+  operator selects. See the [privacy policy](privacy.md).
 - **No file association / no URL protocol / no shell extension.**
   The installer does not register `.lockverity` or any
   `lockverity://` protocol.
 
 ## SmartScreen / unsigned / antivirus
 
-The Lockverity v2.1 release is **not code-signed**. This is a
-deliberate choice (see the in-tree `INFRASTRUCTURE.md` for the
-rationale) and means:
+Lockverity v2.1.2 is **not code-signed**. The Windows installer
+and the PE executables distributed inside the portable package
+are currently unsigned. This means:
 
 - On a fresh install, **Windows SmartScreen** will show
   *"Windows protected your PC — Microsoft Defender SmartScreen
@@ -257,7 +259,7 @@ rationale) and means:
   to proceed. SmartScreen remembers the choice for the same
   executable.
 - Some antivirus products will raise a heuristic flag on a
-  freshly-signed or freshly-downloaded unsigned binary. This is
+  freshly downloaded unsigned binary. This is
   a false positive: the source is committed in this repository
   and the build is reproducible from the documented
   `python backend\scripts\build_windows_installer.py` command.

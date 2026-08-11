@@ -696,6 +696,9 @@ modify it. For more detail, see
   [`docs/windows-installer.md`](docs/windows-installer.md)
 - Windows portable reference:
   [`docs/windows-portable.md`](docs/windows-portable.md)
+- Privacy policy: [`docs/privacy.md`](docs/privacy.md)
+- Code signing policy:
+  [`docs/code-signing-policy.md`](docs/code-signing-policy.md)
 - Central install guide:
   [`docs/install.md`](docs/install.md)
 - Release checklist:

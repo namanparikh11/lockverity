@@ -250,11 +250,15 @@ The portable package does not install a Windows
 service, a scheduled task, a registry autorun, or a
 firewall rule. It does not include an automatic
 update mechanism. It does not collect, transmit, or
-phone home any telemetry. The runtime only makes
-network calls the operator explicitly configured
-(provider integrations, outbound webhook, etc.);
-without those configurations the runtime binds to
-``127.0.0.1`` and never opens a network socket.
+phone home any telemetry. The web application binds to
+``127.0.0.1``. GitHub repository intake necessarily
+contacts GitHub to resolve and download the submitted
+repository. At scan execution, OSV, deps.dev, and OpenSSF
+Scorecard are enabled by default when applicable and can
+be selected independently; disabled providers receive no
+client, cache, or network call. See the
+[privacy policy](privacy.md). The portable package also
+includes this policy as ``PRIVACY.md``.
 
 ## Clean uninstall
 

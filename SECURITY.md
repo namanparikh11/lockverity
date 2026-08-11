@@ -42,6 +42,11 @@ enforced by code, not policy:
   repository content.
 - The only network egress the application makes is to the providers
   it explicitly registers (see `docs/provider-honesty.md`).
+- OSV, deps.dev, and OpenSSF Scorecard can be selected independently
+  for each scan. Disabled providers are gated before service, cache,
+  and network activity. GitHub repository intake necessarily contacts
+  GitHub to resolve and download the submitted public repository. See
+  the [privacy policy](docs/privacy.md) for transmitted coordinates.
 
 This guarantee extends to:
 
