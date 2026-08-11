@@ -22,6 +22,7 @@ from app.models.finding import (
 from app.models.provider_observation import ProviderStatus
 from app.models.scan_job import ScanJobState
 from app.models.scan_run import ScanStatus, ScanTriggerType
+from app.providers.selection import ExternalEvidenceProviders
 from app.repositories.finding_repo import MAX_PAGE_SIZE
 from app.schemas.common import SchemaModel
 from app.schemas.intake import ScanCancelRequest, ScanRunRequest
@@ -478,17 +479,23 @@ def run_scan(
     session: DBSession,
     payload: ScanRunRequest | None = None,
 ) -> ScanRead:
-    """Run ``scan_id`` synchronously on the local worker.
+    """Schedule ``scan_id`` on the local worker.
 
     The endpoint is idempotent for already-running scans (the
     request returns 409). For terminal scans, the run is
     rejected with 409. For queued scans, the scan is moved to
-    ``running`` and the worker schedules the orchestration.
+    ``running`` and the worker schedules the orchestration. The
+    optional request body selects OSV, deps.dev, and OpenSSF
+    Scorecard for this execution attempt; omitted selections
+    preserve the all-enabled behaviour.
     """
     from app.repositories import job_repo
 
     scan = scan_service.get_scan_or_404(session, scan_id)
     force = bool(payload and payload.force)
+    provider_selection = (
+        payload.provider_selection() if payload is not None else ExternalEvidenceProviders()
+    )
     if scan.status == ScanStatus.RUNNING and not force:
         raise ApiError(
             ApiErrorCode.ILLEGAL_TRANSITION,
@@ -532,9 +539,13 @@ def run_scan(
     orchestrator = _orchestrator_for_session(session)
     cancellation = _CancellationToken()
 
-    def _run() -> None:
+    def _run(selection: ExternalEvidenceProviders = provider_selection) -> None:
         try:
-            orchestrator.run(scan_id, cancellation=cancellation)
+            orchestrator.run(
+                scan_id,
+                cancellation=cancellation,
+                provider_selection=selection,
+            )
         except Exception:
             logger.exception("scan %s failed in worker", scan_id)
         finally:

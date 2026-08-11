@@ -52,9 +52,16 @@ from app.providers.results import (
     ParserResult,
     ParserWarning,
 )
+from app.providers.selection import ExternalEvidenceProviders
 from app.rules import default_rules
 from app.services import write_service
 from app.services.provider_service import (
+    DEPS_DEV_PROVIDER,
+    OP_DEPS_DEV_ENRICH,
+    OP_OSV_QUERY,
+    OP_SCORECARD_READ,
+    OSV_PROVIDER,
+    SCORECARD_PROVIDER,
     EnrichmentLookup,
     PostureLookup,
     ProviderService,
@@ -119,7 +126,12 @@ class AnalysisPipeline:
             provider_service_factory or _default_provider_service_factory(settings=settings)
         )
 
-    def run(self, scan_id: int) -> PipelineSummary:
+    def run(
+        self,
+        scan_id: int,
+        *,
+        provider_selection: ExternalEvidenceProviders | None = None,
+    ) -> PipelineSummary:
         """Run the full analysis pipeline against an already-queued scan.
 
         The pipeline is robust against missing artefacts: if a
@@ -127,6 +139,7 @@ class AnalysisPipeline:
         corresponding stages are recorded as ``skipped`` and the
         pipeline still finalizes the scan.
         """
+        provider_selection = provider_selection or ExternalEvidenceProviders()
         stages: list[StageOutcome] = []
         components_persisted = 0
         edges_persisted = 0
@@ -146,12 +159,30 @@ class AnalysisPipeline:
         stages.append(outcome)
 
         # --- dependency_enrichment (deps.dev) ---------------------------
-        outcome, persisted_enrichments = self._stage_dependency_enrichment(scan_id)
+        if provider_selection.deps_dev:
+            outcome, persisted_enrichments = self._stage_dependency_enrichment(scan_id)
+        else:
+            outcome, persisted_enrichments = self._stage_provider_not_requested(
+                scan_id,
+                provider=DEPS_DEV_PROVIDER,
+                operation=OP_DEPS_DEV_ENRICH,
+                stage="dependency_enrichment",
+                reason="disabled_by_operator",
+            )
         stages.append(outcome)
         enrichments_persisted = persisted_enrichments
 
         # --- vulnerability_query (OSV) ----------------------------------
-        outcome, persisted_vulns = self._stage_vulnerability_query(scan_id)
+        if provider_selection.osv:
+            outcome, persisted_vulns = self._stage_vulnerability_query(scan_id)
+        else:
+            outcome, persisted_vulns = self._stage_provider_not_requested(
+                scan_id,
+                provider=OSV_PROVIDER,
+                operation=OP_OSV_QUERY,
+                stage="vulnerability_query",
+                reason="disabled_by_operator",
+            )
         stages.append(outcome)
         vulnerabilities_persisted = persisted_vulns
 
@@ -160,7 +191,10 @@ class AnalysisPipeline:
         stages.append(outcome)
 
         # --- repository_posture (OpenSSF Scorecard) ---------------------
-        outcome, persisted_posture = self._stage_repository_posture(scan_id)
+        if provider_selection.openssf:
+            outcome, persisted_posture = self._stage_repository_posture(scan_id)
+        else:
+            outcome, persisted_posture = self._stage_openssf_not_requested(scan_id)
         stages.append(outcome)
         posture_findings_persisted = persisted_posture
 
@@ -183,6 +217,66 @@ class AnalysisPipeline:
             vulnerabilities_persisted=vulnerabilities_persisted,
             enrichments_persisted=enrichments_persisted,
             posture_findings_persisted=posture_findings_persisted,
+        )
+
+    def _stage_provider_not_requested(
+        self,
+        scan_id: int,
+        *,
+        provider: str,
+        operation: str,
+        stage: str,
+        reason: str,
+    ) -> tuple[StageOutcome, int]:
+        """Persist a zero-call not-requested outcome for one provider."""
+
+        with self._session_factory() as session:
+            _get_scan_or_404(session, scan_id)
+            session.add(
+                ProviderObservation(
+                    scan_run_id=scan_id,
+                    provider=provider,
+                    operation=operation,
+                    status=ProviderStatus.NOT_REQUESTED,
+                    requested_at=None,
+                    completed_at=None,
+                    http_status=None,
+                    records_returned=0,
+                    cache_status=None,
+                    retry_after=None,
+                    error_code=reason,
+                    error_summary=None,
+                    evidence_json=None,
+                )
+            )
+            session.commit()
+        return (
+            StageOutcome(
+                stage=stage,
+                status="skipped",
+                records_processed=0,
+            ),
+            0,
+        )
+
+    def _stage_openssf_not_requested(self, scan_id: int) -> tuple[StageOutcome, int]:
+        """Skip OpenSSF without constructing its service or consulting its cache."""
+
+        from app.models.repository import Repository, RepositorySourceType
+
+        with self._session_factory() as session:
+            scan = _get_scan_or_404(session, scan_id)
+            repository = session.get(Repository, scan.repository_id)
+            is_archive = bool(
+                repository is not None
+                and repository.source_type == RepositorySourceType.UPLOADED_ARCHIVE
+            )
+        return self._stage_provider_not_requested(
+            scan_id,
+            provider=SCORECARD_PROVIDER,
+            operation=OP_SCORECARD_READ,
+            stage="repository_posture",
+            reason="not_applicable" if is_archive else "disabled_by_operator",
         )
 
     # ------------------------------------------------------------------

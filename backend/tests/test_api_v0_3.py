@@ -26,6 +26,7 @@ from app.models.finding import (
     FindingSeverity,
 )
 from app.models.manifest import Manifest, ManifestParseStatus
+from app.models.provider_observation import ProviderObservation, ProviderStatus
 from app.models.scan_run import ScanStatus, ScanTriggerType
 from app.models.workspace import WorkspaceKind, WorkspaceState
 from app.services import repository_service, scan_service
@@ -394,6 +395,16 @@ def test_list_exports_cyclonedx_1_7_partial_scan_with_inventory_carries_warning(
         assert scan is not None
         scan.status = ScanStatus.PARTIAL
         s.add(scan)
+        s.add(
+            ProviderObservation(
+                scan_run_id=scan_id,
+                provider="osv",
+                operation="osv_vulnerability_query",
+                status=ProviderStatus.UNAVAILABLE,
+                records_returned=0,
+                error_code="provider_unavailable",
+            )
+        )
         s.commit()
     client = TestClient(app)
     r = client.get(f"/api/v1/scans/{scan_id}/exports")

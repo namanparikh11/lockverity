@@ -36,6 +36,7 @@ from app.models.scan_stage import (
     StageStatus,
     StageType,
 )
+from app.providers.selection import ExternalEvidenceProviders
 from app.repositories import (
     scan_repo,
     stage_repo,
@@ -91,6 +92,21 @@ _REMOTE_STAGES: frozenset[StageType] = frozenset(
         StageType.EXPORT_GENERATION,
     }
 )
+
+
+def _provider_stage_enabled(
+    stage_type: StageType,
+    selection: ExternalEvidenceProviders,
+) -> bool:
+    """Return whether ``stage_type`` should be pre-marked as running."""
+
+    if stage_type == StageType.VULNERABILITY_QUERY:
+        return selection.osv
+    if stage_type == StageType.DEPENDENCY_ENRICHMENT:
+        return selection.deps_dev
+    if stage_type == StageType.REPOSITORY_POSTURE:
+        return selection.openssf
+    return True
 
 
 @dataclass(frozen=True, slots=True)
@@ -153,9 +169,11 @@ class ScanOrchestrator:
         scan_id: int,
         *,
         cancellation: _CancellationToken | None = None,
+        provider_selection: ExternalEvidenceProviders | None = None,
     ) -> OrchestrationOutcome:
         """Run ``scan_id`` to completion (or to a non-recoverable state)."""
         cancellation = cancellation or _CancellationToken()
+        provider_selection = provider_selection or ExternalEvidenceProviders()
         # Phase 1: transition the scan to ``running``. We use a
         # dedicated session so the state change is durable
         # even if the scan later fails.
@@ -177,7 +195,11 @@ class ScanOrchestrator:
             # stages that do real local work. The pipeline owns
             # its own per-stage state transitions; the orchestrator
             # reads the resulting stage rows at the end.
-            self._run_local_pipeline(scan_id, cancellation=cancellation)
+            self._run_local_pipeline(
+                scan_id,
+                cancellation=cancellation,
+                provider_selection=provider_selection,
+            )
             for stage_type in _stage_pipeline():
                 # Refresh the per-stage state after the pipeline ran.
                 record = self._read_stage_record(scan_id, stage_type, cancellation=cancellation)
@@ -248,6 +270,7 @@ class ScanOrchestrator:
         scan_id: int,
         *,
         cancellation: _CancellationToken,
+        provider_selection: ExternalEvidenceProviders,
     ) -> None:
         """Run the v0.3 analysis pipeline for the local stages.
 
@@ -310,11 +333,19 @@ class ScanOrchestrator:
                         cancellation=cancellation,
                     )
                 continue
+            if not _provider_stage_enabled(stage_type, provider_selection):
+                # The pipeline persists the not-requested observation and
+                # returns a skipped outcome. Keeping the stage PENDING here
+                # preserves the truthful PENDING -> SKIPPED transition.
+                continue
             self._mark_stage_running(scan_id, stage_type)
 
         if not cancellation.is_set():
             try:
-                summary = pipeline.run(scan_id)
+                summary = pipeline.run(
+                    scan_id,
+                    provider_selection=provider_selection,
+                )
             except Exception as exc:
                 logger.exception("analysis pipeline crashed for scan %s", scan_id)
                 # Mark all local-v0.3 stages as failed.

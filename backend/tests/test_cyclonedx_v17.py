@@ -63,6 +63,7 @@ from app.models.finding import (
     FindingStatus,
 )
 from app.models.manifest import Manifest, ManifestParseStatus
+from app.models.provider_observation import ProviderObservation, ProviderStatus
 from app.models.repository import (
     Repository,
     RepositoryProvider,
@@ -310,6 +311,17 @@ def test_eligibility_partial_with_inventory_is_eligible_with_limitation(
     scan_id = _make_scan(session, repo_id=repo_id, status=ScanStatus.PARTIAL)
     m = _make_manifest(session, scan_id=scan_id, path="package.json")
     _make_component(session, scan_id=scan_id, manifest_id=m, name="lodash", version="4.17.21")
+    session.add(
+        ProviderObservation(
+            scan_run_id=scan_id,
+            provider="osv",
+            operation="osv_vulnerability_query",
+            status=ProviderStatus.UNAVAILABLE,
+            records_returned=0,
+            error_code="provider_unavailable",
+        )
+    )
+    session.commit()
     result = CycloneDxV17Exporter(lambda: session).export(scan_run_id=scan_id)
     assert isinstance(result, ProviderSuccess)
     body = json.loads(result.data)
@@ -393,7 +405,8 @@ def test_evaluate_export_eligibility_helper_is_authoritative() -> None:
         _scan_stub(ScanStatus.PARTIAL), component_count=2, manifest_count=1
     )
     assert eligibility.eligible is True
-    assert "provider_degraded" in eligibility.limitations
+    assert eligibility.provider_coverage == "unknown"
+    assert "provider_coverage_unknown" in eligibility.limitations
 
 
 def _scan_stub(status: ScanStatus) -> ScanRun:
@@ -549,10 +562,11 @@ def test_exporter_does_not_fabricate_missing_version(session) -> None:
     )
     props = {p["name"]: p["value"] for p in unresolved.get("properties", [])}
     assert props.get("lockverity:version-source") == "unresolved"
-    # No placeholder string appears anywhere in the BOM.
+    # No placeholder string appears in component identity. Coverage metadata
+    # may honestly use ``unknown`` when no provider observation was persisted.
     forbidden = re.compile(r"\b(unspecified|unknown|latest|n/a)\b", re.IGNORECASE)
-    body_text = r.data.decode("utf-8")
-    assert forbidden.search(body_text) is None, "forbidden placeholder found in BOM"
+    component_text = json.dumps(body["components"], sort_keys=True)
+    assert forbidden.search(component_text) is None, "forbidden placeholder found in BOM"
     # Determinism: re-run produces the same bytes.
     r2 = CycloneDxV17Exporter(lambda: session).export(scan_run_id=scan_id)
     assert isinstance(r2, ProviderSuccess)
@@ -561,7 +575,7 @@ def test_exporter_does_not_fabricate_missing_version(session) -> None:
     from cyclonedx.schema.schema import SchemaVersion
     from cyclonedx.validation.json import JsonStrictValidator
 
-    result = JsonStrictValidator(SchemaVersion.V1_7).validate_str(body_text)
+    result = JsonStrictValidator(SchemaVersion.V1_7).validate_str(r.data.decode("utf-8"))
     assert not result, f"schema validation reported: {list(result)}"
 
 
@@ -1108,6 +1122,17 @@ def test_exporter_partial_scan_does_not_erase_local_components(session) -> None:
     m = _make_manifest(session, scan_id=scan_id, path="package.json")
     _make_component(session, scan_id=scan_id, manifest_id=m, name="lodash", version="4.17.21")
     _make_component(session, scan_id=scan_id, manifest_id=m, name="left-pad", version="1.0.0")
+    session.add(
+        ProviderObservation(
+            scan_run_id=scan_id,
+            provider="osv",
+            operation="osv_vulnerability_query",
+            status=ProviderStatus.UNAVAILABLE,
+            records_returned=0,
+            error_code="provider_unavailable",
+        )
+    )
+    session.commit()
     r = CycloneDxV17Exporter(lambda: session).export(scan_run_id=scan_id)
     body = json.loads(r.data)
     assert len(body["components"]) == 2
@@ -1581,6 +1606,17 @@ def _setup_preview_scan(
             version=kwargs.pop("version", "4.17.21"),
             **kwargs,
         )
+    if status == ScanStatus.PARTIAL:
+        session.add(
+            ProviderObservation(
+                scan_run_id=scan_id,
+                provider="osv",
+                operation="osv_vulnerability_query",
+                status=ProviderStatus.UNAVAILABLE,
+                records_returned=0,
+                error_code="provider_unavailable",
+            )
+        )
     session.commit()
     return scan_id
 
@@ -2048,16 +2084,15 @@ def test_preview_provider_degraded_partial_scan_still_reports_degraded(
     assert preview["evidence_coverage"]["provider_coverage"] == "degraded"
 
 
-def test_preview_completed_eligible_scan_reports_provider_coverage_ok(
+def test_preview_completed_scan_without_observations_reports_provider_coverage_unknown(
     session,
 ) -> None:
-    """A completed eligible scan with no provider
-    degradation keeps the v0.6 honest positive label."""
+    """Completion alone is not proof that provider evidence was obtained."""
     scan_id = _setup_preview_scan(session, status=ScanStatus.COMPLETED)
     preview = CycloneDxV17Exporter(lambda: session).preview(scan_run_id=scan_id)
     assert preview is not None
     assert preview["eligibility"]["code"] == "eligible"
-    assert preview["evidence_coverage"]["provider_coverage"] == "ok"
+    assert preview["evidence_coverage"]["provider_coverage"] == "unknown"
 
 
 def test_preview_failed_scan_does_not_claim_inventory_complete(session) -> None:
@@ -2201,6 +2236,8 @@ def test_preview_coverage_vocabulary_matches_documented_set(session) -> None:
     allowed = {
         "ok",
         "degraded",
+        "not_requested",
+        "unknown",
         "not_applicable",
         # ``complete`` / ``empty`` are the inventory
         # vocabulary for eligible scans.

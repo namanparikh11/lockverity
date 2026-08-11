@@ -8,6 +8,7 @@ from typing import Any
 from pydantic import Field, field_validator
 
 from app.models.workspace import WorkspaceKind, WorkspaceState
+from app.providers.selection import ExternalEvidenceProviders
 from app.schemas.common import NonEmptyStr, SchemaModel, ShortStr, TimestampMixin
 from app.schemas.repository import RepositoryRead
 from app.schemas.scan import ScanRead
@@ -106,10 +107,30 @@ class ScanCancelRequest(SchemaModel):
     reason: ShortStr | None = None
 
 
+class ExternalEvidenceProvidersRequest(SchemaModel):
+    """External evidence providers requested for one scan run."""
+
+    osv: bool = True
+    deps_dev: bool = True
+    openssf: bool = True
+
+    def to_domain(self) -> ExternalEvidenceProviders:
+        return ExternalEvidenceProviders(
+            osv=self.osv,
+            deps_dev=self.deps_dev,
+            openssf=self.openssf,
+        )
+
+
 class ScanRunRequest(SchemaModel):
     """Optional payload for ``POST /api/v1/scans/{id}/run``."""
 
     force: bool = False
+    external_evidence_providers: ExternalEvidenceProvidersRequest | None = None
+
+    def provider_selection(self) -> ExternalEvidenceProviders:
+        requested = self.external_evidence_providers
+        return requested.to_domain() if requested is not None else ExternalEvidenceProviders()
 
 
 class ProviderLimit(SchemaModel):
@@ -139,6 +160,7 @@ class SystemWorkspaceCleanupResponse(SchemaModel):
 
 
 __all__ = [
+    "ExternalEvidenceProvidersRequest",
     "GitHubRepositoryCreate",
     "IntakeResultRead",
     "IntakeSummary",

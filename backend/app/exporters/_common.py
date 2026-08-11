@@ -20,7 +20,7 @@ from sqlalchemy.orm import Session
 from app.models.component import Component
 from app.models.finding import Finding
 from app.models.manifest import Manifest
-from app.models.provider_observation import ProviderObservation
+from app.models.provider_observation import ProviderObservation, ProviderStatus
 from app.models.scan_run import ScanRun, ScanStatus
 
 # Reasonable hard caps. The defaults match the v0.1 configuration
@@ -190,6 +190,9 @@ class ExportEligibility:
     # The set of explicit limitations the consumer should surface.
     # Empty for ineligible scans.
     limitations: tuple[str, ...] = ()
+    # Derived from persisted external-provider observations when supplied.
+    # ``unknown`` is safer than inferring success from scan completion.
+    provider_coverage: str = "unknown"
 
 
 _INELIGIBLE_TERMINAL: dict[ScanStatus, tuple[str, str]] = {
@@ -208,6 +211,7 @@ def evaluate_export_eligibility(
     *,
     component_count: int,
     manifest_count: int,
+    provider_observations: Sequence[ProviderObservation] | None = None,
 ) -> ExportEligibility:
     """Return the v0.6 export-eligibility verdict for ``scan``.
 
@@ -215,17 +219,43 @@ def evaluate_export_eligibility(
     v0.6 SBOM exporter, the API layer, and the frontend must all
     reach the same verdict for the same scan state.
     """
+    coverage, omitted_by_operator = _provider_coverage_from_observations(
+        scan,
+        provider_observations,
+    )
     if scan.status in _INELIGIBLE_TERMINAL:
         code, reason = _INELIGIBLE_TERMINAL[scan.status]
-        return ExportEligibility(eligible=False, reason=reason, code=code)
+        return ExportEligibility(
+            eligible=False,
+            reason=reason,
+            code=code,
+            provider_coverage="not_applicable",
+        )
     if scan.status in _INELIGIBLE_INFLIGHT:
         code, reason = _INELIGIBLE_INFLIGHT[scan.status]
-        return ExportEligibility(eligible=False, reason=reason, code=code)
+        return ExportEligibility(
+            eligible=False,
+            reason=reason,
+            code=code,
+            provider_coverage="not_applicable",
+        )
     if scan.status == ScanStatus.COMPLETED:
+        if omitted_by_operator:
+            return ExportEligibility(
+                eligible=True,
+                reason=(
+                    "Scan completed with local-analysis evidence; one or more external "
+                    "evidence providers were not requested by the operator."
+                ),
+                code="eligible_with_provider_omission",
+                limitations=("provider_omitted_by_operator",),
+                provider_coverage="not_requested",
+            )
         return ExportEligibility(
             eligible=True,
             reason="Scan completed with persisted local-analysis evidence.",
             code="eligible",
+            provider_coverage=coverage,
         )
     # ScanStatus.PARTIAL - the only partial path that qualifies.
     if component_count == 0 or manifest_count == 0:
@@ -236,13 +266,86 @@ def evaluate_export_eligibility(
                 "complete enough to derive an inventory."
             ),
             code="partial_incomplete",
+            provider_coverage="not_applicable",
         )
+    limitations: list[str] = []
+    if coverage == "degraded":
+        limitations.append("provider_degraded")
+    elif coverage == "unknown":
+        limitations.append("provider_coverage_unknown")
+    else:
+        limitations.append("partial_scan")
+    if omitted_by_operator:
+        limitations.append("provider_omitted_by_operator")
+
+    if limitations == ["provider_degraded"]:
+        code = "eligible_with_provider_degradation"
+        reason = "Scan is partial due to provider degradation; local inventory is complete."
+    elif limitations == ["partial_scan", "provider_omitted_by_operator"]:
+        code = "eligible_with_provider_omission"
+        reason = (
+            "Scan is partial with a complete local inventory; one or more external "
+            "evidence providers were not requested by the operator."
+        )
+    elif "provider_degraded" in limitations and omitted_by_operator:
+        code = "eligible_with_provider_limitations"
+        reason = (
+            "Scan is partial due to provider degradation, and one or more other external "
+            "evidence providers were not requested; local inventory is complete."
+        )
+    else:
+        code = "eligible_partial"
+        reason = "Scan is partial, but persisted local inventory is complete enough to export."
     return ExportEligibility(
         eligible=True,
-        reason="Scan is partial due to provider degradation; local inventory is complete.",
-        code="eligible_with_provider_degradation",
-        limitations=("provider_degraded",),
+        reason=reason,
+        code=code,
+        limitations=tuple(limitations),
+        provider_coverage=coverage,
     )
+
+
+def _provider_coverage_from_observations(
+    scan: ScanRun,
+    observations: Sequence[ProviderObservation] | None,
+) -> tuple[str, bool]:
+    """Return an honest coverage label and operator-omission flag.
+
+    ``None`` and an explicit empty sequence both mean there is no persisted
+    evidence from which to derive provider coverage. Completion alone never
+    becomes proof of successful provider coverage.
+    """
+
+    if observations is None:
+        return "unknown", False
+
+    external = [row for row in observations if row.provider in {"osv", "deps_dev", "openssf"}]
+    if not external:
+        return "unknown", False
+    omitted_by_operator = any(
+        row.status == ProviderStatus.NOT_REQUESTED and row.error_code == "disabled_by_operator"
+        for row in external
+    )
+    if any(
+        row.status
+        in {
+            ProviderStatus.UNAVAILABLE,
+            ProviderStatus.PARTIAL,
+            ProviderStatus.RATE_LIMITED,
+        }
+        for row in external
+    ):
+        return "degraded", omitted_by_operator
+    if omitted_by_operator:
+        return "not_requested", True
+    if any(row.status == ProviderStatus.UNKNOWN for row in external):
+        return "unknown", False
+    not_requested = [row for row in external if row.status == ProviderStatus.NOT_REQUESTED]
+    if any(row.error_code not in {"no_components", "not_applicable"} for row in not_requested):
+        return "not_requested", False
+    if any(row.status in {ProviderStatus.AVAILABLE, ProviderStatus.CACHED} for row in external):
+        return "ok", False
+    return "not_applicable", False
 
 
 def fetch_manifests(

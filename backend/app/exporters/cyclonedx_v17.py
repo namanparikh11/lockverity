@@ -59,11 +59,13 @@ from app.exporters._common import (
     fetch_components,
     fetch_dependency_edges,
     fetch_manifests,
+    fetch_observations,
     get_scan_or_raise,
 )
 from app.models.component import Component
 from app.models.finding import Finding, FindingCategory
 from app.models.manifest import Manifest
+from app.models.provider_observation import ProviderObservation
 from app.models.repository import Repository
 from app.models.scan_run import ScanRun, ScanStatus
 from app.providers.results import (
@@ -446,11 +448,7 @@ def _provider_coverage(eligibility: ExportEligibility) -> str:
     provider phase is fine", "we know it is degraded",
     and "we cannot say because the scan did not reach that
     phase"."""
-    if not eligibility.eligible:
-        return "not_applicable"
-    if "provider_degraded" in eligibility.limitations:
-        return "degraded"
-    return "ok"
+    return eligibility.provider_coverage
 
 
 def _duplicate_package_version_count(components: list[Component]) -> int:
@@ -484,6 +482,7 @@ def build_cyclonedx_v17_preview(
     components: list[Component],
     manifests: list[Manifest],
     edges: list[Any],
+    provider_observations: list[ProviderObservation] | None = None,
 ) -> dict[str, Any]:
     """Return the v0.7 CycloneDX 1.7 preview / readiness summary.
 
@@ -551,6 +550,7 @@ def build_cyclonedx_v17_preview(
         scan,
         component_count=len(components),
         manifest_count=len(manifests),
+        provider_observations=provider_observations,
     )
     eligibility_block = {
         "eligible": eligibility.eligible,
@@ -606,6 +606,8 @@ def build_cyclonedx_v17_preview(
         "no_repository_code_execution",
         "unavailable_provider_data_is_not_converted_to_none",
     ]
+    if "provider_omitted_by_operator" in eligibility.limitations:
+        omissions.append("external_provider_evidence_omitted_by_operator")
 
     # 7. legacy export relationship
     legacy_note = (
@@ -680,6 +682,7 @@ class CycloneDxV17Exporter:
             components = list(fetch_components(session, scan_run_id))
             manifests = list(fetch_manifests(session, scan_run_id))
             edges = list(fetch_dependency_edges(session, scan_run_id))
+            provider_observations = list(fetch_observations(session, scan_run_id))
         finally:
             session.close()
         return build_cyclonedx_v17_preview(
@@ -687,6 +690,7 @@ class CycloneDxV17Exporter:
             components=components,
             manifests=manifests,
             edges=edges,
+            provider_observations=provider_observations,
         )
 
     def export(self, *, scan_run_id: int) -> ProviderSuccess[bytes] | ProviderUnavailable:
@@ -710,6 +714,7 @@ class CycloneDxV17Exporter:
             components = list(fetch_components(session, scan_run_id))
             manifests = list(fetch_manifests(session, scan_run_id))
             edges = list(fetch_dependency_edges(session, scan_run_id))
+            provider_observations = list(fetch_observations(session, scan_run_id))
             licence_findings = self._fetch_licence_findings(session, scan_run_id)
             # Materialise the fields we need before the session
             # closes. After ``session.close()`` the detached rows
@@ -730,6 +735,7 @@ class CycloneDxV17Exporter:
             scan,
             component_count=len(components),
             manifest_count=len(manifests),
+            provider_observations=provider_observations,
         )
         if not eligibility.eligible:
             return self._unavailable(code=eligibility.code, summary=eligibility.reason)
@@ -1028,11 +1034,13 @@ class CycloneDxV17Exporter:
             ("lockverity:dependency-graph-coverage", graph_coverage),
             (
                 "lockverity:provider-coverage",
-                "degraded" if "provider_degraded" in eligibility.limitations else "ok",
+                eligibility.provider_coverage,
             ),
         ]
         if "provider_degraded" in eligibility.limitations:
             top_properties.append(("lockverity:partial-reason", "provider_degradation"))
+        if "provider_omitted_by_operator" in eligibility.limitations:
+            top_properties.append(("lockverity:provider-omission-reason", "disabled_by_operator"))
 
         # 8. Render and validate. The library is happy to
         # serialise the BOM before we have attached our

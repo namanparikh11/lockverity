@@ -46,6 +46,7 @@ from app.models.finding import (
 from app.models.manifest import Manifest
 from app.models.scan_run import ScanRun
 from app.providers.results import ProviderSuccess
+from app.providers.selection import ExternalEvidenceProviders
 from app.schemas.common import SchemaModel
 from app.schemas.comparison import ScanComparisonResponse
 from app.schemas.intake import ScanRunRequest
@@ -1162,15 +1163,42 @@ def list_exports(
         ).scalar_one()
         or 0
     )
+    from app.models.provider_observation import ProviderObservation
+
+    provider_observations = (
+        session.query(ProviderObservation)
+        .filter(ProviderObservation.scan_run_id == scan.id)
+        .order_by(ProviderObservation.id.asc())
+        .all()
+    )
     cdx_17_eligibility = evaluate_export_eligibility(
         scan,
         component_count=component_count,
         manifest_count=manifest_count,
+        provider_observations=provider_observations,
     )
     if cdx_17_eligibility.eligible:
         cdx_17_supported = True
         cdx_17_not_supported_reason: str | None = None
-        if "provider_degraded" in cdx_17_eligibility.limitations:
+        if {
+            "provider_omitted_by_operator",
+            "provider_degraded",
+        }.issubset(cdx_17_eligibility.limitations):
+            cdx_17_description = (
+                "CycloneDX 1.7 software bill of materials as JSON. "
+                "Generated against the official 1.7 schema. One or more "
+                "external evidence providers were not requested by the "
+                "operator, and other requested provider evidence was degraded; "
+                "local inventory remains available."
+            )
+        elif "provider_omitted_by_operator" in cdx_17_eligibility.limitations:
+            cdx_17_description = (
+                "CycloneDX 1.7 software bill of materials as JSON. "
+                "Generated against the official 1.7 schema. One or more "
+                "external evidence providers were not requested by the "
+                "operator; local inventory remains available."
+            )
+        elif "provider_degraded" in cdx_17_eligibility.limitations:
             # Provider-degraded partial scan: the local
             # inventory is complete, but vulnerability /
             # enrichment evidence is partial. The descriptor
@@ -1515,10 +1543,12 @@ def auto_run(
     verification only**. It blocks the HTTP worker thread
     until the orchestrator reaches a terminal state. The
     duration is bounded by the per-scan and per-file limits
-    in :class:`app.core.config.Settings` (the orchestrator
-    never executes repository code, never makes a network
-    call to an upstream provider, and never exceeds the
-    configured archive limits), but the request itself can
+    in :class:`app.core.config.Settings`. The orchestrator
+    never executes repository code and never exceeds the
+    configured archive limits. It can contact OSV, deps.dev,
+    and OpenSSF Scorecard when those providers are applicable
+    and selected in the request; omitted selections preserve
+    the all-enabled default. The request itself can
     take seconds to a few minutes depending on the size of
     the workspace.
 
@@ -1531,8 +1561,8 @@ def auto_run(
     :file:`frontend/src/pages/ScanDetailsPage.tsx`.
 
     ``auto-run`` is a thin convenience: it accepts the same
-    ``force`` payload as ``/run`` so a re-run can be
-    requested. It cannot silently replace the asynchronous
+    ``force`` and ``external_evidence_providers`` payload as
+    ``/run``. It cannot silently replace the asynchronous
     flow because it is documented here as a local-only
     convenience, it shares the same orchestrator code path,
     and the only consumer in this repository is the
@@ -1542,7 +1572,10 @@ def auto_run(
 
     scan_service.get_scan_or_404(session, scan_id)
     orchestrator = ScanOrchestrator(_orchestrator_session_factory())
-    outcome = orchestrator.run(scan_id)
+    provider_selection = (
+        payload.provider_selection() if payload is not None else ExternalEvidenceProviders()
+    )
+    outcome = orchestrator.run(scan_id, provider_selection=provider_selection)
     return {
         "scan_id": outcome.scan_id,
         "final_status": outcome.final_status.value,

@@ -112,6 +112,7 @@ def build_evidence_report(
     incoming_edge_count_by_component: dict[int, int],
     licence_observed_by_component: dict[int, bool],
     provider_observed_by_component: dict[int, bool],
+    provider_observations: list[ProviderObservation] | None = None,
 ) -> dict[str, Any]:
     """Return the v1.0 evidence report preview for ``scan``.
 
@@ -150,6 +151,7 @@ def build_evidence_report(
         scan=scan,
         component_count=len(components),
         manifest_count=len(manifests),
+        provider_observations=provider_observations,
     )
     inventory_coverage = _inventory_coverage(
         component_count=len(components),
@@ -827,6 +829,12 @@ class EvidenceReportService:
             session=session,
             scan_run_id=scan_run_id,
         )
+        provider_observations = (
+            session.query(ProviderObservation)
+            .filter(ProviderObservation.scan_run_id == scan_run_id)
+            .order_by(ProviderObservation.id.asc())
+            .all()
+        )
         return build_evidence_report(
             scan=scan,
             repository=repository,
@@ -836,6 +844,7 @@ class EvidenceReportService:
             incoming_edge_count_by_component=incoming_edge_count_by_component,
             licence_observed_by_component=licence_observed_by_component,
             provider_observed_by_component=provider_observed_by_component,
+            provider_observations=list(provider_observations),
         )
 
 
