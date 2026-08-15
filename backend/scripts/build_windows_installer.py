@@ -230,9 +230,12 @@ def _verify_microsoft_authenticode(path: Path) -> str:
             "ERROR: PowerShell is required to verify the WebView2 bootstrapper signature."
         )
     script = (
-        "$s = Get-AuthenticodeSignature -LiteralPath $args[0]; "
+        "$s = Get-AuthenticodeSignature "
+        "-LiteralPath $env:LOCKVERITY_AUTHENTICODE_TARGET; "
         "[Console]::Out.Write($s.Status.ToString() + '|' + $s.SignerCertificate.Subject)"
     )
+    verification_env = dict(os.environ)
+    verification_env["LOCKVERITY_AUTHENTICODE_TARGET"] = str(path)
     result = subprocess.run(  # noqa: S603 - fixed PowerShell verification command
         [
             powershell,
@@ -240,8 +243,8 @@ def _verify_microsoft_authenticode(path: Path) -> str:
             "-NonInteractive",
             "-Command",
             script,
-            str(path),
         ],
+        env=verification_env,
         capture_output=True,
         text=True,
         encoding="utf-8",

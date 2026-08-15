@@ -50,6 +50,8 @@ def test_installer_builder_uses_microsoft_fwlink_and_authenticode_gate() -> None
     builder = (BACKEND_ROOT / "scripts" / "build_windows_installer.py").read_text(encoding="utf-8")
     assert "https://go.microsoft.com/fwlink/p/?LinkId=2124703" in builder
     assert "Get-AuthenticodeSignature" in builder
+    assert "LOCKVERITY_AUTHENTICODE_TARGET" in builder
+    assert "$args[0]" not in builder
     assert 'status != "Valid"' in builder
     assert '"Microsoft Corporation" not in subject' in builder
     assert '"webview2_bootstrapper_sha256"' in builder
