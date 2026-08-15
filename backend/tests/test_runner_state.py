@@ -70,6 +70,13 @@ def _spawn_cli_in_process(
         "USERPROFILE": str(home / "tmp"),
     }
     (home / "tmp").mkdir(parents=True, exist_ok=True)
+    # The bind-failure scenario only needs a valid dist root; it
+    # must not depend on an old portable build from one developer's
+    # machine. A clean packaging build is expected to remove those
+    # stale output directories.
+    frontend_dist = home / "frontend-dist"
+    frontend_dist.mkdir(parents=True, exist_ok=True)
+    (frontend_dist / "index.html").write_text("<!doctype html>\n", encoding="utf-8")
     code = (
         "import sys; "
         "from pathlib import Path; "
@@ -89,7 +96,7 @@ def _spawn_cli_in_process(
         # Point at a real frontend dist so the runner's
         # ``validate_dist`` call does not raise before
         # reaching the bind step.
-        "dist_path = Path(r'C:\\Users\\Naman Parikh\\Documents\\Minimax Projects\\Lockverity\\build\\packaging\\Lockverity-2.1.0-windows-x64-portable\\_internal\\frontend\\dist'); "
+        "dist_path = Path(r'" + str(frontend_dist) + "'); "
         # Pre-write a stale state file so the runner has to
         # defensively clear it on a failed start.
         "write_state(home, make_state("
