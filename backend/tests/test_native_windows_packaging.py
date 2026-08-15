@@ -70,3 +70,14 @@ def test_published_release_materials_are_not_build_inputs_for_webview2() -> None
     builder = (BACKEND_ROOT / "scripts" / "build_windows_installer.py").read_text(encoding="utf-8")
     assert "checkpoint-v2.1.2-public-release" not in builder
     assert "SignPath" not in builder
+
+
+def test_installer_smoke_runs_real_uninstaller_and_verifies_cleanup() -> None:
+    builder = (BACKEND_ROOT / "scripts" / "build_windows_installer.py").read_text(encoding="utf-8")
+    smoke = builder.split("def _run_silent_smoke(", 1)[1].split("\ndef main(", 1)[0]
+    assert 'uninstaller_exe = install_dir / "unins000.exe"' in smoke
+    assert "str(uninstaller_exe)" in smoke
+    assert '"installed_payload_removed"' in smoke
+    assert '"runtime_data_preserved"' in smoke
+    uninstall_block = smoke.split("# Run the actual generated uninstaller.", 1)[1]
+    assert "str(installer_exe)" not in uninstall_block

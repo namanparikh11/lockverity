@@ -789,21 +789,31 @@ def _run_silent_smoke(
             "stdout_tail": (result.stdout or "")[-2000:],
             "stderr_tail": (result.stderr or "")[-2000:],
         }
+    health_result: dict[str, object] = {"status": "not_started", "port": port}
+
     # Confirm files are present and the binaries match the
-    # accepted payload.
+    # accepted payload. Keep going to the uninstaller on a
+    # verification failure so the smoke never strands an app
+    # installation merely because its payload is invalid.
     installed_cli = install_dir / "app" / "lockverity-cli.exe"
     if not installed_cli.is_file():
-        return {
-            "status": "missing_cli",
-            "expected": str(installed_cli),
-        }
-    installed_cli_sha = _sha256_of(installed_cli)
-    if installed_cli_sha != expected_lockverity_cli_exe_sha256:
-        return {
-            "status": "cli_mismatch",
-            "expected": expected_lockverity_cli_exe_sha256,
-            "actual": installed_cli_sha,
-        }
+        health_result.update(status="missing_cli", expected=str(installed_cli))
+    else:
+        installed_cli_sha = _sha256_of(installed_cli)
+        if installed_cli_sha != expected_lockverity_cli_exe_sha256:
+            health_result.update(
+                status="cli_mismatch",
+                expected=expected_lockverity_cli_exe_sha256,
+                actual=installed_cli_sha,
+            )
+
+    # The marker proves that the real uninstaller preserves the
+    # per-user runtime home. It is intentionally retained after
+    # the smoke, exactly like operator databases and logs.
+    runtime_home.mkdir(parents=True, exist_ok=True)
+    preservation_marker = runtime_home / "installer-smoke-runtime-data.txt"
+    preservation_marker.write_text("preserve-on-uninstall\n", encoding="utf-8")
+
     # Start the installed CLI in foreground mode for the smoke.
     env = os.environ.copy()
     env["LOCKVERITY_HOME"] = str(runtime_home)
@@ -812,76 +822,112 @@ def _run_silent_smoke(
     env["PATH"] = "C:\\Windows\\System32;C:\\Windows"
     env.pop("PYTHONHOME", None)
     env.pop("PYTHONPATH", None)
-    cli_proc = subprocess.Popen(  # noqa: S603 - argv is built by us
-        [str(installed_cli), "start", "--port", str(port)],
-        env=env,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-    )
+    cli_proc: subprocess.Popen[str] | None = None
     # Wait for health (bounded). The exception is the documented
     # "service not yet listening" condition during startup; we
     # intentionally swallow it and re-probe on the next tick.
     import urllib.error
     import urllib.request
 
-    health_ok = False
-    for _ in range(40):
-        time.sleep(1.0)
+    if health_result["status"] == "not_started":
         try:
-            with urllib.request.urlopen(
-                f"http://127.0.0.1:{port}/api/v1/health", timeout=2
-            ) as response:
-                if 200 <= response.status < 300:
-                    health_ok = True
-                    break
-        except (urllib.error.URLError, OSError, TimeoutError):
-            # Expected: server not yet listening. Re-probe.
-            continue
-    health_result: dict[str, object] = {
-        "status": "ok" if health_ok else "no_health",
-        "port": port,
-    }
-    # Stop
-    try:
-        stop_proc = subprocess.run(  # noqa: S603 - argv is built by us
-            [str(installed_cli), "stop"],
-            env=env,
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            timeout=60,
-        )
-        health_result["stop_rc"] = stop_proc.returncode
-        health_result["stop_stdout_tail"] = (stop_proc.stdout or "")[-500:]
-    except Exception as exc:  # pragma: no cover - best-effort cleanup
-        health_result["stop_error"] = repr(exc)
-    # Uninstall
-    try:
-        uninst = subprocess.run(  # noqa: S603 - argv is built by us
-            [
-                str(installer_exe),
-                "/VERYSILENT",
-                "/SUPPRESSMSGBOXES",
-                "/NORESTART",
-                f"/DIR={install_dir}",
-            ],
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            timeout=300,
-        )
-        health_result["uninstall_rc"] = uninst.returncode
-    except Exception as exc:  # pragma: no cover - best-effort cleanup
-        health_result["uninstall_error"] = repr(exc)
-    try:
-        cli_proc.wait(timeout=5)
-    except Exception:
-        cli_proc.kill()
+            cli_proc = subprocess.Popen(  # noqa: S603 - argv is built by us
+                [str(installed_cli), "start", "--port", str(port)],
+                env=env,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+            )
+            health_ok = False
+            for _ in range(40):
+                time.sleep(1.0)
+                try:
+                    with urllib.request.urlopen(
+                        f"http://127.0.0.1:{port}/api/v1/health", timeout=2
+                    ) as response:
+                        if 200 <= response.status < 300:
+                            health_ok = True
+                            break
+                except (urllib.error.URLError, OSError, TimeoutError):
+                    # Expected: server not yet listening. Re-probe.
+                    continue
+            health_result["status"] = "ok" if health_ok else "no_health"
+            # Stop through the installed CLI so lifecycle IPC is
+            # covered before the uninstaller touches any files.
+            try:
+                stop_proc = subprocess.run(  # noqa: S603 - argv is built by us
+                    [str(installed_cli), "stop"],
+                    env=env,
+                    capture_output=True,
+                    text=True,
+                    encoding="utf-8",
+                    errors="replace",
+                    timeout=60,
+                )
+                health_result["stop_rc"] = stop_proc.returncode
+                health_result["stop_stdout_tail"] = (stop_proc.stdout or "")[-500:]
+                if stop_proc.returncode != 0 and health_result["status"] == "ok":
+                    health_result["status"] = "stop_failed"
+            except Exception as exc:  # pragma: no cover - cleanup still continues
+                health_result["stop_error"] = repr(exc)
+                if health_result["status"] == "ok":
+                    health_result["status"] = "stop_failed"
+        except Exception as exc:  # pragma: no cover - reported and cleaned below
+            health_result.update(status="launch_failed", launch_error=repr(exc))
+
+    # Ensure the foreground process has released the installed
+    # executables before asking Inno Setup's generated uninstaller
+    # to remove them.
+    if cli_proc is not None:
+        try:
+            cli_proc.wait(timeout=15)
+        except subprocess.TimeoutExpired:
+            cli_proc.kill()
+            cli_proc.wait(timeout=5)
+            if health_result["status"] == "ok":
+                health_result["status"] = "stop_timeout"
+
+    # Run the actual generated uninstaller. Re-running Setup here
+    # can appear successful while exercising no uninstall logic.
+    uninstaller_exe = install_dir / "unins000.exe"
+    health_result["uninstaller"] = str(uninstaller_exe)
+    if not uninstaller_exe.is_file():
+        health_result["uninstall_error"] = "generated unins000.exe is missing"
+        if health_result["status"] == "ok":
+            health_result["status"] = "uninstaller_missing"
+    else:
+        try:
+            uninst = subprocess.run(  # noqa: S603 - argv is built by us
+                [
+                    str(uninstaller_exe),
+                    "/VERYSILENT",
+                    "/SUPPRESSMSGBOXES",
+                    "/NORESTART",
+                ],
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=300,
+            )
+            health_result["uninstall_rc"] = uninst.returncode
+            health_result["uninstall_stdout_tail"] = (uninst.stdout or "")[-500:]
+            health_result["uninstall_stderr_tail"] = (uninst.stderr or "")[-500:]
+            if uninst.returncode != 0 and health_result["status"] == "ok":
+                health_result["status"] = "uninstall_failed"
+        except Exception as exc:  # pragma: no cover - surfaced in the report
+            health_result["uninstall_error"] = repr(exc)
+            if health_result["status"] == "ok":
+                health_result["status"] = "uninstall_failed"
+
+    health_result["installed_payload_removed"] = not (install_dir / "app").exists()
+    health_result["runtime_data_preserved"] = preservation_marker.is_file()
+    if health_result["status"] == "ok" and not health_result["installed_payload_removed"]:
+        health_result["status"] = "uninstall_payload_remains"
+    if health_result["status"] == "ok" and not health_result["runtime_data_preserved"]:
+        health_result["status"] = "uninstall_removed_runtime_data"
     return health_result
 
 
@@ -1059,6 +1105,8 @@ def main(argv: list[str] | None = None) -> int:
         sys.stdout.write(json.dumps(report, indent=2, sort_keys=True) + "\n")
     else:
         _log("done", f"installer: {installer_exe}")
+    if smoke_result is not None and smoke_result.get("status") != "ok":
+        return 1
     return 0
 
 
