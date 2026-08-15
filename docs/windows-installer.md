@@ -8,6 +8,13 @@ modify the operator's `PATH`, does **not** install a Windows
 service, does **not** register an autorun entry, does **not** add
 a firewall rule, and does **not** require administrator privilege.
 
+> **Publication integrity note:** the published v2.1.2 installer,
+> portable payload, tag, hashes, manifests, and provenance remain
+> immutable and retain their historical default-browser launcher. The
+> native-window and WebView2 bootstrapper behaviour below applies to
+> development/smoke installers built from current `main`; it does not
+> describe a republished v2.1.2 release asset.
+
 ### Accepted v2.1 B3A portable payload (supersession ledger)
 
 The v2.1 B3B installer embeds the accepted Part B3A portable payload
@@ -73,8 +80,11 @@ unsigned / SmartScreen / antivirus behaviour you should expect.
    **unchecked by default** so a fresh install does not add a
    desktop icon unless you ask for one.
 5. Click **Install**. No UAC prompt appears.
-6. On the completion page, optionally check **Launch Lockverity** to
-   open the trusted loopback URL in your default browser.
+6. A current-source installer verifies Microsoft Edge WebView2 and, only
+   when it is missing, runs Microsoft's signed Evergreen bootstrapper.
+7. On the completion page, optionally check **Launch Lockverity**. A
+   current-source build opens the dedicated desktop window; the immutable
+   published v2.1.2 installer opens the trusted URL in your browser.
 
 After install:
 
@@ -113,8 +123,11 @@ The installer returns an Inno Setup exit code:
 | 2 | The user clicked **Cancel** (only relevant in interactive mode) |
 | Other non-zero | An error occurred (see `/LOG`) |
 
-Silent install never launches the browser and never shows blocking
-dialogs. The full accepted payload is installed into `/DIR`.
+Silent install never launches the application and never shows blocking
+dialogs. If WebView2 is absent, a current-source installer runs the
+embedded Microsoft-signed Evergreen bootstrapper silently; that
+bootstrapper obtains the runtime from Microsoft. The full accepted
+payload is installed into `/DIR`.
 
 ## Runtime data
 
@@ -144,10 +157,17 @@ installed binary directly:
 & "$env:LOCALAPPDATA\Programs\Lockverity\app\Lockverity.exe"
 ```
 
-The launcher starts the runtime in the background, waits for
-`/api/v1/health`, then opens the trusted loopback URL in your
-default browser. A second invocation of the launcher reuses the
-existing instance (same PID, same port, same instance id).
+In a current-source build, the launcher starts the existing foreground
+runtime on `127.0.0.1`, waits for `/api/v1/health`, and then shows a
+normal resizable desktop window backed by WebView2. Closing the window
+gracefully stops and reaps that backend. A second invocation restores and
+focuses the existing window without creating another backend. Approved
+HTTPS documentation/resource links open in the system browser; the exact
+loopback origin stays embedded and unexpected navigation is blocked.
+
+The immutable published v2.1.2 installer instead contains the historical
+short-lived launcher that opens the trusted loopback URL in the default
+browser. Its assets and provenance are unchanged.
 
 CLI access:
 
@@ -235,8 +255,10 @@ controllable.
 - **No autorun entry.** The installer never writes
   `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` or
   `RunOnce`.
-- **No automatic updates.** The installer never downloads a
-  newer version. Operators update Lockverity manually.
+- **No automatic updates.** The installer never downloads a newer
+  Lockverity version. Operators update Lockverity manually. A
+  current-source installer may contact Microsoft only through the signed
+  Evergreen bootstrapper when the WebView2 prerequisite is missing.
 - **No telemetry / no phone-home.** Lockverity never reports
   usage data to a Lockverity-operated service. GitHub repository
   intake contacts GitHub, and applicable scan execution can
@@ -299,13 +321,14 @@ may be holding the start lock:
    present, run `lockverity-cli.exe stop` to clear the state,
    then retry the install.
 
-### The browser does not open after install
+### The desktop window does not open after install
 
-The installer never launches a browser. The launcher opens the
-browser on the first manual start. If your default browser
-ignores the `webbrowser.open` call, invoke the installed
-`Lockverity.exe` directly from a terminal to see any error
-output.
+The installer never launches Lockverity during silent install. Start
+`Lockverity.exe` manually. If the native launcher reports a missing
+WebView2 Runtime, install the Evergreen Runtime from Microsoft's official
+WebView2 page and retry. For other failures, run
+`lockverity-cli.exe doctor --json` and inspect
+`%LOCALAPPDATA%\Lockverity\logs\lockverity.log`.
 
 ## Build source
 
@@ -322,10 +345,12 @@ The build script:
 2. verifies the accepted B3A portable payload's hashes (it will
    **refuse** to build if any hash differs);
 3. extracts the payload into a dedicated staging directory;
-4. invokes Inno Setup 6.x with the committed `.iss` source;
-5. emits `INSTALLER-MANIFEST.json` and an external
+4. obtains the official WebView2 Evergreen bootstrapper and rejects it
+   unless Microsoft Authenticode verification succeeds;
+5. invokes Inno Setup 6.x with the committed `.iss` source;
+6. emits `INSTALLER-MANIFEST.json` and an external
    `SHA256SUMS.txt` next to the installer EXE;
-6. runs a bounded silent-install + health + uninstall smoke if
+7. runs a bounded silent-install + health + uninstall smoke if
    `--run-smoke` is passed.
 
 Inno Setup 6.7.3 is the only trusted compiler for this build.
@@ -357,3 +382,8 @@ The v2.1 Part B3B acceptance cycle verifies:
 - runtime data is preserved on every variant of uninstall;
 - no registry key outside the per-user uninstaller registration
   is created.
+
+Current-source native-shell acceptance additionally checks dedicated
+window creation, resize/minimize/maximize/restore behavior, single-instance
+focus, loopback API health, no normal browser launch, packaged GUI/CLI
+startup, and graceful backend teardown on close.

@@ -156,6 +156,13 @@ asset. The macOS and Linux workflows are intended for developers and
 technical operators. The Windows installer and portable are the only
 packaged, fully-accepted distributions in v2.1.2.
 
+> **Current development status:** Windows artifacts built from `main`
+> now use a dedicated native Lockverity window backed by Microsoft Edge
+> WebView2 and an owned loopback FastAPI lifecycle. The published v2.1.2
+> assets, tag, checksums, manifests, and provenance remain immutable and
+> keep the browser-launch behavior documented in the download steps
+> below. No replacement v2.1.2 release asset is implied.
+
 ## Windows installer
 
 The Windows installer is the recommended option for most Windows

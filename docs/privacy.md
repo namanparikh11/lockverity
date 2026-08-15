@@ -1,12 +1,14 @@
 # Privacy policy
 
-Last updated: 11 August 2026.
+Last updated: 15 August 2026.
 
 Lockverity is a local-first software supply-chain evidence tool. This policy describes what the application processes locally and what it sends to external services. Repository content and package coordinates can contain personal, confidential, or identifying information; this policy does not classify them as non-personal data.
 
 ## Local runtime and storage
 
-The backend and browser interface run on the operator's machine. Lockverity stores its database, logs, scan results, provider observations, workspaces, uploaded archives, and runtime state in locally configured paths. Windows installer and portable-package defaults place runtime data under `%LOCALAPPDATA%\Lockverity`; source deployments can configure equivalent database and workspace locations.
+The backend and interface run on the operator's machine. Current Windows development builds render the existing React interface in a dedicated Microsoft Edge WebView2 window connected only to the loopback FastAPI origin; source workflows can use a normal browser. Lockverity stores its database, logs, scan results, provider observations, workspaces, uploaded archives, and runtime state in locally configured paths. Windows installer and portable-package defaults place runtime data under `%LOCALAPPDATA%\Lockverity`; source deployments can configure equivalent database and workspace locations.
+
+The Windows GUI does not expose a Python-to-JavaScript bridge. Approved HTTPS documentation and evidence links open in the operator's system browser; unexpected top-level WebView navigation is blocked. Current-source installers embed Microsoft's signed Evergreen WebView2 bootstrapper and may contact Microsoft to install the runtime only when WebView2 is missing. The portable launcher performs no silent runtime download and instead shows an actionable prerequisite message.
 
 ## GitHub repository retrieval
 

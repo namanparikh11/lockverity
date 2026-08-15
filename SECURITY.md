@@ -94,8 +94,8 @@ no partial extraction.
 
 Out of scope for the Lockverity security boundary:
 
-- Vulnerabilities in user-supplied web browsers or Node.js
-  installations.
+- Vulnerabilities in user-supplied web browsers, the Microsoft Edge
+  WebView2 Runtime, or Node.js installations.
 - Vulnerabilities in third-party providers (OSV, deps.dev, OpenSSF,
   GitHub) - we treat their responses as data, not as instructions.
 - Compromise of the host operating system running Lockverity.

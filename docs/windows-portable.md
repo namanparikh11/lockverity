@@ -19,6 +19,12 @@ portable; for the v2.1.2 Windows installer see
 the central download and install guide see
 [`docs/install.md`](install.md).
 
+> **Publication integrity note:** the already-published v2.1.2 ZIP,
+> tag, hashes, manifests, and provenance are immutable and retain their
+> documented browser-launch behaviour. The native-window behaviour in
+> this document applies to development/smoke artifacts built from the
+> current `main` source. No updated v2.1.2 asset is implied or published.
+
 ## TL;DR
 
 1. Download ``Lockverity-2.1.2-windows-x64-portable.zip``.
@@ -26,8 +32,9 @@ the central download and install guide see
    (for example ``C:\Tools\Lockverity`` or
    ``C:\Users\<you>\Lockverity``).
 3. Double-click ``Lockverity.exe`` to start the
-   runtime and open the trusted local URL in the
-   default browser.
+   runtime. In a current-source development build this opens the
+   dedicated Lockverity desktop window; the published v2.1.2 ZIP opens
+   the trusted local URL in the default browser.
 4. From a second terminal, use ``lockverity-cli.exe``
    for the documented ``start``, ``stop``, ``status``,
    ``open``, ``doctor`` and ``logs`` subcommands.
@@ -46,7 +53,7 @@ stable.
 
 ```
 Lockverity-2.1.2-windows-x64-portable\
-  Lockverity.exe                  (windowless graphical launcher)
+  Lockverity.exe                  (native Windows desktop launcher in current builds)
   lockverity-cli.exe               (console CLI; same commands as source-based lockverity)
   _internal\                       (PyInstaller support files; do not edit)
   frontend\dist\                   (bundled React build; read-only)
@@ -96,34 +103,42 @@ and the CLI.
 
 ## Graphical launcher (``Lockverity.exe``)
 
-The launcher is a windowless Windows application that
-uses the approved Part A ``favicon.ico`` as its
-executable icon. It does not open a persistent console
-window; the operator does not see a terminal flash.
+Current-source development artifacts use a normal, resizable Windows
+desktop window with the approved Lockverity icon and title. The window
+uses Microsoft Edge WebView2 to render the existing React application;
+FastAPI remains on loopback and remains the only frontend/backend
+integration surface. No console window or default browser is opened
+during normal GUI launch.
 
 On invocation, the launcher:
 
 1. Resolves the runtime home (default
    ``%LOCALAPPDATA%\Lockverity``).
-2. Calls the documented Part B2 ``status`` logic to
-   determine whether a healthy instance is already
-   running.
-3. If a healthy instance exists, opens the trusted
-   local URL in the default browser and exits.
-4. If no instance is running, starts a new background
-   instance via the documented Part B2 ``start``
-   logic, waits for the health endpoint, then opens
-   the browser.
-5. On a stale or unhealthy instance, runs bounded
+2. Acquires the single-GUI-instance Windows mutex.
+3. Starts the existing Part B2 foreground runtime on
+   ``127.0.0.1`` and waits for readiness before showing the window.
+4. Renders only the exact loopback origin in the embedded WebView.
+   Approved HTTPS documentation/resource links open in the system
+   browser; unexpected external navigation is blocked.
+5. On a stale, conflicting, or unhealthy instance, runs bounded
    recovery and refuses to terminate unrelated
    processes. If automatic safe recovery is
    impossible, shows a native message box with the
    log path and a recommendation to run
    ``lockverity-cli.exe doctor``.
+6. Gracefully stops and reaps the owned backend when the main window
+   closes. If the backend exits unexpectedly, the window also closes.
 
-A second double-click reuses the same running instance
-without starting a second server. The launcher never
+A second double-click focuses/restores the existing window and does not
+start another server. The fixed default port remains ``8000`` because it
+is part of the proven CLI/state identity contract; ``--port <N>`` is
+available for an explicit conflict workaround. The launcher never
 requires administrator rights.
+
+The published v2.1.2 binaries predate this source change: their
+``Lockverity.exe`` is the historical short-lived launcher that starts or
+reuses a background runtime and opens the loopback URL in the default
+browser. Those immutable assets are not replaced by this work.
 
 The launcher exit codes are documented in
 ``backend/app/launcher/__init__.py`` so a future
@@ -131,12 +146,13 @@ installer can match them:
 
 | Code | Meaning                                                   |
 | ---- | --------------------------------------------------------- |
-| 0    | Success (browser opened or already-open instance reused). |
+| 0    | Success (window closed normally or existing window focused). |
 | 20   | Generic launcher error.                                   |
 | 21   | Port already in use by an unrelated process.              |
 | 22   | Database migration failure.                               |
 | 23   | Health endpoint did not report ready in time.             |
 | 24   | Bundled frontend dist is missing or invalid.              |
+| 25   | Microsoft Edge WebView2 Runtime is missing.                |
 
 ## Console CLI (``lockverity-cli.exe``)
 
@@ -170,7 +186,9 @@ The first time a portable extraction is launched:
    verbatim; only missing migrations are applied.
 3. The server starts on ``127.0.0.1:8000`` unless
    overridden.
-4. The browser opens the trusted local URL.
+4. A current-source build shows the native desktop window after the
+   health check succeeds. A published v2.1.2 binary opens the trusted
+   URL in the default browser.
 
 The first-launch migration can take a few seconds on
 older hardware. The launcher shows the log path in a
@@ -203,6 +221,12 @@ launcher refuses to terminate the process and shows a
 message box that names the conflicting port. The
 operator can either stop the conflicting process or
 launch with a different port.
+
+The portable does not install WebView2. If the native launcher reports
+that the Evergreen Runtime is missing, install it from Microsoft's
+official WebView2 download page and relaunch. The installer distribution
+handles this prerequisite automatically; the portable remains a
+no-installer archive.
 
 ## Unsigned-build / SmartScreen warning
 
@@ -262,8 +286,7 @@ includes this policy as ``PRIVACY.md``.
 To uninstall the portable:
 
 1. Stop the running instance with
-   ``lockverity-cli.exe stop`` (or close the launcher
-   if no instance is running).
+   ``lockverity-cli.exe stop`` or close the native desktop window.
 2. Delete the extracted folder.
 3. Optionally delete the runtime home at
    ``%LOCALAPPDATA%\Lockverity`` to remove all
@@ -290,6 +313,8 @@ Prerequisites on the build host:
 * Node.js 22.22.0 or newer on PATH
 * The ``build`` optional-dependency group installed:
   ``pip install -e '.[build]'``
+* Microsoft Edge WebView2 Evergreen Runtime installed for native GUI
+  smoke testing (it is not copied into the portable ZIP)
 * The approved Part A brand assets under
   ``frontend/public/favicon.ico`` and
   ``frontend/public/brand\`` (committed; do not
@@ -346,6 +371,8 @@ The following items are explicit future work and are
 * Backup / restore tooling.
 * Cloud sync, multi-user, or authentication.
 * Telemetry, crash reporting, or outbound analytics.
+* A bundled fixed-version browser engine. Current builds use the
+  supported Evergreen WebView2 Runtime installed on Windows.
 
 The v2.1.2 Windows installer is a separate distribution
 that uses Inno Setup; see
