@@ -16,6 +16,9 @@ Windows installer. It wraps the Inno Setup 6.x compiler
   - extracts the payload into a dedicated staging directory
     (the installer source then copies the staging tree into
     ``{app}\\app\\``);
+  - downloads Microsoft's small Evergreen WebView2 bootstrapper from the
+    documented fwlink (unless an explicit local copy is supplied), requires
+    a valid Microsoft Authenticode signature, and records its build-time hash;
   - runs the committed ``backend\\installer\\lockverity.iss``
     source through the verified compiler;
   - generates ``INSTALLER-MANIFEST.json`` and ``SHA256SUMS.txt``
@@ -54,6 +57,8 @@ import socket
 import subprocess
 import sys
 import time
+import urllib.error
+import urllib.request
 import zipfile
 from pathlib import Path
 
@@ -106,6 +111,9 @@ _GIT_SHA1_RE = re.compile(r"^[0-9a-f]{40}$")
 # smoke. The smoke is disabled by default to keep the
 # build deterministic; pass ``--run-smoke`` to opt in.
 SMOKE_PORT_HINT = 18790
+WEBVIEW2_BOOTSTRAPPER_URL = "https://go.microsoft.com/fwlink/p/?LinkId=2124703"
+WEBVIEW2_BOOTSTRAPPER_NAME = "MicrosoftEdgeWebview2Setup.exe"
+WEBVIEW2_BOOTSTRAPPER_MAX_BYTES = 16 * 1024 * 1024
 
 
 def _log(stage: str, message: str) -> None:
@@ -206,6 +214,113 @@ def _sha256_of(path: Path) -> str:
         for chunk in iter(lambda: handle.read(65536), b""):
             h.update(chunk)
     return h.hexdigest()
+
+
+def _verify_microsoft_authenticode(path: Path) -> str:
+    """Require a valid Microsoft Authenticode signature on ``path``.
+
+    Microsoft's Evergreen bootstrapper is intentionally not pinned to one
+    generated hash because the documented fwlink advances over time. The
+    signed publisher identity is the stable trust boundary; the exact hash is
+    recorded in the generated installer manifest for each build.
+    """
+    powershell = shutil.which("powershell.exe") or shutil.which("powershell")
+    if powershell is None:
+        raise SystemExit(
+            "ERROR: PowerShell is required to verify the WebView2 bootstrapper signature."
+        )
+    script = (
+        "$s = Get-AuthenticodeSignature -LiteralPath $args[0]; "
+        "[Console]::Out.Write($s.Status.ToString() + '|' + $s.SignerCertificate.Subject)"
+    )
+    result = subprocess.run(  # noqa: S603 - fixed PowerShell verification command
+        [
+            powershell,
+            "-NoProfile",
+            "-NonInteractive",
+            "-Command",
+            script,
+            str(path),
+        ],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        timeout=60,
+    )
+    status, _, subject = result.stdout.strip().partition("|")
+    if result.returncode != 0 or status != "Valid" or "Microsoft Corporation" not in subject:
+        raise SystemExit(
+            "ERROR: WebView2 bootstrapper Authenticode verification failed.\n"
+            f"  status: {status or 'unavailable'}\n"
+            f"  signer: {subject or 'unavailable'}"
+        )
+    return subject
+
+
+def _stage_webview2_bootstrapper(
+    staging_dir: Path,
+    source: Path | None = None,
+) -> dict[str, object]:
+    """Stage Microsoft's signed Evergreen bootstrapper for Inno Setup."""
+    destination_dir = staging_dir / "webview2"
+    destination_dir.mkdir(parents=True, exist_ok=True)
+    destination = destination_dir / WEBVIEW2_BOOTSTRAPPER_NAME
+    if source is not None:
+        if not source.is_file():
+            raise SystemExit(f"ERROR: WebView2 bootstrapper not found: {source}")
+        shutil.copy2(source, destination)
+        origin = str(source)
+    else:
+        _log(
+            "webview2",
+            "downloading Microsoft's Evergreen WebView2 bootstrapper from the official fwlink",
+        )
+        request = urllib.request.Request(  # noqa: S310 - constant Microsoft HTTPS fwlink
+            WEBVIEW2_BOOTSTRAPPER_URL,
+            headers={"User-Agent": "Lockverity-Windows-Installer-Builder/1"},
+        )
+        temporary = destination.with_suffix(".download")
+        received = 0
+        try:
+            with (
+                urllib.request.urlopen(  # noqa: S310 - constant Microsoft HTTPS fwlink
+                    request, timeout=60
+                ) as response,
+                open(temporary, "wb") as handle,
+            ):
+                while chunk := response.read(64 * 1024):
+                    received += len(chunk)
+                    if received > WEBVIEW2_BOOTSTRAPPER_MAX_BYTES:
+                        raise SystemExit(
+                            "ERROR: WebView2 bootstrapper exceeded the 16 MiB safety limit."
+                        )
+                    handle.write(chunk)
+            os.replace(temporary, destination)
+        except SystemExit:
+            with contextlib.suppress(FileNotFoundError):
+                temporary.unlink()
+            raise
+        except (urllib.error.URLError, OSError, TimeoutError) as exc:
+            with contextlib.suppress(FileNotFoundError):
+                temporary.unlink()
+            raise SystemExit(
+                f"ERROR: official WebView2 Evergreen bootstrapper download failed: {exc}"
+            ) from exc
+        origin = WEBVIEW2_BOOTSTRAPPER_URL
+    size_bytes = destination.stat().st_size
+    if size_bytes > WEBVIEW2_BOOTSTRAPPER_MAX_BYTES:
+        raise SystemExit("ERROR: staged WebView2 bootstrapper exceeds the 16 MiB safety limit.")
+    if size_bytes < 64 * 1024 or destination.read_bytes()[:2] != b"MZ":
+        raise SystemExit("ERROR: staged WebView2 bootstrapper is not a plausible Windows PE file.")
+    signer = _verify_microsoft_authenticode(destination)
+    return {
+        "filename": destination.name,
+        "origin": origin,
+        "sha256": _sha256_of(destination),
+        "signer": signer,
+        "size_bytes": size_bytes,
+    }
 
 
 def _read_payload_sha256sums(payload_root: Path) -> dict[str, str]:
@@ -558,6 +673,7 @@ def _write_installer_manifest(
     payload_zip: Path,
     payload_summary: dict[str, object],
     iscc_path: Path,
+    webview2_bootstrapper: dict[str, object],
 ) -> Path:
     """Generate the external ``INSTALLER-MANIFEST.json``."""
     manifest = {
@@ -595,6 +711,9 @@ def _write_installer_manifest(
         "file_association": False,
         "browser_extension": False,
         "shell_context_menu_handler": False,
+        "webview2_deployment": "Microsoft Evergreen Bootstrapper (run only if missing)",
+        "webview2_bootstrapper_sha256": webview2_bootstrapper["sha256"],
+        "webview2_bootstrapper_signer": webview2_bootstrapper["signer"],
     }
     manifest_path = output_dir / "INSTALLER-MANIFEST.json"
     manifest_path.write_text(
@@ -810,6 +929,15 @@ def main(argv: list[str] | None = None) -> int:
         help="Run a silent-install + health + uninstall smoke after the build. Disabled by default.",
     )
     parser.add_argument(
+        "--webview2-bootstrapper",
+        type=Path,
+        default=None,
+        help=(
+            "Use this Microsoft-signed Evergreen WebView2 bootstrapper instead of "
+            "downloading the current one from Microsoft's official fwlink."
+        ),
+    )
+    parser.add_argument(
         "--skip-clean-git-check",
         action="store_true",
         help="Skip the clean-git-state check (use only for development iterations, never for the final acceptance build).",
@@ -855,6 +983,14 @@ def main(argv: list[str] | None = None) -> int:
     )
     _stage_payload(Path(payload_summary["payload_root"]), args.staging_dir)
     _log("staging", f"payload staged into {args.staging_dir}")
+    webview2_summary = _stage_webview2_bootstrapper(
+        args.staging_dir,
+        args.webview2_bootstrapper,
+    )
+    _log(
+        "webview2",
+        f"verified Microsoft bootstrapper (sha256={str(webview2_summary['sha256'])[:12]}...)",
+    )
 
     installer_exe = _build_installer(
         iscc=iscc,
@@ -876,6 +1012,7 @@ def main(argv: list[str] | None = None) -> int:
         payload_zip=args.payload_zip,
         payload_summary=payload_summary,
         iscc_path=iscc,
+        webview2_bootstrapper=webview2_summary,
     )
     checksums_path = _write_external_checksums(args.output_dir, installer_exe, manifest_path)
     _log("manifest", f"wrote {manifest_path.name} + {checksums_path.name}")
@@ -913,6 +1050,7 @@ def main(argv: list[str] | None = None) -> int:
         "pe": pe_info,
         "payload": payload_summary,
         "silent_smoke": smoke_result,
+        "webview2_bootstrapper": webview2_summary,
     }
     if args.json_report:
         sys.stdout.write(json.dumps(report, indent=2, sort_keys=True) + "\n")

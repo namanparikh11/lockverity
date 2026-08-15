@@ -66,6 +66,10 @@ dependencies = [
     # process inspection and termination (no shelling
     # out, no ``shell=True``).
     "psutil>=5.9.0,<7.0.0",
+    # Native Windows shell. The graphical executable uses pywebview's
+    # Edge Chromium renderer and the machine's Evergreen Microsoft Edge
+    # WebView2 Runtime; the CLI does not create or import a WebView.
+    "pywebview==6.2.1",
 ]
 
 [project.optional-dependencies]

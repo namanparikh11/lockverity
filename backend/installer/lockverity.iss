@@ -11,8 +11,10 @@
 ; The installer is per-user, x64, no admin / no UAC, and embeds the
 ; accepted v2.1 Part B3A portable payload as-is. It does not modify
 ; the operator's PATH, does not install a service, does not register
-; autorun, does not phone home, and does not include code signing
-; (the release is unsigned).
+; autorun, and does not include code signing (the release is unsigned).
+; If WebView2 is missing, setup runs Microsoft's signed Evergreen
+; bootstrapper; that bootstrapper downloads the matching runtime from
+; Microsoft. No other installer-time network access is performed.
 ;
 ; The stable ``AppId`` below is the per-user uninstallation key the
 ; Windows uninstaller uses to identify the application. **Do not
@@ -160,10 +162,9 @@ UninstallDisplayIcon={app}\{#MyAppPayloadDir}\{#MyAppExeName},0
 ; entirely is the correct, supported way to say "do not sign".
 SignedUninstaller=no
 
-; Application mutex: the running launcher and CLI both share a
-; named mutex keyed on this AppId so the installer can detect
-; a live instance at install / uninstall time and request a
-; graceful stop.
+; Application mutex: the native GUI holds a named mutex keyed on this
+; AppId so setup can detect loaded application files. CLI lifecycle
+; checks use the PID/creation-time/instance-id state contract.
 AppMutex={#MyAppId},Global\{#MyAppId}
 
 ; Surface any install-time error instead of silently exiting
@@ -193,7 +194,7 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 ; BeCalm: do not let the user see Inno's internal jargon.
 BeveledLabel=Lockverity v{#MyAppVersion} setup
 SetupWindowTitle=Lockverity Setup
-FinishedLabelMessage=Lockverity has been installed on your computer.%n%nThe application launches in your default browser when you click Finish.%n%nYour runtime data, databases and logs are stored in:%n  %1
+FinishedLabelMessage=Lockverity has been installed on your computer.%n%nThe application opens in its own desktop window when you click Finish.%n%nYour runtime data, databases and logs are stored in:%n  %1
 FinishedHeadingMessage=Completing the Lockverity Setup Wizard
 
 [Files]
@@ -220,20 +221,26 @@ Source: "root_extra\*"; DestDir: "{app}"; Flags: "ignoreversion recursesubdirs"
 Source: "..\pyinstaller\favicon-exe.ico"; DestDir: "{app}"; \
     Flags: "ignoreversion"
 
+; Official Microsoft Evergreen WebView2 bootstrapper. The build script
+; downloads it from Microsoft's documented fwlink and requires a valid
+; Microsoft Authenticode signature before ISCC sees it. ``dontcopy`` embeds
+; it without installing it as application content; ``PrepareToInstall``
+; extracts and runs it only when the official runtime keys report it missing.
+Source: "webview2\MicrosoftEdgeWebview2Setup.exe"; Flags: dontcopy
+
 [Run]
 ; Completion-page "Launch Lockverity" checkbox. The
 ; entry creates a single checkbox on the wizard's
 ; finished page. ``postinstall`` registers the
 ; checkbox; ``nowait`` returns control to the wizard
-; immediately (the launcher is a windowless graphical
-; exe that returns after handing off to the
-; ``lockverity-cli`` subprocess, so we do not want
-; the wizard to block on its exit code); ``unchecked``
+; immediately (the launcher owns a long-lived native
+; desktop window, so the wizard must not wait for the
+; user to close it); ``unchecked``
 ; leaves the checkbox off by default so the operator
 ; has to opt in (the more conservative default for a
 ; per-user security product); ``skipifsilent`` keeps
 ; the launch out of silent / unattended installs so a
-; CI / acceptance installer never opens a browser. The
+; CI / acceptance installer never opens the GUI. The
 ; Filename points at the **actual installed** graphical
 ; launcher. The accepted v2.1 Part B3A payload is
 ; installed verbatim under ``{app}\app\`` (see the
@@ -374,6 +381,9 @@ const
     CLI_RELATIVE = 'app\\lockverity-cli.exe';
     // Max time the installer will wait for a graceful stop.
     GRACEFUL_STOP_TIMEOUT_S = 30;
+    WEBVIEW2_CLIENT_KEY_MACHINE = 'SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}';
+    WEBVIEW2_CLIENT_KEY_USER = 'Software\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}';
+    WEBVIEW2_BOOTSTRAPPER = 'MicrosoftEdgeWebview2Setup.exe';
 
 // helper: build the runtime-home path the installed CLI writes
 // to. The path matches the standard Part B1/B2 location.
@@ -386,6 +396,60 @@ end;
 function StateFilePath: string;
 begin
     Result := StandardRuntimeHome;
+end;
+
+// Microsoft documents these machine and per-user ``pv`` values as the
+// supported detection path for Evergreen WebView2. Missing, blank, and
+// 0.0.0.0 values all mean the runtime is unavailable.
+function WebView2RuntimeInstalled: Boolean;
+var
+    Version: string;
+begin
+    Result := False;
+    Version := '';
+    if RegQueryStringValue(HKLM, WEBVIEW2_CLIENT_KEY_MACHINE, 'pv', Version) or
+       RegQueryStringValue(HKCU, WEBVIEW2_CLIENT_KEY_USER, 'pv', Version) then
+    begin
+        Version := Trim(Version);
+        Result := (Version <> '') and (Version <> '0.0.0.0');
+    end;
+end;
+
+function EnsureWebView2Runtime: string;
+var
+    Bootstrapper: string;
+    ResultCode: Integer;
+    ExecOk: Boolean;
+begin
+    Result := '';
+    if WebView2RuntimeInstalled() then
+    begin
+        Log('WebView2 Evergreen Runtime detected; bootstrap skipped');
+        exit;
+    end;
+
+    ExtractTemporaryFile(WEBVIEW2_BOOTSTRAPPER);
+    Bootstrapper := ExpandConstant('{tmp}\') + WEBVIEW2_BOOTSTRAPPER;
+    Log('WebView2 Runtime missing; running verified Microsoft Evergreen bootstrapper');
+    ExecOk := Exec(
+        Bootstrapper,
+        '/silent /install',
+        ExpandConstant('{tmp}'),
+        SW_HIDE,
+        ewWaitUntilTerminated,
+        ResultCode);
+    if not ExecOk then
+    begin
+        Result := 'Microsoft Edge WebView2 Runtime is required, but its official bootstrapper could not be started.';
+        exit;
+    end;
+    if ResultCode <> 0 then
+    begin
+        Result := 'Microsoft Edge WebView2 Runtime installation failed with code ' + IntToStr(ResultCode) + '.';
+        exit;
+    end;
+    if not WebView2RuntimeInstalled() then
+        Result := 'Microsoft Edge WebView2 Runtime installation completed without a detectable runtime. Restart Windows and run setup again.';
 end;
 
 // helper: read the state file (best-effort, returns empty string
@@ -543,7 +607,7 @@ begin
             PromptResult := MsgBox(
                 'Lockverity is currently running.' + #13#10 + #13#10 +
                 'The installer cannot replace the application while the runtime is loaded.' + #13#10 +
-                'Please close Lockverity (right-click the system tray or taskbar icon) and click Retry, or Cancel to abort the install.' + #13#10 + #13#10 +
+                'Please close the Lockverity desktop window and click Retry, or Cancel to abort the install.' + #13#10 + #13#10 +
                 'When Lockverity has stopped, click Retry to continue.',
                 mbError, MB_RETRYCANCEL);
             if PromptResult = IDRETRY then
@@ -560,6 +624,8 @@ begin
                 Result := 'Install cancelled by operator.';
         end;
     end;
+    if Result = '' then
+        Result := EnsureWebView2Runtime();
 end;
 
 procedure CurStepChanged(CurStep: TSetupStep);

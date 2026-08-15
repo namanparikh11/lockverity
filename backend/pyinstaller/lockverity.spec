@@ -1,16 +1,17 @@
 # -*- mode: python ; coding: utf-8 -*-
-"""PyInstaller spec for the Lockverity graphical launcher.
+"""PyInstaller spec for the Lockverity native Windows launcher.
 
 This spec produces the v2.1 Part B3A ``Lockverity.exe``
-graphical launcher. The launcher is a windowless
-application that:
+graphical launcher. The executable uses the Windows
+GUI subsystem and creates a pywebview/Edge WebView2 window that:
 
   * uses the approved ``favicon.ico`` for the
     executable icon resource;
   * resolves all resources via ``app.runtime_paths``;
-  * delegates the runtime lifecycle to the accepted
-    Part B2 ``app.cli`` functions and the Part B1
-    ``app.main`` FastAPI app.
+  * owns the existing Part B2 foreground runtime for the
+    lifetime of the native window;
+  * renders the existing React/FastAPI product without a
+    default-browser handoff.
 
 The spec is intentionally explicit: every ``datas``
 entry, every ``hiddenimport``, and every binary is
@@ -113,10 +114,14 @@ HIDDENIMPORTS: list[str] = [
     # The Alembic op helpers are imported
     # dynamically in env.py.
     "alembic.operations.ops",
-    # The launcher uses ``webbrowser``; the standard
-    # library entry is normally scanned, but the
-    # Windows backend is dynamically imported.
+    # The launcher uses ``webbrowser`` only for approved external links;
+    # the standard-library Windows backend is dynamically imported.
     "webbrowser",
+    # pywebview selects its Windows renderer dynamically. Its bundled
+    # PyInstaller hook collects WebView2 interop DLLs and JavaScript assets;
+    # these explicit imports pin the selected native renderer in the graph.
+    "webview",
+    "webview.platforms.edgechromium",
     # ``app.cli.process`` uses ``psutil`` which has
     # platform-specific submodules.
     "psutil",
