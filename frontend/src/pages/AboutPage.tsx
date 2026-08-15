@@ -277,6 +277,8 @@ export function AboutPage() {
           <li>
             <a
               href="https://github.com/namanparikh11/lockverity/blob/main/docs/architecture.md"
+              target="_blank"
+              rel="noreferrer"
               className="text-accent-700 hover:text-accent-800"
             >
               Architecture
@@ -286,6 +288,8 @@ export function AboutPage() {
           <li>
             <a
               href="https://github.com/namanparikh11/lockverity/blob/main/docs/threat-model.md"
+              target="_blank"
+              rel="noreferrer"
               className="text-accent-700 hover:text-accent-800"
             >
               Threat model
@@ -295,6 +299,8 @@ export function AboutPage() {
           <li>
             <a
               href="https://github.com/namanparikh11/lockverity/blob/main/SECURITY.md"
+              target="_blank"
+              rel="noreferrer"
               className="text-accent-700 hover:text-accent-800"
             >
               Security policy
@@ -304,6 +310,8 @@ export function AboutPage() {
           <li>
             <a
               href="https://github.com/namanparikh11/lockverity/blob/main/LICENSE"
+              target="_blank"
+              rel="noreferrer"
               className="text-accent-700 hover:text-accent-800"
             >
               License
@@ -313,6 +321,8 @@ export function AboutPage() {
           <li>
             <a
               href="https://github.com/namanparikh11/lockverity"
+              target="_blank"
+              rel="noreferrer"
               className="text-accent-700 hover:text-accent-800"
             >
               GitHub repository

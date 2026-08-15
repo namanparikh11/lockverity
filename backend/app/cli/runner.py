@@ -82,6 +82,7 @@ import urllib.parse
 import urllib.request
 import uuid
 import webbrowser
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -551,6 +552,7 @@ def start(
     extra_env: dict[str, str] | None = None,
     log_level: str = "info",
     open_browser: bool = False,
+    on_ready: Callable[[InstanceState], None] | None = None,
 ) -> StartResult:
     """Launch the Lockverity single-port runtime.
 
@@ -761,6 +763,7 @@ def start(
                 cli_logger=cli_logger,
                 instance_id=instance_id,
                 timeout=timeout,
+                on_ready=on_ready,
             )
         process_handle, _log_handle = _launch_detached(
             argv=argv,
@@ -846,6 +849,8 @@ def start(
             instance_id=instance_id,
         )
         write_state(home, state)
+        if on_ready is not None:
+            on_ready(state)
         cli_logger.info(
             "lockverity %s ready at http://%s:%d (pid=%d, instance_id=%s, state=%s)",
             __version__,
@@ -1076,6 +1081,7 @@ def _start_foreground(
     cli_logger: object,
     instance_id: str,
     timeout: float,
+    on_ready: Callable[[InstanceState], None] | None = None,
 ) -> StartResult:
     """Run the server in the current TTY (no daemonisation).
 
@@ -1225,6 +1231,8 @@ def _start_foreground(
             log_path=log_path,
             instance_id=instance_id,
         )
+        if on_ready is not None:
+            on_ready(state)
         cli_logger.info(
             "lockverity %s ready at http://%s:%d (pid=%d, instance_id=%s, state=%s)",
             __version__,
@@ -1498,7 +1506,11 @@ def stop(
             elapsed_seconds=time.monotonic() - started,
             details=f"recorded pid {state.pid} is a zombie; state file cleared",
         )
-    if not terminate_process(state.pid, timeout=timeout):
+    if not terminate_process(
+        state.pid,
+        timeout=timeout,
+        instance_id=state.instance_id,
+    ):
         # Graceful stop did not converge. Either keep
         # waiting (if not --force) or escalate.
         if not force:

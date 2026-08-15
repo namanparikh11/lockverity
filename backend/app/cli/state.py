@@ -100,6 +100,7 @@ import json
 import os
 import sys
 import tempfile
+import time
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -399,11 +400,24 @@ def clear_state(home: Path) -> bool:
     caller can surface the error to the operator.
     """
     path = state_file_path(home)
-    try:
-        path.unlink()
-    except FileNotFoundError:
-        return False
-    return True
+    # The foreground supervisor and an external ``stop`` command can both
+    # observe the same child exit. On Windows, one process may briefly have
+    # the state file open for its instance-id check while the other removes
+    # it, yielding ``ERROR_SHARING_VIOLATION``. Retry that transient sharing
+    # race for one bounded second; all other unlink errors still surface.
+    attempts = 20 if sys.platform == "win32" else 1
+    for attempt in range(attempts):
+        try:
+            path.unlink()
+        except FileNotFoundError:
+            return False
+        except PermissionError:
+            if attempt + 1 >= attempts:
+                raise
+            time.sleep(0.05)
+        else:
+            return True
+    return False  # pragma: no cover - loop always returns or raises
 
 
 # Re-export ``field`` so the public dataclass-internals

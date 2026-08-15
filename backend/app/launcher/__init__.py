@@ -1,428 +1,581 @@
-"""Lockverity graphical launcher (v2.1 Part B3A).
+"""Native Windows desktop launcher for Lockverity.
 
-The launcher is the clickable Windows entry point shipped
-with the v2.1 Part B3A portable package. It does not
-reimplement the runtime lifecycle; it delegates to the
-accepted Part B2 ``app.cli`` functions and the accepted
-Part B1 ``app.main`` FastAPI app.
+``Lockverity.exe`` owns a foreground FastAPI runtime for exactly as long as
+the desktop window is open. The existing React application is rendered by
+pywebview's Edge Chromium backend (Microsoft Edge WebView2); the existing
+HTTP API remains the only frontend/backend integration surface.
 
-The launcher:
-
-  * Resolves the normal Lockverity runtime home
-    (``%LOCALAPPDATA%\\Lockverity`` on Windows) unless
-    ``LOCKVERITY_HOME`` is set.
-  * Calls ``status`` to discover whether an instance is
-    already running.
-  * Forwards to ``start`` in the background if no
-    instance is running, then opens the trusted local
-    URL in the operator's default browser.
-  * Reuses the running instance if one is already healthy.
-  * Shows a native Windows message box on failure with
-    the log path and the ``lockverity-cli.exe doctor``
-    recommendation. The launcher never displays secrets
-    or raw tracebacks to ordinary users.
-
-The launcher uses only the Python standard library so
-it has no new third-party dependencies. The
-``ctypes.windll.user32`` import is guarded so the
-module can be imported on non-Windows hosts (the
-test suite runs on every platform).
+Windows and pywebview imports stay behind small adapters so unit tests can
+exercise lifecycle and navigation decisions without creating a real window.
 """
 
 from __future__ import annotations
 
 import argparse
+import contextlib
 import logging
 import os
 import sys
+import threading
 import time
-import urllib.error
-import urllib.request
+import urllib.parse
 import webbrowser
+from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
-from app.cli import process as cli_process
+from app.cli import runner as cli_runner
 from app.cli.home import ensure_home, resolve_home
-from app.cli.runner import (
-    DEFAULT_HOST,
-    DEFAULT_PORT,
-    is_loopback_host,
-    probe_port,
-)
-from app.cli.state import read_state
-from app.runtime_paths import application_root, is_frozen
+from app.cli.state import InstanceState
+from app.runtime_paths import application_root
 
 logger = logging.getLogger("lockverity.launcher")
 
-# Exit codes for the launcher. The codes are documented
-# so the packaged installer can match them. The codes
-# are chosen to be distinct from the CLI exit codes
-# (``0`` success, ``1`` generic error, ``2`` health /
-# allow-remote guard, ``64`` usage) so a wrapper can
-# distinguish the two entry points from a single
-# subprocess.
 LAUNCHER_EXIT_OK = 0
 LAUNCHER_EXIT_ERROR = 20
 LAUNCHER_EXIT_PORT_IN_USE = 21
 LAUNCHER_EXIT_MIGRATION = 22
 LAUNCHER_EXIT_HEALTH = 23
 LAUNCHER_EXIT_MISSING_DIST = 24
+LAUNCHER_EXIT_WEBVIEW2_MISSING = 25
 
+WINDOW_TITLE = "Lockverity"
+WINDOW_WIDTH = 1280
+WINDOW_HEIGHT = 800
+WINDOW_MIN_WIDTH = 1024
+WINDOW_MIN_HEIGHT = 640
+APP_USER_MODEL_ID = "Lockverity.Desktop"
+INSTANCE_MUTEX_NAME = r"Global\{E5B0C0F4-7C42-4D6A-9B17-1A2B3C4D5E6F}"
 
-def _resolve_runtime_home() -> Path:
-    """Return the runtime home the launcher will use.
+_ERROR_ALREADY_EXISTS = 183
+_SW_RESTORE = 9
+_SW_SHOW = 5
 
-    Precedence: ``LOCKVERITY_HOME`` env var, ``--home``
-    CLI option, then the OS-appropriate default. The
-    function delegates to :func:`app.cli.home.resolve_home`
-    so the launcher and the CLI share the same home
-    resolution rules.
-    """
-    explicit = os.environ.get("LOCKVERITY_HOME")
-    if explicit:
-        return resolve_home(cli_override=explicit)
-    return resolve_home()
-
-
-def _start_background(
-    home: Path,
-    host: str,
-    port: int,
-    frontend_dist: Path,
-    database_url: str,
-    log_level: str,
-) -> int:
-    """Start a background Lockverity instance and return the child PID.
-
-    The function delegates to the documented
-    ``lockverity-cli.exe start`` subprocess so the
-    state file, the start lock, the migration, and
-    the health probe are all owned by the v2.1
-    Part B2 lifecycle code (the launcher never
-    re-implements the lifecycle). The
-    ``lockverity-cli start`` call is the documented
-    graphical-launcher-to-CLI bridge; it publishes
-    the runtime identity state, holds the start
-    lock for the child's lifetime, and runs the
-    migration before the server starts.
-
-    The function returns the recorded ``pid`` from
-    the CLI's start subprocess's published state
-    file. The launcher shows the same trusted local
-    URL in the default browser that ``open`` shows
-    from a second terminal.
-    """
-    home = ensure_home(home)
-    probe = probe_port(host, port)
-    if probe.in_use:
-        raise PortInUseError(f"port {host}:{port} is in use")
-    import subprocess as _subprocess
-
-    # The launcher's frozen ``sys.executable`` is
-    # ``Lockverity.exe`` (the windowless launcher),
-    # not ``lockverity-cli.exe``. The CLI exe is the
-    # sibling at ``<portable_root>/lockverity-cli.exe``
-    # and is the supported entry point for the
-    # documented lifecycle. In source mode the
-    # launcher's own ``sys.executable`` is the
-    # Python interpreter and the launcher's argv is
-    # ``python -m app.cli``.
-    if is_frozen():
-        cli_exe = Path(sys.executable).with_name("lockverity-cli.exe")
-        if not cli_exe.is_file():
-            raise RuntimeError(f"lockverity-cli.exe not found at {cli_exe}")
-        argv = [str(cli_exe), "start", "--port", str(port)]
-    else:
-        argv = [
-            sys.executable,
-            "-m",
-            "app.cli",
-            "start",
-            "--port",
-            str(port),
-        ]
-    # The launcher's own process is short-lived; the
-    # detached ``lockverity-cli start`` subprocess is
-    # short-lived too (it exits after handing off the
-    # serve child). The serve child survives the
-    # launcher's exit because the CLI spawns it as a
-    # detached ``Popen``.
-    if sys.platform == "win32":
-        flags = 0x00000008 | 0x00000200  # DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP
-        kwargs: dict[str, object] = {
-            "stdin": _subprocess.DEVNULL,
-            "stdout": _subprocess.DEVNULL,
-            "stderr": _subprocess.DEVNULL,
-            "close_fds": True,
-            "creationflags": flags,
-        }
-    else:
-        kwargs = {
-            "stdin": _subprocess.DEVNULL,
-            "stdout": _subprocess.DEVNULL,
-            "stderr": _subprocess.DEVNULL,
-            "close_fds": True,
-            "start_new_session": True,
-        }
-    handle = _subprocess.Popen(argv, **kwargs)  # noqa: S603 - argv is built by us
-    handle.wait()
-    if handle.returncode != 0:
-        raise RuntimeError(
-            f"lockverity-cli start returned non-zero exit code "
-            f"{handle.returncode}; the runtime log is at "
-            f"{home / 'logs' / 'lockverity.log'}"
-        )
-    # The CLI's start subprocess wrote the state
-    # file before exiting. Read it back so the
-    # launcher can show the trusted URL in the
-    # default browser.
-    from app.cli.state import read_state
-
-    state = read_state(home)
-    if state is None:
-        raise RuntimeError(
-            f"lockverity-cli start did not publish a state file under {home / 'run'}"
-        )
-    return state.pid
-
-
-def _wait_for_health(host: str, port: int, timeout: float) -> bool:
-    """Block until ``/api/v1/health`` returns 200 or ``timeout`` elapses."""
-    deadline = time.monotonic() + timeout
-    while time.monotonic() < deadline:
-        try:
-            with urllib.request.urlopen(
-                f"http://{host}:{port}/api/v1/health", timeout=2
-            ) as response:
-                if response.status == 200:
-                    return True
-        except (urllib.error.URLError, ConnectionError, OSError):
-            time.sleep(0.5)
-    return False
-
-
-def _read_status(home: Path) -> dict[str, object] | None:
-    """Return the parsed status payload or ``None`` if no state file exists.
-
-    The function is the read-only inspection path; the
-    launcher never starts a second instance if one is
-    already running and healthy.
-    """
-    try:
-        state = read_state(home)
-    except (ValueError, OSError):
-        return None
-    if state is None:
-        return None
-    identity = cli_process.verify_identity(
-        recorded_pid=state.pid,
-        recorded_created_at=state.created_at,
-        recorded_instance_id=state.instance_id,
-        recorded_module=state.module,
-    )
-    if isinstance(identity, cli_process.IdentityMatch):
-        return {
-            "status": "running",
-            "pid": state.pid,
-            "host": state.host,
-            "port": state.port,
-            "url": f"http://{state.host}:{state.port}/",
-        }
-    if isinstance(identity, cli_process.ProcessGone):
-        return {"status": "stopped", "instance_id": state.instance_id}
-    return {
-        "status": "stale",
-        "instance_id": state.instance_id,
-        "reason": str(identity),
+# External documents and evidence links which the product itself can render.
+# Exact hosts are intentional: suffix matching would make
+# ``github.com.attacker.example`` look trusted.
+APPROVED_EXTERNAL_HOSTS = frozenset(
+    {
+        "api.deps.dev",
+        "deps.dev",
+        "docs.github.com",
+        "github.com",
+        "osv.dev",
+        "policies.google.com",
+        "securityscorecards.dev",
+        "www.github.com",
+        "www.linuxfoundation.org",
     }
+)
+
+_WEBVIEW2_CLIENT_GUID = "{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}"
+WEBVIEW2_DOWNLOAD_URL = "https://developer.microsoft.com/microsoft-edge/webview2/"
 
 
 class PortInUseError(RuntimeError):
-    """Raised when the launcher's port is already bound by another process."""
+    """Compatibility exit-category for a loopback bind conflict."""
 
 
 class MigrationError(RuntimeError):
-    """Raised when the database migration fails."""
+    """Compatibility exit-category for a migration failure."""
 
 
 class MissingDistError(RuntimeError):
-    """Raised when the bundled frontend dist is missing or invalid."""
+    """Raised when the bundled React distribution is unavailable."""
 
 
-def _show_message_box(title: str, message: str) -> int:
-    """Show a native Windows message box.
+class BackendStartupError(RuntimeError):
+    """Raised when the owned backend fails before readiness."""
 
-    The function is a thin adapter around
-    ``ctypes.windll.user32.MessageBoxW``. It is a no-op
-    on non-Windows hosts so the test suite can run on
-    every platform; the test suite monkey-patches this
-    function to record the messages without showing
-    actual dialogs.
+
+class BackendUnexpectedExitError(RuntimeError):
+    """Raised when the owned backend exits while the window is open."""
+
+
+@dataclass(frozen=True, slots=True)
+class NavigationDecision:
+    """Decision returned by :func:`classify_navigation`."""
+
+    action: str
+    url: str
+
+
+class WindowsSingleInstance:
+    """Process-lifetime named mutex used by the graphical launcher.
+
+    The same stable mutex appears in Inno Setup's ``AppMutex`` directive.
+    The CLI start lock remains the second line of defence for database and
+    runtime state.
     """
-    if sys.platform != "win32":
-        # Non-Windows: log to stderr and return 0.
-        # This branch is hit by the test suite on
-        # POSIX and on Windows CI runners that do not
-        # have an interactive desktop.
-        sys.stderr.write(f"[{title}] {message}\n")
-        return 0
-    import ctypes
 
-    # MB_OK | MB_ICONERROR | MB_TOPMOST
-    flags = 0x00000000 | 0x00000010 | 0x00040000
-    return ctypes.windll.user32.MessageBoxW(None, message, title, flags)
+    def __init__(self, name: str = INSTANCE_MUTEX_NAME) -> None:
+        self.name = name
+        self._handle: int | None = None
+
+    def acquire(self) -> bool:
+        if sys.platform != "win32":
+            return True
+        import ctypes
+
+        kernel32 = ctypes.windll.kernel32
+        kernel32.CreateMutexW.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_wchar_p]
+        kernel32.CreateMutexW.restype = ctypes.c_void_p
+        kernel32.CloseHandle.argtypes = [ctypes.c_void_p]
+        kernel32.SetLastError(0)
+        handle = kernel32.CreateMutexW(None, False, self.name)
+        if not handle:
+            raise OSError(ctypes.get_last_error(), "CreateMutexW failed")
+        self._handle = int(handle)
+        return int(kernel32.GetLastError()) != _ERROR_ALREADY_EXISTS
+
+    def close(self) -> None:
+        if self._handle is None or sys.platform != "win32":
+            return
+        import ctypes
+
+        ctypes.windll.kernel32.CloseHandle(self._handle)
+        self._handle = None
 
 
-def _open_browser(url: str) -> bool:
-    """Open the default browser to ``url``.
+class DesktopBackendSupervisor:
+    """Own the existing foreground CLI runtime from a worker thread."""
 
-    The function is a thin adapter around
-    :func:`webbrowser.open`; tests can monkey-patch it to
-    record the URL without opening a real browser.
-    """
-    return bool(webbrowser.open(url))
-
-
-def main(argv: list[str] | None = None) -> int:
-    """Run the launcher.
-
-    The function is the entry point declared in the
-    PyInstaller spec (``lockverity.spec``). It is
-    intentionally narrow: a thin shell over the
-    accepted Part B2 / Part B1 logic with the
-    launcher-specific UI adaptation.
-    """
-    parser = argparse.ArgumentParser(prog="Lockverity")
-    parser.add_argument(
-        "--no-browser",
-        action="store_true",
-        help="Do not open the browser after starting.",
-    )
-    parser.add_argument(
-        "--port",
-        type=int,
-        default=DEFAULT_PORT,
-        help="Override the port (default 8000).",
-    )
-    parser.add_argument(
-        "--timeout",
-        type=float,
-        default=30.0,
-        help="Health-probe timeout in seconds (default 30).",
-    )
-    args = parser.parse_args(argv)
-
-    home = _resolve_runtime_home()
-    ensure_home(home)
-    settings = _settings()
-    frontend_dist = Path(settings.frontend_dist).expanduser()
-    if not frontend_dist.is_absolute():
-        frontend_dist = (application_root() / frontend_dist).resolve()
-    if not (frontend_dist / "index.html").is_file():
-        _show_message_box(
-            "Lockverity - bundled frontend missing",
-            f"The packaged frontend dist is missing or invalid.\n\n"
-            f"Expected at: {frontend_dist}\n\n"
-            f"Please re-download the Lockverity portable package.",
+    def __init__(
+        self,
+        *,
+        home: Path,
+        host: str,
+        port: int,
+        frontend_dist: Path,
+        database_url: str | None,
+        timeout: float,
+    ) -> None:
+        self.home = home
+        self.host = host
+        self.port = port
+        self.frontend_dist = frontend_dist
+        self.database_url = database_url
+        self.timeout = timeout
+        self.state: InstanceState | None = None
+        self.error: BaseException | None = None
+        self.ready = threading.Event()
+        self.done = threading.Event()
+        self.shutdown_requested = threading.Event()
+        self._thread = threading.Thread(
+            target=self._run,
+            name="lockverity-desktop-backend",
+            daemon=False,
         )
-        return LAUNCHER_EXIT_MISSING_DIST
 
-    host = DEFAULT_HOST
-    port = int(args.port)
-    if not is_loopback_host(host):
-        _show_message_box(
-            "Lockverity - configuration error",
-            "The launcher binds to loopback only. "
-            "Remote exposure requires an explicit --allow-remote.",
-        )
-        return LAUNCHER_EXIT_ERROR
+    @property
+    def url(self) -> str:
+        return f"http://{self.host}:{self.port}/"
 
-    # Step 1: probe existing instance.
-    status = _read_status(home)
-    if status and status.get("status") == "running":
-        url = str(status.get("url") or f"http://{host}:{port}/")
-        if not args.no_browser:
-            _open_browser(url)
-        return LAUNCHER_EXIT_OK
+    def start(self) -> None:
+        self._thread.start()
 
-    # Step 2: start a background instance.
-    try:
-        _start_background(
-            home=home,
-            host=host,
-            port=port,
-            frontend_dist=frontend_dist,
-            database_url=settings.database_url,
-            log_level="info",
+    def _on_ready(self, state: InstanceState) -> None:
+        self.state = state
+        self.port = state.port
+        self.ready.set()
+
+    def _run(self) -> None:
+        try:
+            cli_runner.start(
+                home=self.home,
+                host=self.host,
+                port=self.port,
+                frontend_dist=self.frontend_dist,
+                foreground=True,
+                timeout=self.timeout,
+                database_url=self.database_url,
+                log_level="info",
+                open_browser=False,
+                on_ready=self._on_ready,
+            )
+            if self.ready.is_set() and not self.shutdown_requested.is_set():
+                self.error = BackendUnexpectedExitError("the local backend stopped unexpectedly")
+        except BaseException as exc:  # worker must report every startup/child failure
+            self.error = exc
+        finally:
+            self.done.set()
+
+    def wait_until_ready(self) -> bool:
+        deadline = time.monotonic() + self.timeout
+        while time.monotonic() < deadline:
+            if self.ready.wait(timeout=0.05):
+                return True
+            if self.done.is_set():
+                return False
+        self.error = BackendStartupError(
+            f"backend did not report ready on {self.host}:{self.port} within {self.timeout:.1f}s"
         )
-    except PortInUseError as exc:
-        _show_message_box(
-            "Lockverity - port in use",
-            f"Another process is bound to {host}:{port}.\n\n"
-            f"{exc}\n\n"
-            f"Stop the conflicting process or run the launcher with a "
-            f"different --port. The log is at:\n{home / 'logs' / 'lockverity.log'}",
-        )
-        return LAUNCHER_EXIT_PORT_IN_USE
-    except Exception as exc:  # broad: covers migration / dist / runtime
-        # Distinguish migration failures so the user sees the
-        # correct log path; the rest of the failures are
-        # bundled into the generic "unexpected failure" path.
-        msg = str(exc)
-        if "alembic" in msg.lower() or "migration" in msg.lower():
-            code = LAUNCHER_EXIT_MIGRATION
+        return False
+
+    def request_shutdown(self) -> None:
+        self.shutdown_requested.set()
+
+    def shutdown(self) -> bool:
+        """Stop and reap the backend, escalating only after the grace period."""
+        self.request_shutdown()
+        if self.ready.is_set() and not self.done.is_set():
+            result = cli_runner.stop(home=self.home, timeout=15.0, force=False)
+            if result.outcome == "error":
+                logger.warning("graceful backend stop did not converge: %s", result.details)
+                result = cli_runner.stop(home=self.home, timeout=2.0, force=True)
+            stopped = result.outcome in {"stopped", "force_killed", "was_not_running"}
         else:
-            code = LAUNCHER_EXIT_ERROR
-        _show_message_box(
-            "Lockverity - failed to start",
-            f"The launcher could not start Lockverity.\n\n"
-            f"{msg}\n\n"
-            f"Run ``lockverity-cli.exe doctor`` for a diagnostic, or check "
-            f"the log at:\n{home / 'logs' / 'lockverity.log'}",
-        )
-        return code
+            stopped = True
+        if self._thread.is_alive():
+            self._thread.join(timeout=20.0)
+        return stopped and not self._thread.is_alive()
 
-    # Step 3: wait for readiness.
-    if not _wait_for_health(host, port, timeout=float(args.timeout)):
-        _show_message_box(
-            "Lockverity - health timeout",
-            f"The server did not report healthy at "
-            f"http://{host}:{port}/api/v1/health within "
-            f"{float(args.timeout):.0f}s.\n\n"
-            f"Check the log at:\n{home / 'logs' / 'lockverity.log'}",
-        )
-        return LAUNCHER_EXIT_HEALTH
 
-    if not args.no_browser:
-        _open_browser(f"http://{host}:{port}/")
-    return LAUNCHER_EXIT_OK
+def _resolve_runtime_home() -> Path:
+    explicit = os.environ.get("LOCKVERITY_HOME")
+    return resolve_home(cli_override=explicit) if explicit else resolve_home()
 
 
 def _settings() -> object:
-    """Return a fresh :class:`app.core.Settings` instance.
-
-    The launcher bypasses the LRU cache because the
-    launcher is a short-lived process that may run
-    before the cache is populated; the cache_clear
-    also defends against a stale cache from a
-    previous launcher invocation in the same Python
-    process (e.g. a test runner).
-    """
     from app.core.config import get_settings
 
     get_settings.cache_clear()
     return get_settings()
 
 
+def _frontend_dist(settings: Any) -> Path:
+    configured = Path(str(settings.frontend_dist)).expanduser()
+    if not configured.is_absolute():
+        configured = (application_root() / configured).resolve()
+    return configured
+
+
+def _show_message_box(title: str, message: str) -> int:
+    if sys.platform != "win32":
+        sys.stderr.write(f"[{title}] {message}\n")
+        return 0
+    import ctypes
+
+    return int(ctypes.windll.user32.MessageBoxW(None, message, title, 0x00040010))
+
+
+def _set_app_user_model_id() -> None:
+    if sys.platform != "win32":
+        return
+    import ctypes
+
+    result = ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(APP_USER_MODEL_ID)
+    if int(result) != 0:
+        logger.warning("SetCurrentProcessExplicitAppUserModelID failed: HRESULT=%s", result)
+
+
+def _focus_existing_window(timeout: float = 5.0) -> bool:
+    """Restore and focus the existing titled window where Windows permits it."""
+    if sys.platform != "win32":
+        return False
+    import ctypes
+
+    user32 = ctypes.windll.user32
+    deadline = time.monotonic() + max(0.0, timeout)
+    while time.monotonic() <= deadline:
+        hwnd = user32.FindWindowW(None, WINDOW_TITLE)
+        if hwnd:
+            user32.ShowWindow(hwnd, _SW_RESTORE if user32.IsIconic(hwnd) else _SW_SHOW)
+            user32.SetForegroundWindow(hwnd)
+            return True
+        time.sleep(0.1)
+    return False
+
+
+def _webview2_runtime_version() -> str | None:
+    """Return the installed Evergreen WebView2 version using Microsoft's keys."""
+    if sys.platform != "win32":
+        return "non-windows-test-host"
+    import winreg
+
+    locations = (
+        (
+            winreg.HKEY_LOCAL_MACHINE,
+            rf"SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\{_WEBVIEW2_CLIENT_GUID}",
+        ),
+        (
+            winreg.HKEY_CURRENT_USER,
+            rf"Software\Microsoft\EdgeUpdate\Clients\{_WEBVIEW2_CLIENT_GUID}",
+        ),
+    )
+    for hive, key_path in locations:
+        try:
+            with winreg.OpenKey(hive, key_path) as key:
+                value = str(winreg.QueryValueEx(key, "pv")[0]).strip()
+        except OSError:
+            continue
+        if value and value != "0.0.0.0":  # noqa: S104 - WebView2 version sentinel
+            return value
+    return None
+
+
+def _same_origin(candidate: urllib.parse.SplitResult, app: urllib.parse.SplitResult) -> bool:
+    try:
+        candidate_port = candidate.port
+        app_port = app.port
+    except ValueError:
+        return False
+    return (
+        candidate.scheme.lower() == app.scheme.lower()
+        and (candidate.hostname or "").lower() == (app.hostname or "").lower()
+        and candidate_port == app_port
+    )
+
+
+def classify_navigation(url: str, app_origin: str) -> NavigationDecision:
+    """Classify a top-level WebView navigation using an exact-origin policy."""
+    candidate = urllib.parse.urlsplit(url)
+    app = urllib.parse.urlsplit(app_origin)
+    if candidate.scheme == "about" and candidate.path == "blank":
+        return NavigationDecision("internal", url)
+    if _same_origin(candidate, app):
+        return NavigationDecision("internal", url)
+    host = (candidate.hostname or "").lower()
+    if candidate.scheme.lower() == "https" and host in APPROVED_EXTERNAL_HOSTS:
+        return NavigationDecision("external", url)
+    return NavigationDecision("blocked", url)
+
+
+def _open_external_url(url: str) -> bool:
+    """Open an already-approved external URL in the system browser."""
+    return bool(webbrowser.open(url, new=2, autoraise=True))
+
+
+def _event_url(args: object) -> str:
+    value = getattr(args, "Uri", None)
+    if value is None and hasattr(args, "get_Uri"):
+        value = args.get_Uri()  # type: ignore[attr-defined]
+    return str(value or "")
+
+
+def _install_navigation_guard(window: Any, app_origin: str) -> None:
+    """Install Edge WebView2 top-level and new-window navigation guards."""
+    browser = window.native.browser
+
+    def handle(url: str) -> NavigationDecision:
+        decision = classify_navigation(url, app_origin)
+        if decision.action == "external":
+            with contextlib.suppress(OSError, webbrowser.Error):
+                _open_external_url(decision.url)
+        elif decision.action == "blocked":
+            logger.warning("blocked unexpected WebView navigation to %s", decision.url)
+        return decision
+
+    def on_navigation_starting(_sender: object, args: object) -> None:
+        decision = handle(_event_url(args))
+        if decision.action != "internal":
+            if hasattr(args, "Cancel"):
+                args.Cancel = True
+            elif hasattr(args, "set_Cancel"):
+                args.set_Cancel(True)  # type: ignore[attr-defined]
+
+    def on_new_window_request(_sender: object, args: object) -> None:
+        handle(_event_url(args))
+        if hasattr(args, "Handled"):
+            args.Handled = True
+        elif hasattr(args, "set_Handled"):
+            args.set_Handled(True)  # type: ignore[attr-defined]
+
+    # BrowserForm constructs this WebView2 control before ``before_show``.
+    # Replacing the callback now means pywebview subscribes our guarded
+    # callback when CoreWebView2 initialization completes.
+    browser.webview.NavigationStarting += on_navigation_starting
+    browser.on_new_window_request = on_new_window_request
+    window._lockverity_navigation_handlers = (on_navigation_starting, on_new_window_request)
+
+
+def _icon_path() -> Path:
+    return application_root() / "favicon-exe.ico"
+
+
+def _load_webview() -> Any:
+    import webview
+
+    return webview
+
+
+def _monitor_backend(supervisor: DesktopBackendSupervisor, window: Any) -> None:
+    supervisor.done.wait()
+    if supervisor.shutdown_requested.is_set() or supervisor.error is None:
+        return
+    if not isinstance(supervisor.error, BackendUnexpectedExitError):
+        _show_message_box(
+            "Lockverity - backend stopped",
+            "Lockverity's local backend stopped unexpectedly. The desktop window will close.\n\n"
+            f"Check the log at:\n{supervisor.home / 'logs' / 'lockverity.log'}",
+        )
+    with contextlib.suppress(Exception):
+        window.destroy()
+
+
+def _run_webview(supervisor: DesktopBackendSupervisor) -> None:
+    webview = _load_webview()
+    # Lockverity's existing export UI downloads generated Blob URLs. Enabling
+    # pywebview's download path is therefore required product functionality;
+    # on Windows it presents a native Save As dialog. File-origin navigation,
+    # arbitrary popups, and remote debugging remain disabled independently.
+    webview.settings["ALLOW_DOWNLOADS"] = True
+    webview.settings["ALLOW_FILE_URLS"] = False
+    webview.settings["OPEN_EXTERNAL_LINKS_IN_BROWSER"] = False
+    webview.settings["REMOTE_DEBUGGING_PORT"] = None
+    window = webview.create_window(
+        WINDOW_TITLE,
+        supervisor.url,
+        js_api=None,
+        width=WINDOW_WIDTH,
+        height=WINDOW_HEIGHT,
+        min_size=(WINDOW_MIN_WIDTH, WINDOW_MIN_HEIGHT),
+        resizable=True,
+        background_color="#F7F8FA",
+        text_select=True,
+        zoomable=False,
+        confirm_close=False,
+    )
+    if window is None:
+        raise RuntimeError("pywebview did not create the Lockverity window")
+    window.events.before_show += lambda window: _install_navigation_guard(window, supervisor.url)
+    window.events.closing += supervisor.request_shutdown
+    icon = _icon_path()
+    webview.start(
+        func=_monitor_backend,
+        args=(supervisor, window),
+        gui="edgechromium",
+        debug=False,
+        private_mode=True,
+        storage_path=str(supervisor.home / "webview2"),
+        icon=str(icon) if icon.is_file() else None,
+    )
+
+
+def _startup_error_code(exc: BaseException | None) -> int:
+    text = str(exc or "").lower()
+    if "port" in text and "use" in text:
+        return LAUNCHER_EXIT_PORT_IN_USE
+    if "alembic" in text or "migration" in text:
+        return LAUNCHER_EXIT_MIGRATION
+    if isinstance(exc, BackendStartupError):
+        return LAUNCHER_EXIT_HEALTH
+    return LAUNCHER_EXIT_ERROR
+
+
+def main(argv: list[str] | None = None) -> int:
+    """Start the owned backend, show the native window, then shut it down."""
+    effective_argv = list(sys.argv[1:] if argv is None else argv)
+    if effective_argv and effective_argv[0] == "--internal-serve":
+        # Frozen foreground backend child. ``runner.build_server_argv``
+        # re-enters the current windowless executable in frozen mode.
+        from app.cli._serve import main as serve_main
+
+        return serve_main(effective_argv[1:])
+
+    parser = argparse.ArgumentParser(prog="Lockverity")
+    parser.add_argument("--port", type=int, default=cli_runner.DEFAULT_PORT)
+    parser.add_argument("--timeout", type=float, default=30.0)
+    args = parser.parse_args(effective_argv)
+
+    if not (1 <= int(args.port) <= 65535):
+        _show_message_box("Lockverity - invalid port", "The desktop port must be in 1..65535.")
+        return LAUNCHER_EXIT_ERROR
+
+    instance = WindowsSingleInstance()
+    try:
+        first_instance = instance.acquire()
+    except OSError:
+        _show_message_box(
+            "Lockverity - startup error",
+            "Windows could not create the Lockverity single-instance guard.",
+        )
+        return LAUNCHER_EXIT_ERROR
+    if not first_instance:
+        _focus_existing_window()
+        instance.close()
+        return LAUNCHER_EXIT_OK
+
+    supervisor: DesktopBackendSupervisor | None = None
+    try:
+        _set_app_user_model_id()
+        if _webview2_runtime_version() is None:
+            _show_message_box(
+                "Lockverity - Microsoft Edge WebView2 required",
+                "Microsoft Edge WebView2 Runtime is required to display Lockverity.\n\n"
+                "Install Microsoft's Evergreen WebView2 Runtime, then start Lockverity again.\n\n"
+                f"Official download: {WEBVIEW2_DOWNLOAD_URL}",
+            )
+            return LAUNCHER_EXIT_WEBVIEW2_MISSING
+
+        home = ensure_home(_resolve_runtime_home())
+        settings = _settings()
+        frontend_dist = _frontend_dist(settings)
+        if not (frontend_dist / "index.html").is_file():
+            _show_message_box(
+                "Lockverity - bundled frontend missing",
+                "The packaged React frontend is missing or invalid.\n\n"
+                f"Expected at: {frontend_dist}",
+            )
+            return LAUNCHER_EXIT_MISSING_DIST
+
+        supervisor = DesktopBackendSupervisor(
+            home=home,
+            host=cli_runner.DEFAULT_HOST,
+            port=int(args.port),
+            frontend_dist=frontend_dist,
+            # Match the CLI contract exactly: ``None`` selects its
+            # CWD-independent ``<runtime-home>/data`` default, while an
+            # explicit operator environment override is forwarded verbatim.
+            database_url=os.environ.get("LOCKVERITY_DATABASE_URL") or None,
+            timeout=float(args.timeout),
+        )
+        supervisor.start()
+        if not supervisor.wait_until_ready():
+            supervisor.shutdown()
+            _show_message_box(
+                "Lockverity - failed to start",
+                "Lockverity's local backend did not become ready. No desktop window was opened.\n\n"
+                f"Check the log at:\n{home / 'logs' / 'lockverity.log'}",
+            )
+            return _startup_error_code(supervisor.error)
+
+        try:
+            _run_webview(supervisor)
+        except Exception:
+            logger.exception("native WebView startup failed")
+            _show_message_box(
+                "Lockverity - desktop window failed",
+                "Lockverity could not create its Microsoft Edge WebView2 window.\n\n"
+                f"Check the log at:\n{home / 'logs' / 'lockverity.log'}",
+            )
+            return LAUNCHER_EXIT_ERROR
+        return LAUNCHER_EXIT_OK
+    finally:
+        if supervisor is not None and not supervisor.shutdown():
+            logger.error("backend supervisor did not exit after desktop shutdown")
+        instance.close()
+
+
 __all__ = [
+    "APPROVED_EXTERNAL_HOSTS",
+    "APP_USER_MODEL_ID",
+    "INSTANCE_MUTEX_NAME",
     "LAUNCHER_EXIT_ERROR",
     "LAUNCHER_EXIT_HEALTH",
     "LAUNCHER_EXIT_MIGRATION",
     "LAUNCHER_EXIT_MISSING_DIST",
     "LAUNCHER_EXIT_OK",
     "LAUNCHER_EXIT_PORT_IN_USE",
+    "LAUNCHER_EXIT_WEBVIEW2_MISSING",
+    "BackendStartupError",
+    "BackendUnexpectedExitError",
+    "DesktopBackendSupervisor",
     "MigrationError",
     "MissingDistError",
+    "NavigationDecision",
     "PortInUseError",
+    "WindowsSingleInstance",
+    "classify_navigation",
     "main",
 ]

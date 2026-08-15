@@ -375,7 +375,12 @@ def read_live_identity(pid: int) -> LiveProcess | None:
 # ---------------------------------------------------------------------------
 
 
-def terminate_process(pid: int, *, timeout: float = 10.0) -> bool:
+def terminate_process(
+    pid: int,
+    *,
+    timeout: float = 10.0,
+    instance_id: str | None = None,
+) -> bool:
     """Terminate the live process gracefully.
 
     The function is the standard-library / psutil
@@ -398,16 +403,14 @@ def terminate_process(pid: int, *, timeout: float = 10.0) -> bool:
     except psutil.Error:
         return False
     try:
-        if sys.platform == "win32":
-            # Windows does not have ``SIGTERM``; psutil
-            # translates the documented graceful-stop
-            # signal to ``TerminateProcess`` on Windows,
-            # which is the documented graceful-stop
-            # primitive. The child was started with
-            # ``DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP``
-            # so it does not share a console with the
-            # CLI.
-            process.terminate()
+        if sys.platform == "win32" and instance_id:
+            # A GUI-subsystem process has no console to receive Ctrl+C or
+            # Ctrl+Break. Signal the per-instance named event created by
+            # ``app.cli._serve`` so Uvicorn can run its lifespan shutdown.
+            from app.cli._serve import signal_windows_shutdown
+
+            if not signal_windows_shutdown(instance_id):
+                return False
         else:
             process.terminate()
     except (psutil.Error, OSError):

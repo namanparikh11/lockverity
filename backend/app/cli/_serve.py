@@ -10,11 +10,11 @@ being terminated.
 Uvicorn's own CLI does not accept a custom
 ``--instance-id`` argument; the supervisor needs a
 private entry point that consumes the argument and
-then calls :func:`uvicorn.run` with the rest of the
-documented Uvicorn arguments. The entry point is
-deliberately small: its single job is to strip the
-``--instance-id`` token out of ``sys.argv`` and pass
-the rest through to Uvicorn.
+then configures :class:`uvicorn.Server` with the rest
+of the documented Uvicorn arguments. On Windows the
+entry point also owns a per-instance named event so a
+windowless GUI process can request graceful lifespan
+shutdown without relying on console signals.
 
 The entry point is a private module; downstream
 integrators should not import it directly. The
@@ -26,12 +26,20 @@ from __future__ import annotations
 
 import argparse
 import contextlib
+import ctypes
 import logging
 import signal
 import sys
+import threading
 from collections.abc import Sequence
 
 logger = logging.getLogger("lockverity.cli.serve")
+
+_WINDOWS_STOP_EVENT_PREFIX = r"Local\LockverityBackendStop-"
+_EVENT_MODIFY_STATE = 0x0002
+_SYNCHRONIZE = 0x00100000
+_WAIT_OBJECT_0 = 0
+_INFINITE = 0xFFFFFFFF
 
 # The argument name the supervisor appends to the
 # child argv. The name is reserved: Uvicorn does not
@@ -62,6 +70,89 @@ _UVICORN_KNOWN_FLAGS_WITH_VALUE: frozenset[str] = frozenset(
         "--reload-dir",
     }
 )
+
+
+def _windows_shutdown_event_name(instance_id: str) -> str:
+    """Return the bounded per-instance Windows shutdown event name."""
+    import uuid
+
+    canonical = str(uuid.UUID(instance_id))
+    return _WINDOWS_STOP_EVENT_PREFIX + canonical
+
+
+def signal_windows_shutdown(instance_id: str) -> bool:
+    """Signal a running backend's graceful-shutdown event on Windows."""
+    if sys.platform != "win32":
+        return False
+    try:
+        name = _windows_shutdown_event_name(instance_id)
+    except (ValueError, AttributeError, TypeError):
+        return False
+    kernel32 = ctypes.windll.kernel32
+    kernel32.OpenEventW.argtypes = [ctypes.c_uint32, ctypes.c_int, ctypes.c_wchar_p]
+    kernel32.OpenEventW.restype = ctypes.c_void_p
+    kernel32.SetEvent.argtypes = [ctypes.c_void_p]
+    kernel32.CloseHandle.argtypes = [ctypes.c_void_p]
+    handle = kernel32.OpenEventW(_EVENT_MODIFY_STATE | _SYNCHRONIZE, False, name)
+    if not handle:
+        return False
+    try:
+        return bool(kernel32.SetEvent(handle))
+    finally:
+        kernel32.CloseHandle(handle)
+
+
+class _WindowsShutdownEvent:
+    """Own the backend's named Windows event and map it to Uvicorn exit."""
+
+    def __init__(self, instance_id: str, server: object) -> None:
+        self._server = server
+        self._handle: int | None = None
+        self._thread: threading.Thread | None = None
+        if sys.platform != "win32":
+            return
+        name = _windows_shutdown_event_name(instance_id)
+        kernel32 = ctypes.windll.kernel32
+        kernel32.CreateEventW.argtypes = [
+            ctypes.c_void_p,
+            ctypes.c_int,
+            ctypes.c_int,
+            ctypes.c_wchar_p,
+        ]
+        kernel32.CreateEventW.restype = ctypes.c_void_p
+        kernel32.SetEvent.argtypes = [ctypes.c_void_p]
+        kernel32.CloseHandle.argtypes = [ctypes.c_void_p]
+        kernel32.WaitForSingleObject.argtypes = [ctypes.c_void_p, ctypes.c_uint32]
+        handle = kernel32.CreateEventW(None, True, False, name)
+        if not handle:
+            raise OSError(ctypes.get_last_error(), "CreateEventW failed")
+        self._handle = int(handle)
+        self._thread = threading.Thread(
+            target=self._wait,
+            name="lockverity-backend-shutdown-event",
+            daemon=True,
+        )
+
+    def _wait(self) -> None:
+        if self._handle is None:
+            return
+        result = ctypes.windll.kernel32.WaitForSingleObject(self._handle, _INFINITE)
+        if result == _WAIT_OBJECT_0:
+            self._server.should_exit = True  # type: ignore[attr-defined]
+
+    def __enter__(self) -> _WindowsShutdownEvent:
+        if self._thread is not None:
+            self._thread.start()
+        return self
+
+    def __exit__(self, *_exc: object) -> None:
+        if self._handle is None:
+            return
+        ctypes.windll.kernel32.SetEvent(self._handle)
+        if self._thread is not None:
+            self._thread.join(timeout=1.0)
+        ctypes.windll.kernel32.CloseHandle(self._handle)
+        self._handle = None
 
 
 def _split_argv(argv: Sequence[str]) -> tuple[str | None, list[str]]:
@@ -172,7 +263,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     # the supervisor or the unit tests.
     import uvicorn
 
-    uvicorn.run(
+    config = uvicorn.Config(
         app_module,
         host=parsed.host,
         port=parsed.port,
@@ -182,6 +273,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         # ``lockverity start`` / ``lockverity stop``.
         reload=False,
     )
+    server = uvicorn.Server(config)
+    if sys.platform == "win32" and instance_id:
+        with _WindowsShutdownEvent(instance_id, server):
+            server.run()
+    else:
+        server.run()
     return 0
 
 

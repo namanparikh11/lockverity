@@ -399,6 +399,30 @@ class TestStateFile:
         assert clear_state(isolated_home) is True
         assert clear_state(isolated_home) is False
 
+    def test_clear_state_retries_transient_windows_sharing_violation(
+        self,
+        isolated_home_with_subdirs: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        path = state_file_path(isolated_home_with_subdirs)
+        path.write_text("{}", encoding="utf-8")
+        original_unlink = Path.unlink
+        calls = 0
+
+        def flaky_unlink(candidate: Path, *args: object, **kwargs: object) -> None:
+            nonlocal calls
+            if candidate == path and calls == 0:
+                calls += 1
+                raise PermissionError("simulated Windows sharing violation")
+            original_unlink(candidate, *args, **kwargs)
+
+        monkeypatch.setattr(state_module.sys, "platform", "win32")
+        monkeypatch.setattr(Path, "unlink", flaky_unlink)
+
+        assert clear_state(isolated_home_with_subdirs) is True
+        assert calls == 1
+        assert not path.exists()
+
     def test_make_state_validates_inputs(self, isolated_home_with_subdirs: Path) -> None:
         with pytest.raises(ValueError):
             make_state(
