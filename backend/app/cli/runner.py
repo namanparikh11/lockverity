@@ -388,6 +388,7 @@ def build_server_argv(
     port: int,
     log_level: str,
     instance_id: str,
+    inherit_socket_fd: int | None = None,
 ) -> list[str]:
     """Build the argv for the private child-serve entry point.
 
@@ -413,11 +414,22 @@ def build_server_argv(
     The ``app.cli._serve`` module's ``main`` is
     imported and called with the same argument
     vector.
+
+    When ``inherit_socket_fd`` is provided (POSIX
+    GUI mode), the function appends the
+    ``--inherit-socket-fd <fd>`` flag pair so the
+    child reconstructs the supervisor's pre-bound
+    socket with the inherited file descriptor. On
+    Windows the share data is delivered through the
+    child's stdin, so the flag is not appended and
+    the caller is expected to write the share blob
+    to ``proc.stdin`` before the child reads it.
     """
     from app.runtime_paths import is_frozen
 
+    base: list[str]
     if is_frozen():
-        return [
+        base = [
             sys.executable,
             "--internal-serve",
             "--host",
@@ -429,19 +441,23 @@ def build_server_argv(
             INSTANCE_ID_ARG,
             instance_id,
         ]
-    return [
-        sys.executable,
-        "-m",
-        SERVER_ENTRY,
-        "--host",
-        host,
-        "--port",
-        str(port),
-        "--log-level",
-        log_level,
-        INSTANCE_ID_ARG,
-        instance_id,
-    ]
+    else:
+        base = [
+            sys.executable,
+            "-m",
+            SERVER_ENTRY,
+            "--host",
+            host,
+            "--port",
+            str(port),
+            "--log-level",
+            log_level,
+            INSTANCE_ID_ARG,
+            instance_id,
+        ]
+    if inherit_socket_fd is not None and sys.platform != "win32":
+        base.extend(["--inherit-socket-fd", str(int(inherit_socket_fd))])
+    return base
 
 
 def build_server_env(
@@ -553,6 +569,7 @@ def start(
     log_level: str = "info",
     open_browser: bool = False,
     on_ready: Callable[[InstanceState], None] | None = None,
+    prebound_socket: socket.socket | None = None,
 ) -> StartResult:
     """Launch the Lockverity single-port runtime.
 
@@ -705,13 +722,47 @@ def start(
         # process is bound. The check is a soft probe;
         # the bind inside Uvicorn will fail with a
         # clearer error if the probe missed a race.
-        probe = probe_port(host, port)
-        if probe.in_use:
-            raise RuntimeError(
-                f"port {host}:{port} is already in use ({probe.detail}). "
-                "Choose a different port with --port or stop the existing "
-                "process first."
-            )
+        # The GUI mode hands the runner a pre-bound
+        # socket instead; the kernel already owns the
+        # port, so the runner never re-binds it and
+        # never probes the port for availability. The
+        # ``--port`` CLI flag is left alone for the
+        # background path so an operator can still pin
+        # a specific port.
+        inherit_socket_fd: int | None = None
+        if prebound_socket is not None:
+            try:
+                bound = prebound_socket.getsockname()
+            except OSError as exc:
+                raise RuntimeError(
+                    f"the GUI-owned pre-bound socket is not bound: {exc}"
+                ) from exc
+            if len(bound) < 2:
+                raise RuntimeError(
+                    "the GUI-owned pre-bound socket does not expose a port; "
+                    "reserve_loopback_port must produce an IPv4 or IPv6 socket."
+                )
+            port = int(bound[1])
+            # The runner never releases the pre-bound
+            # socket; the child inherits the binding via
+            # ``--inherit-socket-fd`` (POSIX) or the
+            # stdin share blob (Windows). On Windows the
+            # share blob cannot be created until the
+            # child is running, so the
+            # ``share_socket_to_subprocess`` call is
+            # deferred to the launch step below.
+            from app.cli.port_reservation import mark_socket_inheritable
+
+            if sys.platform != "win32":
+                inherit_socket_fd = mark_socket_inheritable(prebound_socket)
+        else:
+            probe = probe_port(host, port)
+            if probe.in_use:
+                raise RuntimeError(
+                    f"port {host}:{port} is already in use ({probe.detail}). "
+                    "Choose a different port with --port or stop the existing "
+                    "process first."
+                )
         # Generate the non-secret instance UUID that
         # ties the recorded state to the live process.
         instance_id = str(uuid.uuid4())
@@ -764,11 +815,15 @@ def start(
                 instance_id=instance_id,
                 timeout=timeout,
                 on_ready=on_ready,
+                prebound_socket=prebound_socket,
+                inherit_socket_fd=inherit_socket_fd,
             )
         process_handle, _log_handle = _launch_detached(
             argv=argv,
             env=env,
             log_path=log_path,
+            prebound_socket=prebound_socket,
+            inherit_socket_fd=inherit_socket_fd,
         )
         # Wait for the health endpoint to respond. The
         # timeout bounds the wait so a slow build does
@@ -878,6 +933,8 @@ def _launch_detached(
     argv: list[str],
     env: dict[str, str],
     log_path: Path,
+    prebound_socket: socket.socket | None = None,
+    inherit_socket_fd: int | None = None,
 ) -> tuple[subprocess.Popen[bytes], object]:
     """Launch the Uvicorn child as a detached process.
 
@@ -898,6 +955,17 @@ def _launch_detached(
     the parent process does not have to drain the
     pipes (which would deadlock if the child writes
     more than the pipe buffer can hold).
+
+    When the GUI mode forwards a pre-bound socket, the
+    function writes the Windows share blob to the
+    child's stdin (Windows) or inherits the file
+    descriptor through ``subprocess``'s ``pass_fds``
+    argument (POSIX). The share handle is consumed by
+    the child's :func:`_read_inherited_socket` helper
+    before Uvicorn is constructed. The runner never
+    rebinds the port and never closes the pre-bound
+    socket; the OS keeps the port reserved for the
+    child for the lifetime of the supervisor.
     """
     log_path.parent.mkdir(parents=True, exist_ok=True)
     with open(log_path, "ab", buffering=0) as log_handle:
@@ -908,15 +976,46 @@ def _launch_detached(
             "env": env,
             "cwd": str(Path(__file__).resolve().parents[2]),
         }
+        if prebound_socket is not None and sys.platform == "win32":
+            # Windows: the supervisor writes the share
+            # blob to the child's stdin. The actual
+            # blob is created *after* the child is
+            # spawned because ``socket.share`` needs
+            # the child PID. The pipe must be open
+            # before ``Popen`` returns.
+            kwargs["stdin"] = subprocess.PIPE
+        if inherit_socket_fd is not None and sys.platform != "win32":
+            # POSIX: forward the inherited file
+            # descriptor through ``subprocess``. The
+            # child reconstructs the socket from the
+            # fd number encoded in
+            # ``--inherit-socket-fd <N>``.
+            kwargs["pass_fds"] = (int(inherit_socket_fd),)
+            kwargs["close_fds"] = True
         if sys.platform.startswith("win"):
             detached_process = 0x00000008
             create_new_process_group = 0x00000200
             kwargs["creationflags"] = detached_process | create_new_process_group
-            kwargs["close_fds"] = True
+            kwargs.setdefault("close_fds", True)
         else:
-            kwargs["start_new_session"] = True
-            kwargs["close_fds"] = True
+            kwargs.setdefault("start_new_session", True)
+            kwargs.setdefault("close_fds", True)
         handle = subprocess.Popen(argv, **kwargs)
+        if prebound_socket is not None and handle.stdin is not None and sys.platform == "win32":
+            from app.cli.port_reservation import share_socket_to_subprocess
+
+            try:
+                share_data = share_socket_to_subprocess(prebound_socket, int(handle.pid))
+                handle.stdin.write(share_data)
+                handle.stdin.flush()
+            except (BrokenPipeError, OSError):
+                # The child may have failed to start;
+                # the supervisor surfaces the failure
+                # via the health check below.
+                pass
+            finally:
+                with contextlib.suppress(OSError):
+                    handle.stdin.close()
     return handle, log_handle
 
 
@@ -1082,6 +1181,8 @@ def _start_foreground(
     instance_id: str,
     timeout: float,
     on_ready: Callable[[InstanceState], None] | None = None,
+    prebound_socket: socket.socket | None = None,
+    inherit_socket_fd: int | None = None,
 ) -> StartResult:
     """Run the server in the current TTY (no daemonisation).
 
@@ -1170,6 +1271,20 @@ def _start_foreground(
         "cwd": str(Path(__file__).resolve().parents[2]),
         "close_fds": True,
     }
+    if prebound_socket is not None and sys.platform == "win32":
+        # Windows: the supervisor writes the share
+        # blob to the child's stdin. The actual blob
+        # is created *after* the child is spawned
+        # because ``socket.share`` needs the child
+        # PID. The pipe must be open before ``Popen``
+        # returns.
+        kwargs["stdin"] = subprocess.PIPE
+    if inherit_socket_fd is not None and sys.platform != "win32":
+        # POSIX: forward the inherited file descriptor
+        # through ``subprocess``. The child reconstructs
+        # the socket from the fd number encoded in
+        # ``--inherit-socket-fd <N>``.
+        kwargs["pass_fds"] = (int(inherit_socket_fd),)
     if sys.stdout is not None and hasattr(sys.stdout, "fileno"):
         # The child inherits the supervisor's stdout
         # so a ``Ctrl+C`` in the console goes to both.
@@ -1180,6 +1295,25 @@ def _start_foreground(
         kwargs["stdout"] = None  # inherit
         kwargs["stderr"] = None  # inherit
     proc = subprocess.Popen(argv, **kwargs)
+    if (
+        prebound_socket is not None
+        and proc.stdin is not None
+        and sys.platform == "win32"
+    ):
+        from app.cli.port_reservation import share_socket_to_subprocess
+
+        try:
+            share_data = share_socket_to_subprocess(prebound_socket, int(proc.pid))
+            proc.stdin.write(share_data)
+            proc.stdin.flush()
+        except (BrokenPipeError, OSError):
+            # The child may have failed to start; the
+            # supervisor surfaces the failure via the
+            # health check below.
+            pass
+        finally:
+            with contextlib.suppress(OSError):
+                proc.stdin.close()
     state: InstanceState | None = None
     try:
         # Wait for the health endpoint. The supervisor

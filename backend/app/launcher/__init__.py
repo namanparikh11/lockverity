@@ -15,6 +15,7 @@ import argparse
 import contextlib
 import logging
 import os
+import socket
 import sys
 import threading
 import time
@@ -26,6 +27,10 @@ from typing import Any
 
 from app.cli import runner as cli_runner
 from app.cli.home import ensure_home, resolve_home
+from app.cli.port_reservation import (
+    PortReservationError,
+    reserve_loopback_port,
+)
 from app.cli.state import InstanceState
 from app.runtime_paths import application_root
 
@@ -149,13 +154,24 @@ class DesktopBackendSupervisor:
         frontend_dist: Path,
         database_url: str | None,
         timeout: float,
+        prebound_socket: socket.socket | None = None,
     ) -> None:
         self.home = home
         self.host = host
+        # The port is the actual port the kernel
+        # assigned. The supervisor records this value
+        # into the runtime state, drives the
+        # ``self.url`` property, and is the value the
+        # ``WebView2`` window navigates to. The
+        # ``prebound_socket`` is the source of truth
+        # for the port; if it is provided the
+        # ``port`` argument is the actual port from
+        # ``getsockname()`` and must not be replaced.
         self.port = port
         self.frontend_dist = frontend_dist
         self.database_url = database_url
         self.timeout = timeout
+        self.prebound_socket = prebound_socket
         self.state: InstanceState | None = None
         self.error: BaseException | None = None
         self.ready = threading.Event()
@@ -192,6 +208,7 @@ class DesktopBackendSupervisor:
                 log_level="info",
                 open_browser=False,
                 on_ready=self._on_ready,
+                prebound_socket=self.prebound_socket,
             )
             if self.ready.is_set() and not self.shutdown_requested.is_set():
                 self.error = BackendUnexpectedExitError("the local backend stopped unexpectedly")
@@ -474,6 +491,12 @@ def main(argv: list[str] | None = None) -> int:
         return serve_main(effective_argv[1:])
 
     parser = argparse.ArgumentParser(prog="Lockverity")
+    # ``--port`` is retained for parity with the CLI;
+    # the GUI ignores the value and asks the OS for a
+    # free loopback port via
+    # :func:`app.cli.port_reservation.reserve_loopback_port`.
+    # The default value is therefore documentation only;
+    # the GUI never binds it.
     parser.add_argument("--port", type=int, default=cli_runner.DEFAULT_PORT)
     parser.add_argument("--timeout", type=float, default=30.0)
     args = parser.parse_args(effective_argv)
@@ -495,6 +518,29 @@ def main(argv: list[str] | None = None) -> int:
         _focus_existing_window()
         instance.close()
         return LAUNCHER_EXIT_OK
+
+    # The GUI mode reserves a loopback port BEFORE the
+    # backend ever starts so the OS commits to a port
+    # number and no other process can grab it while we
+    # set up. The same socket is forwarded into the
+    # Uvicorn child via :mod:`app.cli.port_reservation`'s
+    # cross-process transfer (Windows:
+    # :func:`socket.share`; POSIX: fd inheritance).
+    # The CLI retains its explicit ``--port`` flag;
+    # the desktop application never uses it. The
+    # default value is therefore only documentation.
+    prebound_socket: socket.socket | None = None
+    reserved_port: int | None = None
+    try:
+        prebound_socket, reserved_port = reserve_loopback_port()
+    except PortReservationError as exc:
+        _show_message_box(
+            "Lockverity - could not reserve a port",
+            "Lockverity could not reserve a free loopback port for the local backend.\n\n"
+            f"Details: {exc}",
+        )
+        instance.close()
+        return LAUNCHER_EXIT_ERROR
 
     supervisor: DesktopBackendSupervisor | None = None
     try:
@@ -519,16 +565,26 @@ def main(argv: list[str] | None = None) -> int:
             )
             return LAUNCHER_EXIT_MISSING_DIST
 
+        # The supervisor records ``reserved_port`` as
+        # the actual port. The runner never re-binds
+        # the port: it transfers the pre-bound socket
+        # into the Uvicorn child via the cross-process
+        # mechanism. The runtime state file
+        # (``run/lockverity.state.json``) records the
+        # same port, so ``lockverity-cli status`` and
+        # ``lockverity-cli stop`` find the live
+        # backend.
         supervisor = DesktopBackendSupervisor(
             home=home,
             host=cli_runner.DEFAULT_HOST,
-            port=int(args.port),
+            port=int(reserved_port),
             frontend_dist=frontend_dist,
             # Match the CLI contract exactly: ``None`` selects its
             # CWD-independent ``<runtime-home>/data`` default, while an
             # explicit operator environment override is forwarded verbatim.
             database_url=os.environ.get("LOCKVERITY_DATABASE_URL") or None,
             timeout=float(args.timeout),
+            prebound_socket=prebound_socket,
         )
         supervisor.start()
         if not supervisor.wait_until_ready():
@@ -554,6 +610,9 @@ def main(argv: list[str] | None = None) -> int:
     finally:
         if supervisor is not None and not supervisor.shutdown():
             logger.error("backend supervisor did not exit after desktop shutdown")
+        if prebound_socket is not None:
+            with contextlib.suppress(OSError):
+                prebound_socket.close()
         instance.close()
 
 

@@ -76,15 +76,33 @@ def test_normal_gui_waits_for_readiness_never_opens_default_browser_and_shuts_do
     _patch_main_prerequisites(monkeypatch, home=fake_home, dist=fake_dist)
     calls: list[str] = []
     browser_urls: list[str] = []
+    captured: dict[str, object] = {}
 
     class FakeSupervisor:
         def __init__(self, **kwargs: Any) -> None:
+            # The launcher reserves a loopback port via
+            # ``reserve_loopback_port`` and forwards
+            # the live socket into the supervisor. The
+            # ``--port`` CLI value is documentation
+            # only; the actual port is the kernel-assigned
+            # value. The captured port and the port the
+            # prebound socket was bound to are both
+            # recorded so the assertion block can prove
+            # the two values agree exactly.
             assert kwargs["host"] == "127.0.0.1"
-            assert kwargs["port"] == 8123
+            assert isinstance(kwargs.get("port"), int)
+            assert 1 <= int(kwargs["port"]) <= 65535
             assert kwargs["database_url"] is None
+            assert kwargs.get("prebound_socket") is not None
+            prebound_socket = kwargs.get("prebound_socket")
+            captured["port"] = int(kwargs["port"])
+            captured["prebound_socket_port"] = int(
+                prebound_socket.getsockname()[1]
+            )
             self.error = None
             self.home = fake_home
-            self.url = "http://127.0.0.1:8123/"
+            self.url = f"http://127.0.0.1:{kwargs['port']}/"
+            self.port = int(kwargs["port"])
 
         def start(self) -> None:
             calls.append("backend-start")
@@ -109,11 +127,24 @@ def test_normal_gui_waits_for_readiness_never_opens_default_browser_and_shuts_do
         lambda url, **_kwargs: browser_urls.append(url) or True,
     )
 
+    # The legacy ``--port`` flag is accepted for CLI
+    # parity; the GUI ignores the value and asks the
+    # OS for a free loopback port. Passing ``8123``
+    # must NOT result in the GUI binding 8123.
     assert launcher.main(["--port", "8123"]) == launcher.LAUNCHER_EXIT_OK
+    assert captured["port"] != 8123, (
+        "GUI must dynamically allocate a port rather than bind the legacy 8123 value"
+    )
+    # The actual port the supervisor is told to use
+    # must be the port the prebound socket was bound
+    # to; the two values must agree exactly so the
+    # state file, the WebView URL, and the health
+    # check all point at the same loopback port.
+    assert captured["port"] == captured["prebound_socket_port"]
     assert calls == [
         "backend-start",
         "backend-ready",
-        "window:http://127.0.0.1:8123/",
+        f"window:http://127.0.0.1:{captured['port']}/",
         "backend-shutdown",
     ]
     assert browser_urls == []
@@ -134,7 +165,8 @@ def test_gui_forwards_explicit_database_override_only(
             received.append(kwargs["database_url"])
             self.error = None
             self.home = fake_home
-            self.url = "http://127.0.0.1:8000/"
+            self.url = f"http://127.0.0.1:{kwargs['port']}/"
+            self.port = int(kwargs["port"])
 
         def start(self) -> None:
             pass

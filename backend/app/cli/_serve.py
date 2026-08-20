@@ -29,6 +29,7 @@ import contextlib
 import ctypes
 import logging
 import signal
+import socket
 import sys
 import threading
 from collections.abc import Sequence
@@ -49,6 +50,18 @@ _INFINITE = 0xFFFFFFFF
 # confirm the live process identity at ``stop`` /
 # ``status`` time.
 INSTANCE_ID_ARG = "--instance-id"
+
+# The argument name the supervisor appends to the
+# child argv on POSIX to forward the file-descriptor
+# number of the GUI-owned pre-bound socket. The flag
+# is consumed by :func:`_read_inherited_socket` and
+# stripped from the remaining argv before Uvicorn
+# sees it. On Windows the child reads the share handle
+# blob from stdin instead of the ``--inherit-socket-fd``
+# argument, so the flag is POSIX-only at the supervisor
+# layer. The constant is defined unconditionally so the
+# argv-stripping logic is identical on both platforms.
+_INHERIT_SOCKET_FD_FLAG = "--inherit-socket-fd"
 
 # Uvicorn argument names we expect to consume before
 # delegating to :func:`uvicorn.run`. The list is
@@ -206,6 +219,86 @@ def _parse_uvicorn_args(remaining: Sequence[str]) -> argparse.Namespace:
     return parser.parse_args(list(remaining))
 
 
+def _read_inherited_socket(remaining: Sequence[str]) -> socket.socket | None:
+    """Read the supervisor's pre-bound socket, if any, and return it.
+
+    The function is the child-side counterpart of
+    :func:`app.cli.port_reservation.share_socket_to_subprocess`.
+    The mechanism depends on the platform:
+
+      - **Windows**: the supervisor wrote a
+        :meth:`socket.socket.share` blob to the child's
+        stdin. The function reads the blob (until EOF)
+        and reconstructs the socket with
+        :func:`socket.fromshare`.
+
+      - **POSIX**: the supervisor appended a
+        ``--inherit-socket-fd <fd>`` flag to the child
+        argv and used ``subprocess.pass_fds`` to
+        inherit the file descriptor. The function
+        decodes the fd number and reconstructs the
+        socket with :class:`socket.socket`'s ``fileno``
+        argument.
+
+    The function returns ``None`` when the supervisor
+    did not ask for socket inheritance (the CLI
+    background path), so the caller can ignore the
+    pre-bound-socket code path. The function does not
+    raise on a missing or malformed payload: a corrupt
+    or missing share is a fatal startup failure and
+    the caller surfaces the error before :class:`uvicorn.Server`
+    is constructed.
+    """
+    if sys.platform == "win32":
+        return _read_inherited_socket_from_stdin()
+    return _read_inherited_socket_from_argv(remaining)
+
+
+def _read_inherited_socket_from_stdin() -> socket.socket | None:
+    """Read the Windows share handle from the supervisor's stdin pipe.
+
+    The supervisor wrote a single :meth:`socket.socket.share`
+    blob to the child stdin before :class:`subprocess.Popen`
+    was constructed. The blob length is variable (Windows
+    socket share data is not a fixed size); the function
+    reads until EOF and reconstructs the socket.
+    """
+    from app.cli.port_reservation import reconstruct_shared_socket
+
+    try:
+        stream = sys.stdin.buffer
+        data = stream.read()
+    except (OSError, ValueError):
+        return None
+    if not data:
+        return None
+    return reconstruct_shared_socket(data)
+
+
+def _read_inherited_socket_from_argv(remaining: Sequence[str]) -> socket.socket | None:
+    """Read the inherited POSIX file-descriptor number from ``remaining``.
+
+    The function walks ``remaining`` looking for the
+    ``--inherit-socket-fd <N>`` flag pair and returns
+    the reconstructed socket. The caller is expected
+    to strip the flag pair from the Uvicorn-relevant
+    argv before passing it to Uvicorn.
+    """
+    from app.cli.port_reservation import reconstruct_shared_socket
+
+    index = 0
+    while index < len(remaining):
+        token = remaining[index]
+        if token == _INHERIT_SOCKET_FD_FLAG and index + 1 < len(remaining):
+            fd_blob = remaining[index + 1].encode("ascii")
+            return reconstruct_shared_socket(fd_blob)
+        if token.startswith(_INHERIT_SOCKET_FD_FLAG + "="):
+            fd_blob = token.split("=", 1)[1].encode("ascii")
+            return reconstruct_shared_socket(fd_blob)
+        index += 1
+    return None
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     """Strip the supervisor's ``--instance-id`` flag and run Uvicorn.
 
@@ -216,10 +309,32 @@ def main(argv: Sequence[str] | None = None) -> int:
     waits for the child to be reachable on the
     configured host / port and then records the
     instance ID in the state file.
+
+    The supervisor may also pass a pre-bound listening
+    socket for the GUI mode. The child reads the share
+    handle from stdin (Windows) or the file-descriptor
+    number encoded in the ``--inherit-socket-fd`` flag
+    (POSIX) and uses the socket directly with
+    :func:`uvicorn.Server.serve`. The ``--port`` flag is
+    ignored in that mode because the socket is already
+    bound; the recorded port comes from the socket's
+    ``getsockname()`` value.
     """
     if argv is None:
         argv = sys.argv[1:]
     instance_id, remaining = _split_argv(argv)
+    inherited_socket = _read_inherited_socket(remaining)
+    if inherited_socket is not None:
+        # The remaining argv may still carry the
+        # ``--inherit-socket-fd`` flag (POSIX); strip
+        # it before parsing the Uvicorn-relevant
+        # arguments so argparse does not see the flag.
+        remaining = [
+            token
+            for token in remaining
+            if token != _INHERIT_SOCKET_FD_FLAG
+            and not token.startswith(_INHERIT_SOCKET_FD_FLAG + "=")
+        ]
     parsed = _parse_uvicorn_args(remaining)
     # The Uvicorn module path is the documented
     # single-port runtime. The supervisor always
@@ -276,9 +391,15 @@ def main(argv: Sequence[str] | None = None) -> int:
     server = uvicorn.Server(config)
     if sys.platform == "win32" and instance_id:
         with _WindowsShutdownEvent(instance_id, server):
-            server.run()
+            if inherited_socket is not None:
+                server.run(sockets=[inherited_socket])
+            else:
+                server.run()
     else:
-        server.run()
+        if inherited_socket is not None:
+            server.run(sockets=[inherited_socket])
+        else:
+            server.run()
     return 0
 
 
