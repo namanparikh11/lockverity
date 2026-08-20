@@ -91,6 +91,7 @@ import psutil
 
 from app import __version__
 from app.cli import lock as start_lock
+from app.cli.gui_stop import signal_gui_stop
 from app.cli.home import data_dir, ensure_home, logs_dir
 from app.cli.logging_setup import configure_logging, get_cli_logger
 from app.cli.process import (
@@ -1524,6 +1525,26 @@ def _format_unix(unix_seconds: float) -> str:
     )
 
 
+def _wait_for_backend_exit(pid: int, timeout: float) -> bool:
+    """Return ``True`` if the given pid exits within ``timeout`` seconds.
+
+    The helper is used by :func:`stop` after the GUI self-termination
+    signal is set; it polls the OS for the child's existence at
+    50 ms granularity. ``psutil`` is the standard library equivalent
+    of the same check and is already a runtime dependency; the
+    helper does not import ``subprocess`` to avoid creating another
+    ``Popen`` round-trip on the stop path.
+    """
+    import psutil
+
+    deadline = time.monotonic() + max(0.0, float(timeout))
+    while time.monotonic() < deadline:
+        if not psutil.pid_exists(pid):
+            return True
+        time.sleep(0.05)
+    return not psutil.pid_exists(pid)
+
+
 def _wait_for_health(host: str, port: int, *, timeout: float) -> bool:
     """Block until ``/api/v1/health`` returns 200 or ``timeout`` elapses.
 
@@ -1629,6 +1650,34 @@ def stop(
     assert isinstance(identity, IdentityMatch)
     cli_logger = get_cli_logger()
     cli_logger.info("stopping lockverity (pid=%d)", state.pid)
+    # If the recorded backend is a CLI subprocess of a running desktop
+    # GUI instance, ask the GUI to self-terminate first so the GUI
+    # closes the WebView and tears down the pre-bound socket cleanly
+    # before the backend terminate signal lands. The signal is
+    # best-effort; on non-Windows hosts (or if the GUI is not running)
+    # the function is a no-op and the documented state.pid-terminate
+    # path below is the authoritative shutdown.
+    if state.module == "app.cli._serve":
+        if signal_gui_stop():
+            cli_logger.info(
+                "stop: signaled running desktop GUI to self-terminate"
+            )
+        # Give the GUI a brief grace period to start its own
+        # shutdown (close the WebView, run its ``finally`` block,
+        # which calls ``supervisor.shutdown`` to terminate the
+        # backend child, then ``cli_runner.stop`` returns success
+        # because the recorded pid is already gone). The wait is
+        # bounded by ``timeout``; the ``terminate_process`` call
+        # below is the authoritative fallback if the GUI does not
+        # tear down in time.
+        grace_seconds = min(5.0, max(0.5, float(timeout)))
+        if _wait_for_backend_exit(state.pid, grace_seconds):
+            cli_logger.info("stop: GUI self-terminated the backend cleanly")
+            return StopResult(
+                outcome="stopped",
+                elapsed_seconds=time.monotonic() - started,
+                details=f"pid {state.pid} exited after GUI self-termination",
+            )
     if is_zombie(state.pid):
         # A zombie is already dead; just clean up the
         # state file. The OS will reap the zombie when

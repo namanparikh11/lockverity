@@ -3,7 +3,7 @@
 ``Lockverity.exe`` owns a foreground FastAPI runtime for exactly as long as
 the desktop window is open. The existing React application is rendered by
 pywebview's Edge Chromium backend (Microsoft Edge WebView2); the existing
-HTTP API remains the only frontend/backend integration surface.
+HTTP API remains the only frontend/backend backend surface.
 
 Windows and pywebview imports stay behind small adapters so unit tests can
 exercise lifecycle and navigation decisions without creating a real window.
@@ -26,13 +26,15 @@ from pathlib import Path
 from typing import Any
 
 from app.cli import runner as cli_runner
+from app.cli.gui_stop import STOP_EVENT_NAME, signal_gui_stop
 from app.cli.home import ensure_home, resolve_home
+from app.cli.logging_setup import configure_launcher_logging
 from app.cli.port_reservation import (
     PortReservationError,
     reserve_loopback_port,
 )
 from app.cli.state import InstanceState
-from app.runtime_paths import application_root
+from app.runtime_paths import application_root, is_frozen
 
 logger = logging.getLogger("lockverity.launcher")
 
@@ -158,15 +160,15 @@ class DesktopBackendSupervisor:
     ) -> None:
         self.home = home
         self.host = host
-        # The port is the actual port the kernel
-        # assigned. The supervisor records this value
-        # into the runtime state, drives the
-        # ``self.url`` property, and is the value the
-        # ``WebView2`` window navigates to. The
-        # ``prebound_socket`` is the source of truth
-        # for the port; if it is provided the
-        # ``port`` argument is the actual port from
-        # ``getsockname()`` and must not be replaced.
+        # The port is the actual port the kernel assigned.
+        # The supervisor records this value into the
+        # runtime state, drives the ``self.url``
+        # property, and is the value the ``WebView2``
+        # window navigates to. The ``prebound_socket``
+        # is the source of truth for the port; if it is
+        # provided the ``port`` argument is the actual
+        # port from ``getsockname()`` and must not be
+        # replaced.
         self.port = port
         self.frontend_dist = frontend_dist
         self.database_url = database_url
@@ -194,6 +196,13 @@ class DesktopBackendSupervisor:
         self.state = state
         self.port = state.port
         self.ready.set()
+        logger.info(
+            "WebView startup: backend ready url=http://%s:%d/ port=%d instance_id=%s",
+            self.host,
+            self.port,
+            self.port,
+            getattr(state, "instance_id", "<unknown>"),
+        )
 
     def _run(self) -> None:
         try:
@@ -211,7 +220,9 @@ class DesktopBackendSupervisor:
                 prebound_socket=self.prebound_socket,
             )
             if self.ready.is_set() and not self.shutdown_requested.is_set():
-                self.error = BackendUnexpectedExitError("the local backend stopped unexpectedly")
+                self.error = BackendUnexpectedExitError(
+                    "the local backend stopped unexpectedly"
+                )
         except BaseException as exc:  # worker must report every startup/child failure
             self.error = exc
         finally:
@@ -219,14 +230,28 @@ class DesktopBackendSupervisor:
 
     def wait_until_ready(self) -> bool:
         deadline = time.monotonic() + self.timeout
+        logger.info(
+            "WebView startup: wait_until_ready entered timeout=%.1fs", self.timeout
+        )
+        polls = 0
         while time.monotonic() < deadline:
             if self.ready.wait(timeout=0.05):
+                logger.info(
+                    "WebView startup: wait_until_ready observed ready after %d polls",
+                    polls,
+                )
                 return True
             if self.done.is_set():
+                logger.error(
+                    "WebView startup: wait_until_ready observed done with error=%r",
+                    self.error,
+                )
                 return False
+            polls += 1
         self.error = BackendStartupError(
             f"backend did not report ready on {self.host}:{self.port} within {self.timeout:.1f}s"
         )
+        logger.error("WebView startup: wait_until_ready timed out: %s", self.error)
         return False
 
     def request_shutdown(self) -> None:
@@ -372,7 +397,15 @@ def _event_url(args: object) -> str:
 
 def _install_navigation_guard(window: Any, app_origin: str) -> None:
     """Install Edge WebView2 top-level and new-window navigation guards."""
-    browser = window.native.browser
+    try:
+        browser = window.native.browser
+    except Exception:
+        logger.exception(
+            "WebView startup: navigation guard could not read window.native.browser; "
+            "window.native=%r",
+            getattr(window, "native", None),
+        )
+        raise
 
     def handle(url: str) -> NavigationDecision:
         decision = classify_navigation(url, app_origin)
@@ -401,26 +434,121 @@ def _install_navigation_guard(window: Any, app_origin: str) -> None:
     # BrowserForm constructs this WebView2 control before ``before_show``.
     # Replacing the callback now means pywebview subscribes our guarded
     # callback when CoreWebView2 initialization completes.
-    browser.webview.NavigationStarting += on_navigation_starting
-    browser.on_new_window_request = on_new_window_request
-    window._lockverity_navigation_handlers = (on_navigation_starting, on_new_window_request)
+    try:
+        browser.webview.NavigationStarting += on_navigation_starting
+        browser.on_new_window_request = on_new_window_request
+        window._lockverity_navigation_handlers = (on_navigation_starting, on_new_window_request)
+    except Exception:
+        logger.exception(
+            "WebView startup: navigation guard callback subscription failed; "
+            "browser=%r browser.webview=%r",
+            browser,
+            getattr(browser, "webview", None),
+        )
+        raise
+    logger.info("WebView startup: navigation guard installed (origin=%s)", app_origin)
 
 
 def _icon_path() -> Path:
     return application_root() / "favicon-exe.ico"
 
 
-def _load_webview() -> Any:
-    import webview
+def _pywebview_version() -> str:
+    """Return the installed ``pywebview`` version, or ``"unknown"``."""
+    try:
+        import webview  # type: ignore[import-not-found]
+    except Exception as exc:  # pragma: no cover - import-failure path
+        return f"import-failed: {type(exc).__name__}: {exc}"
+    version = getattr(webview, "__version__", None)
+    if version:
+        return str(version)
+    try:
+        from importlib.metadata import version as _md_version  # type: ignore
+        return _md_version("pywebview")
+    except Exception as exc:  # pragma: no cover - metadata-failure path
+        return f"unknown ({type(exc).__name__})"
 
+
+def _diagnose_webview_environment(supervisor: DesktopBackendSupervisor) -> None:
+    """Log the WebView / pywebview / runtime environment.
+
+    Emits one structured log line per diagnostic category so a
+    reviewer can read the captured state without joining multi-line
+    records.
+    """
+    icon = _icon_path()
+    try:
+        icon_exists = icon.is_file()
+        icon_size = icon.stat().st_size if icon_exists else 0
+    except OSError as exc:
+        icon_exists = False
+        icon_size = 0
+        logger.warning("WebView diagnostics: icon stat failed: %s", exc)
+    storage_path = supervisor.home / "webview2"
+    webview2_user_data = os.environ.get("WEBVIEW2_USER_DATA_FOLDER", "<unset>")
+    logger.info(
+        "WebView diagnostics: python=%s frozen=%s sys_executable=%s",
+        ".".join(str(part) for part in sys.version_info[:3]),
+        is_frozen(),
+        sys.executable,
+    )
+    logger.info(
+        "WebView diagnostics: pywebview=%s webview2_runtime=%s webview2_user_data=%s",
+        _pywebview_version(),
+        _webview2_runtime_version(),
+        webview2_user_data,
+    )
+    logger.info(
+        "WebView diagnostics: url=http://%s:%d/ port=%d icon=%s icon_exists=%s "
+        "icon_size=%d webview2_storage=%s",
+        supervisor.host,
+        supervisor.port,
+        supervisor.port,
+        icon,
+        icon_exists,
+        icon_size,
+        storage_path,
+    )
+
+
+def _load_webview() -> Any:
+    """Import pywebview with full exception capture."""
+    try:
+        import webview  # type: ignore[import-not-found]
+    except Exception:
+        logger.exception(
+            "WebView import failed: pywebview could not be imported. "
+            "Frozen=%s python=%s sys_executable=%s",
+            is_frozen(),
+            sys.executable,
+            sys.executable,
+        )
+        raise
+    logger.info(
+        "WebView import ok: pywebview=%s",
+        getattr(webview, "__version__", "<unknown>"),
+    )
     return webview
 
 
 def _monitor_backend(supervisor: DesktopBackendSupervisor, window: Any) -> None:
+    """Wait for the owned backend to exit and close the WebView on exit.
+
+    The monitor thread runs alongside the WebView's message loop and
+    tears the window down whenever the supervisor's ``done`` event
+    fires, so an external ``lockverity-cli stop`` (which terminates
+    the backend child) or an unexpected backend crash both result in
+    the GUI process exiting cleanly. The unexpected-crash path shows a
+    short message box so the operator knows the window is closing
+    because the backend is gone; the operator-initiated shutdown path
+    is silent.
+    """
     supervisor.done.wait()
-    if supervisor.shutdown_requested.is_set() or supervisor.error is None:
-        return
-    if not isinstance(supervisor.error, BackendUnexpectedExitError):
+    if (
+        not supervisor.shutdown_requested.is_set()
+        and supervisor.error is not None
+        and not isinstance(supervisor.error, BackendUnexpectedExitError)
+    ):
         _show_message_box(
             "Lockverity - backend stopped",
             "Lockverity's local backend stopped unexpectedly. The desktop window will close.\n\n"
@@ -430,43 +558,180 @@ def _monitor_backend(supervisor: DesktopBackendSupervisor, window: Any) -> None:
         window.destroy()
 
 
+def _poll_stop_event(window: Any, stop_event_handle: int, poll_interval: float = 0.5) -> None:
+    """Block until the named stop event is set, then destroy the WebView.
+
+    The poll loop runs on its own thread so the message loop and the
+    other WebView event handlers are not blocked. When the event is
+    set by ``lockverity-cli stop``, the loop tears down the WebView
+    so ``webview.start`` returns and the GUI process exits cleanly.
+    """
+    import ctypes
+
+    kernel32 = ctypes.windll.kernel32
+    while True:
+        result = kernel32.WaitForSingleObject(stop_event_handle, int(poll_interval * 1000))
+        if result == 0:  # WAIT_OBJECT_0
+            logger.info("WebView shutdown: lockverity-cli stop event received")
+            with contextlib.suppress(Exception):
+                window.destroy()
+            return
+        if result != 258:  # WAIT_TIMEOUT
+            # ``lockverity-cli stop`` is the only producer of
+            # this event; an unexpected wait result here is
+            # a Windows API error. Log and keep polling.
+            logger.warning(
+                "WebView shutdown: WaitForSingleObject returned %d on the stop event",
+                result,
+            )
+
+
+def _open_stop_event() -> int | None:
+    """Open the global stop event handle. Returns 0 if unavailable."""
+    if sys.platform != "win32":
+        return None
+    import ctypes
+
+    kernel32 = ctypes.windll.kernel32
+    kernel32.OpenEventW.argtypes = [ctypes.c_uint32, ctypes.c_int, ctypes.c_wchar_p]
+    kernel32.OpenEventW.restype = ctypes.c_void_p
+    handle = kernel32.OpenEventW(0x00100000, False, STOP_EVENT_NAME)  # SYNCHRONIZE
+    return int(handle) if handle else None
+
+
 def _run_webview(supervisor: DesktopBackendSupervisor) -> None:
-    webview = _load_webview()
+    """Create the pywebview Edge Chromium window and block on the UI loop.
+
+    Every operation in this function logs its entry, its result,
+    and any exception. The launcher shows a single user-friendly
+    message box on failure; the rich diagnostic detail is captured
+    in ``%LOCALAPPDATA%\\Lockverity\\logs\\lockverity.log``.
+    """
+    logger.info("WebView startup: entering _run_webview")
+    try:
+        webview = _load_webview()
+    except Exception:
+        logger.exception("WebView startup: pywebview import failed")
+        raise
+
     # Lockverity's existing export UI downloads generated Blob URLs. Enabling
     # pywebview's download path is therefore required product functionality;
     # on Windows it presents a native Save As dialog. File-origin navigation,
     # arbitrary popups, and remote debugging remain disabled independently.
-    webview.settings["ALLOW_DOWNLOADS"] = True
-    webview.settings["ALLOW_FILE_URLS"] = False
-    webview.settings["OPEN_EXTERNAL_LINKS_IN_BROWSER"] = False
-    webview.settings["REMOTE_DEBUGGING_PORT"] = None
-    window = webview.create_window(
+    try:
+        webview.settings["ALLOW_DOWNLOADS"] = True
+        webview.settings["ALLOW_FILE_URLS"] = False
+        webview.settings["OPEN_EXTERNAL_LINKS_IN_BROWSER"] = False
+        webview.settings["REMOTE_DEBUGGING_PORT"] = None
+        logger.info("WebView startup: settings applied")
+    except Exception:
+        logger.exception("WebView startup: webview.settings write failed")
+        raise
+
+    logger.info(
+        "WebView startup: calling webview.create_window(title=%s url=http://%s:%d/ "
+        "width=%d height=%d)",
         WINDOW_TITLE,
-        supervisor.url,
-        js_api=None,
-        width=WINDOW_WIDTH,
-        height=WINDOW_HEIGHT,
-        min_size=(WINDOW_MIN_WIDTH, WINDOW_MIN_HEIGHT),
-        resizable=True,
-        background_color="#F7F8FA",
-        text_select=True,
-        zoomable=False,
-        confirm_close=False,
+        supervisor.host,
+        supervisor.port,
+        WINDOW_WIDTH,
+        WINDOW_HEIGHT,
     )
+    try:
+        window = webview.create_window(
+            WINDOW_TITLE,
+            supervisor.url,
+            js_api=None,
+            width=WINDOW_WIDTH,
+            height=WINDOW_HEIGHT,
+            min_size=(WINDOW_MIN_WIDTH, WINDOW_MIN_HEIGHT),
+            resizable=True,
+            background_color="#F7F8FA",
+            text_select=True,
+            zoomable=False,
+            confirm_close=False,
+        )
+    except Exception:
+        logger.exception(
+            "WebView startup: webview.create_window raised. url=http://%s:%d/ webview2_storage=%s",
+            supervisor.host,
+            supervisor.port,
+            str(supervisor.home / "webview2"),
+        )
+        raise
     if window is None:
+        logger.error(
+            "WebView startup: webview.create_window returned None. url=http://%s:%d/",
+            supervisor.host,
+            supervisor.port,
+        )
         raise RuntimeError("pywebview did not create the Lockverity window")
-    window.events.before_show += lambda window: _install_navigation_guard(window, supervisor.url)
-    window.events.closing += supervisor.request_shutdown
+    logger.info("WebView startup: webview.create_window returned a window object")
+
+    try:
+        window.events.before_show += lambda window: _install_navigation_guard(
+            window, supervisor.url
+        )
+        # Wrap ``supervisor.request_shutdown`` in a zero-arg lambda so the
+        # callback signature matches the ``Window.closing`` event contract
+        # and so the callback only sets a ``threading.Event`` flag. All
+        # actual shutdown work runs on the main thread / supervisor thread
+        # after the WebView returns from the message loop; the closing
+        # callback must never do message-pumping, socket, or subprocess
+        # work itself.
+        window.events.closing += lambda: supervisor.request_shutdown()
+        logger.info("WebView startup: event hooks attached")
+    except Exception:
+        logger.exception("WebView startup: attaching event hooks failed")
+        raise
+
+    # ``lockverity-cli stop`` signals the running GUI by setting the
+    # global ``STOP_EVENT_NAME`` event. The poll thread below waits
+    # on the event and tears the WebView down so ``webview.start``
+    # returns and the GUI process exits cleanly. The thread is
+    # daemonised so the shutdown path is not held by it.
+    stop_event_handle = _open_stop_event()
+    stop_poll_thread: threading.Thread | None = None
+    if stop_event_handle:
+        stop_poll_thread = threading.Thread(
+            target=_poll_stop_event,
+            args=(window, stop_event_handle),
+            name="lockverity-stop-poll",
+            daemon=True,
+        )
+        stop_poll_thread.start()
+    else:
+        logger.info(
+            "WebView startup: global stop event not available on this platform; "
+            "lockverity-cli stop will rely on backend termination only"
+        )
+
     icon = _icon_path()
-    webview.start(
-        func=_monitor_backend,
-        args=(supervisor, window),
-        gui="edgechromium",
-        debug=False,
-        private_mode=True,
-        storage_path=str(supervisor.home / "webview2"),
-        icon=str(icon) if icon.is_file() else None,
+    icon_arg = str(icon) if icon.is_file() else None
+    storage_arg = str(supervisor.home / "webview2")
+    logger.info(
+        "WebView startup: calling webview.start(gui=edgechromium icon=%s storage_path=%s)",
+        icon_arg,
+        storage_arg,
     )
+    try:
+        webview.start(
+            func=_monitor_backend,
+            args=(supervisor, window),
+            gui="edgechromium",
+            debug=False,
+            private_mode=True,
+            storage_path=storage_arg,
+            icon=icon_arg,
+        )
+    except Exception:
+        logger.exception(
+            "WebView startup: webview.start raised. gui=edgechromium storage_path=%s icon=%s",
+            storage_arg,
+            icon_arg,
+        )
+        raise
+    logger.info("WebView startup: webview.start returned (window closed)")
 
 
 def _startup_error_code(exc: BaseException | None) -> int:
@@ -500,6 +765,27 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--port", type=int, default=cli_runner.DEFAULT_PORT)
     parser.add_argument("--timeout", type=float, default=30.0)
     args = parser.parse_args(effective_argv)
+
+    # Configure launcher logging against the resolved
+    # runtime home as early as possible so every
+    # subsequent failure (including argparse errors,
+    # mutex creation errors, port reservation errors,
+    # Alembic errors, supervisor errors, and WebView
+    # errors) lands in ``lockverity.log`` instead of
+    # being silently dropped on a windowless Windows
+    # process. The CLI's own ``configure_logging`` call
+    # is still authoritative for ``lockverity.cli``;
+    # :func:`configure_launcher_logging` is idempotent and
+    # does not double-attach the shared handler.
+    early_home = _resolve_runtime_home()
+    configure_launcher_logging(early_home / "logs" / "lockverity.log")
+    logger.info(
+        "launcher: main(argv=%r) python=%s frozen=%s sys_executable=%s",
+        effective_argv,
+        ".".join(str(part) for part in sys.version_info[:3]),
+        is_frozen(),
+        sys.executable,
+    )
 
     if not (1 <= int(args.port) <= 65535):
         _show_message_box("Lockverity - invalid port", "The desktop port must be in 1..65535.")
@@ -586,8 +872,19 @@ def main(argv: list[str] | None = None) -> int:
             timeout=float(args.timeout),
             prebound_socket=prebound_socket,
         )
+        logger.info(
+            "WebView startup: backend reserved port=%d home=%s timeout=%.1fs",
+            reserved_port,
+            home,
+            args.timeout,
+        )
         supervisor.start()
+        logger.info("WebView startup: supervisor.start() returned, waiting for readiness")
         if not supervisor.wait_until_ready():
+            logger.error(
+                "WebView startup: supervisor did not become ready; supervisor.error=%r",
+                supervisor.error,
+            )
             supervisor.shutdown()
             _show_message_box(
                 "Lockverity - failed to start",
@@ -596,16 +893,35 @@ def main(argv: list[str] | None = None) -> int:
             )
             return _startup_error_code(supervisor.error)
 
+        _diagnose_webview_environment(supervisor)
+        logger.info(
+            "WebView startup: backend ready at http://%s:%d/, entering native desktop shell",
+            supervisor.host,
+            supervisor.port,
+        )
         try:
             _run_webview(supervisor)
-        except Exception:
-            logger.exception("native WebView startup failed")
-            _show_message_box(
-                "Lockverity - desktop window failed",
-                "Lockverity could not create its Microsoft Edge WebView2 window.\n\n"
-                f"Check the log at:\n{home / 'logs' / 'lockverity.log'}",
+        except BaseException:
+            # ``BaseException`` (not just ``Exception``) is
+            # caught so a SystemExit / KeyboardInterrupt
+            # raised by pywebview's underlying Win32
+            # bootstrap is captured with a full traceback
+            # rather than silently terminating the GUI
+            # process before the logger can flush.
+            logger.exception(
+                "WebView startup: native shell raised; this is the failing "
+                "operation in the desktop window path"
             )
+            try:
+                _show_message_box(
+                    "Lockverity - desktop window failed",
+                    "Lockverity could not create its Microsoft Edge WebView2 window.\n\n"
+                    f"Check the log at:\n{home / 'logs' / 'lockverity.log'}",
+                )
+            except Exception:
+                logger.exception("WebView startup: _show_message_box also failed")
             return LAUNCHER_EXIT_ERROR
+        logger.info("WebView startup: native shell returned (window closed)")
         return LAUNCHER_EXIT_OK
     finally:
         if supervisor is not None and not supervisor.shutdown():
@@ -637,4 +953,5 @@ __all__ = [
     "WindowsSingleInstance",
     "classify_navigation",
     "main",
+    "signal_gui_stop",
 ]
