@@ -118,10 +118,28 @@ HIDDENIMPORTS: list[str] = [
     # the standard-library Windows backend is dynamically imported.
     "webbrowser",
     # pywebview selects its Windows renderer dynamically. Its bundled
-    # PyInstaller hook collects WebView2 interop DLLs and JavaScript assets;
-    # these explicit imports pin the selected native renderer in the graph.
+    # PyInstaller hook (under ``webview/__pyinstaller/hook-webview.py``)
+    # collects WebView2 interop DLLs and JavaScript assets, and the
+    # ``webview.platforms.edgechromium`` module pulls in ``clr`` /
+    # ``pythonnet`` at runtime. These explicit imports pin the selected
+    # native renderer in the import graph so the static scan cannot
+    # silently drop the module. The legacy ``webview.platforms.win32``
+    # and ``webview.platforms.mshtml`` backends are intentionally NOT
+    # listed; the Lockverity contract is EdgeChromium-only and the
+    # extra backends would only enlarge the frozen payload.
     "webview",
     "webview.platforms.edgechromium",
+    # ``pywebview`` EdgeChromium backend uses the ``clr`` (pythonnet)
+    # runtime to interop with ``System.Windows.Forms`` /
+    # ``Microsoft.Web.WebView2``. ``clr_loader`` is the
+    # ``pythonnet`` runtime that hosts ``coreclr``; both must be
+    # in the frozen payload for ``import clr`` inside
+    # ``webview.platforms.edgechromium`` to succeed.
+    "clr_loader",
+    # ``bottle`` is the tiny WSGI server pywebview uses for
+    # local-host JS bridge calls; it is dynamically imported
+    # by ``webview.http`` and so is missed by the static scan.
+    "bottle",
     # ``app.cli.process`` uses ``psutil`` which has
     # platform-specific submodules.
     "psutil",
