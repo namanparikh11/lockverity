@@ -101,8 +101,10 @@ $RECYCLE.BIN/
 
 # Lockverity runtime artefacts
 # Workspace and runtime uploads - never commit user-provided archives
+/var/
 backend/var/
 backend/runtime/
+backend/run/
 backend/.lockverity/
 *.lockverity.sqlite
 *.lockverity.sqlite-journal
