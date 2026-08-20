@@ -101,6 +101,7 @@ def test_normal_gui_waits_for_readiness_never_opens_default_browser_and_shuts_do
             )
             self.error = None
             self.home = fake_home
+            self.host = "127.0.0.1"
             self.url = f"http://127.0.0.1:{kwargs['port']}/"
             self.port = int(kwargs["port"])
 
@@ -165,6 +166,7 @@ def test_gui_forwards_explicit_database_override_only(
             received.append(kwargs["database_url"])
             self.error = None
             self.home = fake_home
+            self.host = "127.0.0.1"
             self.url = f"http://127.0.0.1:{kwargs['port']}/"
             self.port = int(kwargs["port"])
 
@@ -423,6 +425,8 @@ def test_production_webview_is_edgechromium_without_bridge_or_devtools(
 
     supervisor = SimpleNamespace(
         url="http://127.0.0.1:8000/",
+        host="127.0.0.1",
+        port=8000,
         home=fake_home,
         request_shutdown=lambda: None,
     )
@@ -445,3 +449,75 @@ def test_no_shell_true_or_normal_browser_launch_path() -> None:
     assert "shell=True" not in source
     assert "_open_browser" not in source
     assert "--no-browser" not in source
+
+
+def test_closing_callback_uses_zero_arg_lambda() -> None:
+    """The closing callback is a zero-arg lambda wrapping ``request_shutdown``.
+
+    The original regression wrapped ``supervisor.request_shutdown``
+    directly as the ``window.events.closing`` callback. pywebview
+    invokes the closing callback with the ``Window`` as a positional
+    argument, which raised ``TypeError`` from inside the message
+    loop. The lambda wrapper is the documented contract; the test
+    guards against a future maintainer reverting to the direct
+    bound-method subscription.
+    """
+    source = Path(launcher.__file__).read_text(encoding="utf-8")
+    assert "window.events.closing += lambda: supervisor.request_shutdown()" in source, (
+        "Closing callback must be a zero-arg lambda wrapping "
+        "supervisor.request_shutdown() so the message loop does not "
+        "see a TypeError when pywebview dispatches the closing event "
+        "with the Window as a positional argument."
+    )
+
+
+def test_gui_stop_event_handling_is_wired() -> None:
+    """The GUI polls the global stop event and tears the WebView down.
+
+    The ``lockverity-cli stop`` command signals the running GUI by
+    setting the global ``STOP_EVENT_NAME`` event. The GUI must
+    open that event and tear the WebView down so ``webview.start``
+    returns and the GUI process exits cleanly. The test guards
+    against a future refactor that drops the event polling and
+    leaves the GUI alive after ``lockverity-cli stop``.
+    """
+    from app.cli.gui_stop import STOP_EVENT_NAME
+
+    source = Path(launcher.__file__).read_text(encoding="utf-8")
+    # The launcher either references STOP_EVENT_NAME directly or
+    # imports it from the shared gui_stop module; both routes
+    # exercise the documented event.
+    assert (
+        STOP_EVENT_NAME in source
+        or "from app.cli.gui_stop import" in source
+    ), (
+        f"Launcher must reference or import the documented stop event {STOP_EVENT_NAME}."
+    )
+    assert "_poll_stop_event" in source, (
+        "Launcher must include a background poll thread that waits on the stop event."
+    )
+    assert "WaitForSingleObject" in source, (
+        "The poll thread must use the Windows WaitForSingleObject API."
+    )
+
+
+def test_monitor_backend_closes_window_on_done() -> None:
+    """The monitor thread closes the WebView when the supervisor reports done.
+
+    The historical monitor only closed the window on an unexpected
+    error; the operator-initiated ``lockverity-cli stop`` path left
+    the GUI alive holding the pre-bound socket. The fix unconditionally
+    tears the WebView down when the supervisor's ``done`` event fires
+    so the GUI exits cleanly whenever the backend exits.
+    """
+    source = Path(launcher.__file__).read_text(encoding="utf-8")
+    # The monitor function must unconditionally call ``window.destroy()``
+    # after the supervisor's ``done`` event fires, regardless of
+    # whether the shutdown was operator-initiated or unexpected.
+    monitor_block = source[
+        source.index("def _monitor_backend") : source.index("def _poll_stop_event")
+    ]
+    assert "window.destroy()" in monitor_block, (
+        "_monitor_backend must call window.destroy() unconditionally so the "
+        "GUI exits whenever the backend's done event fires."
+    )
