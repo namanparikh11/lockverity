@@ -1,5 +1,4 @@
-import { RefreshCw } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router";
 
 import { api } from "@/api/api";
@@ -14,11 +13,13 @@ import { ErrorState } from "@/components/ErrorState";
 import { FilterBar, SelectFilter } from "@/components/FilterBar";
 import { PageHeader } from "@/components/PageHeader";
 import { ProviderStatusBadge } from "@/components/ProviderStatusBadge";
+import { RefreshButton } from "@/components/RefreshButton";
 import { ResponsiveTable } from "@/components/ResponsiveTable";
 import { Skeleton } from "@/components/Skeleton";
 import { StatusBadge } from "@/components/StatusBadge";
 import { SummaryCard } from "@/components/SummaryCard";
 import { Timestamp } from "@/components/Timestamp";
+import { useRefresh } from "@/hooks/useRefresh";
 import { providerNameLabel, scanStatusLabel } from "@/utils/labels";
 import { formatTimestamp } from "@/utils/time";
 
@@ -45,9 +46,16 @@ import { formatTimestamp } from "@/utils/time";
  * operational state is not security state.
  *
  * Polling is manual-only by default. The refresh
- * button blocks duplicate clicks (a synchronous
- * ``pendingRef`` guard) and preserves the last known
- * payload on transient failure.
+ * button is the shared :class:`RefreshButton`
+ * component which blocks duplicate clicks (a
+ * synchronous guard), preserves the last known
+ * payload on transient failure, and renders the
+ * ``Refreshing…`` label while the request is in
+ * flight. v2.1.3 promoted the historical inline
+ * implementation to the shared component so the
+ * same guard / accessibility / failure-preservation
+ * semantics apply to every application-data
+ * surface in the product.
  */
 
 type ProviderStateFilter = "all" | "available" | "partial" | "rate_limited" | "unavailable" | "not_requested" | "cached" | "unknown";
@@ -72,37 +80,47 @@ const ISSUE_STATUS_OPTIONS: { value: IssueStatusFilter; label: string }[] = [
 ];
 
 export function DiagnosticsPage() {
-  const [data, setData] = useState<DiagnosticsSummary | null>(null);
-  const [error, setError] = useState<unknown>(null);
-  const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
-  const pendingRef = useRef(false);
+  // The shared :class:`useRefresh` hook is the
+  // single chokepoint for the manual refresh
+  // behaviour: one click = one request, the last
+  // known payload is preserved on failure, the
+  // visible label flips to ``"Refreshing…"`` while
+  // the request is in flight, and the synchronous
+  // guard inside the hook blocks duplicate
+  // concurrent invocations. v2.1.3 promoted the
+  // historical inline implementation to the
+  // shared hook so the same guard / accessibility
+  // / failure-preservation semantics apply to
+  // every application-data surface in the product.
+  const refreshState = useRefresh<DiagnosticsSummary>({
+    fetcher: () => api.diagnosticsSummary(),
+  });
+  const data = refreshState.data;
+  const initialLoadFailed =
+    refreshState.error !== undefined && data === undefined;
+  const refreshFailed = refreshState.error !== undefined && data !== undefined;
+  const loading = !refreshState.hasLoaded && !refreshState.isRefreshing;
   const [providerState, setProviderState] = useState<ProviderStateFilter>("all");
   const [issueStatus, setIssueStatus] = useState<IssueStatusFilter>("all");
   const [stageFilter, setStageFilter] = useState("all");
 
-  const refresh = useCallback(async () => {
-    if (pendingRef.current) return;
-    pendingRef.current = true;
-    setRefreshing(true);
-    try {
-      const next = await api.diagnosticsSummary();
-      setData(next);
-      setError(null);
-    } catch (err) {
-      // Preserve the last known payload; only the
-      // error banner surfaces the failure.
-      setError(err);
-    } finally {
-      setRefreshing(false);
-      setLoading(false);
-      pendingRef.current = false;
-    }
-  }, []);
-
+  // Fire the initial fetch on mount. The hook
+  // blocks duplicate clicks while in flight so
+  // the operator can never cause a stack. The
+  // effect intentionally runs only on mount; the
+  // hook's own guards prevent duplicate in-flight
+  // requests, and re-running on every state
+  // change would create a feedback loop. The
+  // ``refreshState.refresh`` reference is captured
+  // in a ref so the lint dependency array does not
+  // need to enumerate ``refreshState`` (which
+  // would change every render and create a
+  // feedback loop).
+  const refreshRef = useRef(refreshState.refresh);
+  refreshRef.current = refreshState.refresh;
   useEffect(() => {
-    void refresh();
-  }, [refresh]);
+    refreshRef.current();
+  }, []);
 
   const providers = useMemo(
     () => data?.providers ?? [],
@@ -139,16 +157,12 @@ export function DiagnosticsPage() {
         description="A read-only view of runtime reachability, executor health, persisted provider observations, recent partial / failed / cancelled scans, and aggregated persisted stage states. Operational state is not security state; provider availability is not vulnerability absence."
         breadcrumbs={[{ label: "Diagnostics" }]}
         actions={
-          <button
-            type="button"
-            className="btn-secondary"
-            onClick={refresh}
-            disabled={refreshing || loading}
-            data-testid="diagnostics-refresh"
-          >
-            <RefreshCw aria-hidden="true" className="h-4 w-4" />
-            {refreshing ? "Refreshing..." : "Refresh"}
-          </button>
+          <RefreshButton
+            state={refreshState}
+            testId="diagnostics-refresh"
+            ariaLabel="Refresh operational diagnostics"
+            label="Refresh"
+          />
         }
       />
       <DataCompletenessNotice
@@ -156,15 +170,15 @@ export function DiagnosticsPage() {
         description="The diagnostics surface is read-only and is composed from persisted state. A reachable backend does not imply providers are available; a provider unavailable does not imply a vulnerability is absent; cached evidence is not the same as live evidence; a successful provider request does not prove a repository is safe; a completed scan may still contain partial or degraded provider evidence."
         tone="muted"
       />
-      {error && data === null ? (
+      {initialLoadFailed && refreshState.error ? (
         <div className="mt-4" data-testid="diagnostics-error">
           <ErrorState
-            error={error}
+            error={refreshState.error}
             title="Diagnostics could not be loaded. The last known state is shown where available."
           />
         </div>
       ) : null}
-      {error && data !== null ? (
+      {refreshFailed ? (
         <div className="mt-4" data-testid="diagnostics-refresh-error">
           <DataCompletenessNotice
             title="Refresh failed. The last known diagnostics state is shown below."
@@ -173,9 +187,9 @@ export function DiagnosticsPage() {
           />
         </div>
       ) : null}
-      {loading && data === null ? (
+      {loading ? (
         <Skeleton rows={6} />
-      ) : data === null ? null : (
+      ) : data === undefined ? null : (
         <>
           <section
             className="mt-4 grid grid-cols-1 gap-4 md:grid-cols-2"
