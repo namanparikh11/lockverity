@@ -10,6 +10,7 @@ fixtures so the loader is usable from any module.
 
 from __future__ import annotations
 
+import zipfile
 from collections.abc import Iterable
 from pathlib import Path
 from typing import Any
@@ -49,6 +50,67 @@ def list_fixtures(relative: str = "") -> list[Path]:
     return sorted(p for p in root.rglob("*") if p.is_file())
 
 
+def build_deepseek_harness_zip() -> Path:
+    """Build a deterministic local ZIP fixture mirroring the
+    DeepSeek-Harness symlink pattern.
+
+    The fixture is a minimal but realistic snapshot of
+    the failing production archive: an ordinary
+    ``README.md`` file plus a single relative
+    symbolic-link entry under
+    ``.agents/notes/implemented/CLAUDE.md``. The
+    fixture lives entirely in-memory and is written
+    to the on-disk fixtures directory so a future
+    test can reuse the same bytes for end-to-end
+    intake checks.
+
+    The function never depends on a live GitHub
+    mirror. The permanent test suite uses this
+    fixture; an offline developer can re-run the
+    regression without network access.
+
+    The on-disk bytes are written with a fixed
+    ``date_time`` (1980-01-01 00:00:00) so the
+    fixture is byte-stable across runs and the
+    ``git status --porcelain`` check stays clean
+    after a test run.
+    """
+    target = FIXTURES_DIR / "deepseek_harness_symlink.zip"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    # The ZIP ``date_time`` is the only source of
+    # non-determinism for a constant payload; pin
+    # it so the on-disk bytes are byte-stable.
+    fixed_date_time = (1980, 1, 1, 0, 0, 0)
+    with zipfile.ZipFile(target, "w", zipfile.ZIP_DEFLATED) as zf:
+        # The repository root file is an ordinary
+        # text payload. The bytes are deterministic
+        # so a future test can assert the exact
+        # archive contents.
+        zf.writestr(
+            zipfile.ZipInfo("deepseek-harness/README.md", fixed_date_time),
+            b"# deepseek-harness\n",
+        )
+        # The failing entry is a relative symbolic
+        # link whose target points at the parent
+        # directory's README. ``zipfile`` records
+        # the link target via the
+        # ``create_system=3`` (``UNIX``) attribute
+        # and the external_attr bits. The
+        # constructed ZIP entry is intentionally
+        # not dereferenced; the intake layer
+        # inspects the metadata.
+        info = zipfile.ZipInfo(
+            "deepseek-harness/.agents/notes/implemented/CLAUDE.md",
+            fixed_date_time,
+        )
+        info.create_system = 3  # UNIX
+        # ``S_IFLNK = 0o120000`` shifted into the
+        # upper 16 bits of ``external_attr``.
+        info.external_attr = (0o120000 & 0xFFFF) << 16
+        zf.writestr(info, b"../../README.md")
+    return target
+
+
 def list_files_in_tree(root_path: str) -> list[tuple[str, bytes]]:
     """Return ``(relative_path, bytes)`` for every file under ``root_path``.
 
@@ -82,6 +144,7 @@ def write_temp_fixture(
 
 __all__ = [
     "FIXTURES_DIR",
+    "build_deepseek_harness_zip",
     "fixture_path",
     "list_files_in_tree",
     "list_fixtures",

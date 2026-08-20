@@ -42,6 +42,9 @@ from pathlib import Path
 from app.utils.archive_validation import (
     ArchiveEntry,
     ArchiveLimits,
+    ArchiveValidationCollector,
+    ArchiveValidationError,
+    SkippedSymlink,
     validate_entries,
 )
 from app.utils.hashing import DEFAULT_CHUNK_SIZE
@@ -145,6 +148,13 @@ class ZipIntakeResult:
     file_count: int
     uncompressed_size: int
     contents_dir: Path
+    # The list of symbolic links the validator
+    # intentionally skipped for safety. The list is
+    # empty for archives that contain no symbolic
+    # links. The scan evidence layer uses the list
+    # to mark the analysis ``partial`` when the
+    # omitted content materially affects coverage.
+    skipped_symlinks: tuple[SkippedSymlink, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -261,6 +271,22 @@ def inspect_zip_entries(archive_path: Path) -> list[ArchiveEntry]:
                 unix_mode = (info.external_attr >> 16) & 0xFFFF
                 is_symlink = (unix_mode & _S_IFMT) == _S_IFLNK
                 is_dir = info.is_dir()
+                # v2.1.3: capture the literal link
+                # target for symlink entries. The ZIP
+                # format stores the target as the
+                # entry's data, so we read it from the
+                # handle. The validator never
+                # dereferences the link; the target is
+                # only inspected as a string.
+                link_target: str | None = None
+                if is_symlink and not is_dir:
+                    try:
+                        with zf.open(info, "r") as handle:
+                            link_target = handle.read().decode(
+                                "utf-8", errors="replace"
+                            ) or None
+                    except (KeyError, OSError, zipfile.BadZipFile):
+                        link_target = None
                 if is_dir:
                     # Directories are not counted as files. The
                     # path is still validated for safety.
@@ -279,6 +305,7 @@ def inspect_zip_entries(archive_path: Path) -> list[ArchiveEntry]:
                         size=info.file_size,
                         compressed_size=info.compress_size,
                         is_symlink=is_symlink,
+                        link_target=link_target,
                     )
                 )
             return entries
@@ -289,18 +316,30 @@ def inspect_zip_entries(archive_path: Path) -> list[ArchiveEntry]:
         ) from exc
 
 
-def validate_zip(entries: list[ArchiveEntry], limits: ArchiveLimits) -> None:
-    """Run the existing :func:`validate_entries` over ``entries``."""
+def validate_zip(
+    entries: list[ArchiveEntry], limits: ArchiveLimits
+) -> ArchiveValidationCollector:
+    """Run the validator and surface both errors and skipped symlinks.
+
+    The function returns the populated
+    :class:`ArchiveValidationCollector` so the
+    caller can read the ``skipped_symlinks``
+    collection and persist it through the intake
+    result. The function raises a
+    :class:`ZipIntakeError` with the first
+    :class:`ArchiveValidationError`'s code so the
+    historical hard-fail semantics are preserved.
+    Skipped symlinks are *not* an error.
+    """
+    collector = validate_entries(entries, limits)
     try:
-        validate_entries(entries, limits)
-    except Exception as exc:
-        # ``validate_entries`` raises
-        # :class:`ArchiveValidationError`. Surface the same
-        # code under a :class:`ZipIntakeError` so callers can
+        collector.ok()
+    except ArchiveValidationError as exc:
+        # Surface the same code under a
+        # :class:`ZipIntakeError` so callers can
         # handle intake failures uniformly.
-        code = getattr(exc, "code", "archive_invalid")
-        message = getattr(exc, "message", str(exc))
-        raise ZipIntakeError(code, message) from exc
+        raise ZipIntakeError(exc.code, exc.message) from exc
+    return collector
 
 
 def extract_zip(
@@ -336,6 +375,18 @@ def extract_zip(
                 if info.is_dir():
                     target = paths.contents_dir / normalized.replace("/", os.sep)
                     target.mkdir(parents=True, exist_ok=True)
+                    continue
+                # v2.1.3: the validator may have
+                # recorded-and-skipped a symbolic
+                # link. The extractor never materialises
+                # the link; it simply moves on. Hardlinks
+                # are not present here because the
+                # validator rejected them with
+                # ``archive_hardlink_forbidden``.
+                if any(
+                    e.is_symlink and normalize_relative_path(e.name) == normalized
+                    for e in entries
+                ):
                     continue
                 if normalized in seen:
                     raise ZipIntakeError(
@@ -439,7 +490,12 @@ def intake_zip(
     """Run the full intake pipeline (quarantine -> validate -> extract)."""
     archive_path, sha_hex, size = quarantine_archive(paths, source=source, limits=limits)
     entries = inspect_zip_entries(archive_path)
-    validate_zip(entries, limits)
+    # ``validate_zip`` returns the populated
+    # collector; the skipped symlinks are surfaced
+    # through the intake result so the scan evidence
+    # layer can mark the analysis ``partial`` when
+    # the omission matters.
+    collector = validate_zip(entries, limits)
     extract_zip(archive_path, paths, entries, limits=limits)
     file_count = sum(1 for e in entries if not e.is_symlink and e.size >= 0)
     uncompressed_size = sum(max(0, e.size) for e in entries if not e.is_symlink)
@@ -450,6 +506,7 @@ def intake_zip(
         file_count=file_count,
         uncompressed_size=uncompressed_size,
         contents_dir=paths.contents_dir,
+        skipped_symlinks=tuple(collector.skipped_symlinks),
     )
 
 
@@ -469,9 +526,12 @@ def intake_tar_gz(
 
     The function is symmetrical with :func:`intake_zip` but uses
     :mod:`tarfile` to read the archive. Each member is validated
-    against the same safety contract as ZIP entries; symlinks,
-    device files, and unsafe paths are rejected before any
-    extraction happens.
+    against the same safety contract as ZIP entries; the
+    v2.1.3 symlink policy classifies links into
+    ``skip`` (safe relative symlinks) or ``reject``
+    (anything unsafe). Hardlinks remain a hard
+    fail; device files and unsafe paths continue to
+    raise.
     """
     import gzip
     import tarfile
@@ -494,12 +554,16 @@ def intake_tar_gz(
                     normalized = normalize_relative_path(name)
                 except PathNormalizationError as exc:
                     raise ZipIntakeError("archive_unsafe_path", str(exc)) from exc
-                if member.issym() or member.islnk():
-                    kind = "symlink" if member.issym() else "hardlink"
-                    raise ZipIntakeError(
-                        f"archive_{kind}_forbidden",
-                        f"Entry {name!r} is a {kind}; not accepted.",
-                    )
+                # v2.1.3: defer the symlink / hardlink
+                # classification to the shared
+                # ``validate_entries`` helper. The
+                # tarball layer only records the
+                # ``is_symlink`` / ``is_hardlink`` flag
+                # and the literal link target so the
+                # validator can decide whether the link
+                # is safe to record and skip or whether
+                # the link is unsafe and must be
+                # rejected.
                 if member.isdir():
                     entries.append(
                         ArchiveEntry(
@@ -507,6 +571,18 @@ def intake_tar_gz(
                             size=0,
                             compressed_size=0,
                             is_symlink=False,
+                        )
+                    )
+                    continue
+                if member.issym() or member.islnk():
+                    entries.append(
+                        ArchiveEntry(
+                            name=name,
+                            size=0,
+                            compressed_size=0,
+                            is_symlink=bool(member.issym()),
+                            is_hardlink=bool(member.islnk()),
+                            link_target=member.linkname or None,
                         )
                     )
                     continue
@@ -537,13 +613,20 @@ def intake_tar_gz(
         ) from exc
 
     try:
-        validate_entries(entries, limits)
+        collector = validate_zip(entries, limits)
     except Exception as exc:
         code = getattr(exc, "code", "archive_invalid")
         message = getattr(exc, "message", str(exc))
         cleanup_workspace(paths)
         paths.ensure()
         raise ZipIntakeError(code, message) from exc
+
+    # Build the set of normalised entry paths the
+    # validator recorded-and-skipped. The extractor
+    # never materialises these entries in the workspace
+    # because the validator's contract is "skip + do
+    # not follow".
+    skipped_paths = {record.path for record in collector.skipped_symlinks}
 
     # Extract validated entries.
     if not paths.contents_dir.exists():
@@ -563,7 +646,14 @@ def intake_tar_gz(
                     target.mkdir(parents=True, exist_ok=True)
                     continue
                 if member.issym() or member.islnk():
-                    # Already validated above, but double-check.
+                    # Skipped symbolic links are
+                    # intentionally not extracted.
+                    # Hardlinks are not present here
+                    # because the validator rejected
+                    # them. The double-check below is a
+                    # safety net.
+                    if normalized in skipped_paths or member.issym():
+                        continue
                     raise ZipIntakeError(
                         "archive_symlink_forbidden",
                         f"Entry {name!r} is a link; not accepted.",
@@ -633,8 +723,16 @@ def intake_tar_gz(
             paths.contents_dir.mkdir(parents=True, exist_ok=True)
         raise
 
-    file_count_final = sum(1 for e in entries if not e.is_symlink and e.size >= 0)
-    uncompressed_size_final = sum(max(0, e.size) for e in entries if not e.is_symlink)
+    file_count_final = sum(
+        1
+        for e in entries
+        if not e.is_symlink and not e.is_hardlink and e.size >= 0
+    )
+    uncompressed_size_final = sum(
+        max(0, e.size)
+        for e in entries
+        if not e.is_symlink and not e.is_hardlink
+    )
     return ZipIntakeResult(
         archive_path=archive_path,
         archive_sha256=sha_hex,
@@ -642,4 +740,5 @@ def intake_tar_gz(
         file_count=file_count_final,
         uncompressed_size=uncompressed_size_final,
         contents_dir=paths.contents_dir,
+        skipped_symlinks=tuple(collector.skipped_symlinks),
     )

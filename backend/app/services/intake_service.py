@@ -733,10 +733,20 @@ _ARCHIVE_REJECTION_MESSAGES: dict[str, str] = {
         "checkout."
     ),
     "archive_symlink_forbidden": (
-        "Archive was rejected: it contains a symbolic or "
-        "hard link. Lockverity never follows links inside an "
-        "uploaded archive. Re-create the archive as plain "
-        "files."
+        "Archive was rejected: it contains a hard link. "
+        "Lockverity never follows hard links inside an uploaded "
+        "archive. Re-create the archive as plain files."
+    ),
+    "archive_symlink_target_unsafe": (
+        "Archive was rejected: it contains a symbolic link with a "
+        "target that escapes the archive root, an absolute target, "
+        "a Windows drive-letter target, or a UNC target. Re-create "
+        "the archive without the unsafe link."
+    ),
+    "archive_symlink_target_missing": (
+        "Archive was rejected: it contains a symbolic link with an "
+        "empty or malformed target. Re-create the archive with a "
+        "valid relative target."
     ),
     "archive_too_many_files": (
         "Archive was rejected: it contains more files than "

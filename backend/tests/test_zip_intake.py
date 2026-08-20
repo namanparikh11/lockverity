@@ -138,19 +138,33 @@ def test_intake_zip_rejects_unc_path(tmp_path: Path) -> None:
         intake_zip(paths, source=[body], limits=_limits())
 
 
-def test_intake_zip_rejects_symlink(tmp_path: Path) -> None:
+def test_intake_zip_rejects_unsafe_symlink(tmp_path: Path) -> None:
+    """A symlink with an unsafe target is still rejected.
+
+    v2.1.3 split the historical
+    ``archive_symlink_forbidden`` policy: a safe
+    relative symlink is now recorded-and-skipped; a
+    symlink whose target is absolute, drive-letter,
+    UNC, or escapes the archive root remains a hard
+    fail. The test uses an absolute target so the
+    ``archive_symlink_target_unsafe`` code is the
+    one that fires.
+    """
     paths = create_workspace_paths(tmp_path, new_workspace_key())
-    # Hand-craft a zip with a symlink entry.
+    # Hand-craft a zip with a symlink entry whose
+    # target is an absolute POSIX path. The v2.1.3
+    # policy rejects absolute targets outright so
+    # the entire archive is refused.
 
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w") as zf:
         info = zipfile.ZipInfo("link.txt")
         # Encode unix symlink mode in the external_attr.
         info.external_attr = 0o120777 << 16
-        zf.writestr(info, "target")
+        zf.writestr(info, "/etc/passwd")
     with pytest.raises(ZipIntakeError) as exc:
         intake_zip(paths, source=[buf.getvalue()], limits=_limits())
-    assert exc.value.code == "archive_symlink_forbidden"
+    assert exc.value.code == "archive_symlink_target_unsafe"
 
 
 def test_intake_zip_rejects_duplicate_normalized_path(tmp_path: Path) -> None:

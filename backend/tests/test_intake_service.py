@@ -318,7 +318,9 @@ def test_intake_github_archive_rejection_message_is_actionable(
     # actionable message.
     for code, expected_keyword in (
         ("archive_unsafe_path", "outside the archive root"),
-        ("archive_symlink_forbidden", "symbolic or hard link"),
+        ("archive_symlink_forbidden", "hard link"),
+        ("archive_symlink_target_unsafe", "symbolic link with a"),
+        ("archive_symlink_target_missing", "symbolic link"),
         ("archive_too_many_files", "more files than"),
         ("archive_entry_too_large", "single entry exceeds"),
         ("archive_uncompressed_too_large", "cumulative uncompressed"),
