@@ -45,6 +45,64 @@ LOG_DATEFMT = "%Y-%m-%dT%H:%M:%S"
 # their own names; the CLI logger is additive so the
 # operator can filter the CLI messages out if needed.
 CLI_LOGGER_NAME = "lockverity.cli"
+# Logger name used by the desktop launcher. The launcher
+# runs in the GUI process; without an explicit file handler
+# attached to this logger, the launcher's
+# :func:`logging.Logger.exception` calls would propagate
+# to the root logger and (on a windowless Windows process)
+# be silently dropped. The launcher therefore configures
+# its own file handler against the same ``lockverity.log``
+# file the CLI uses so the operator sees a single
+# chronological log across CLI + GUI lifecycles.
+LAUNCHER_LOGGER_NAME = "lockverity.launcher"
+
+# Logger names the launcher routes to the rotating file.
+# ``pywebview`` and ``webview`` are the underlying GUI
+# library names; ``clr_loader`` is the pythonnet runtime
+# used by pywebview's Edge Chromium backend on Windows.
+# ``urllib3`` is included so any certificate / proxy
+# exception raised while pywebview initialises the
+# WebView2 controller is captured.
+LAUNCHER_ATTACHED_LOGGERS: tuple[str, ...] = (
+    CLI_LOGGER_NAME,
+    LAUNCHER_LOGGER_NAME,
+    "pywebview",
+    "webview",
+    "clr_loader",
+    "urllib3",
+)
+
+
+def _build_handler(
+    log_path: Path,
+    *,
+    max_bytes: int,
+    backup_count: int,
+    level: int,
+) -> RotatingFileHandler:
+    """Build the rotating file handler shared by the wrappers."""
+    handler = RotatingFileHandler(
+        filename=str(log_path),
+        maxBytes=max_bytes,
+        backupCount=backup_count,
+        encoding="utf-8",
+        delay=True,
+    )
+    handler.setLevel(level)
+    handler.setFormatter(logging.Formatter(LOG_FORMAT, datefmt=LOG_DATEFMT))
+    return handler
+
+
+def _handler_already_attached(logger: logging.Logger, log_path: Path) -> bool:
+    """Return True if ``logger`` already has a rotating handler for ``log_path``."""
+    for existing in list(logger.handlers):
+        if (
+            isinstance(existing, RotatingFileHandler)
+            and Path(getattr(existing, "baseFilename", "")) == log_path
+        ):
+            existing.setLevel(logger.level or logging.INFO)
+            return True
+    return False
 
 
 def configure_logging(
@@ -61,35 +119,75 @@ def configure_logging(
     attaching a second handler. The handler uses UTF-8
     encoding so the log file is portable across hosts.
 
-    The function never configures the root logger; only
-    the CLI logger and its descendants receive the
-    rotating file handler. The application loggers keep
-    their own configuration (or, in production, the
-    default ``StreamHandler``).
+    The CLI logger sets ``propagate = False`` so a parent
+    ``lockverity`` handler does not double-write the same
+    record. The CLI logger is the only place the CLI
+    writes its own log records; the CLI's own output
+    never propagates to the root logger.
     """
     logger = logging.getLogger(CLI_LOGGER_NAME)
     log_path.parent.mkdir(parents=True, exist_ok=True)
-    for existing in list(logger.handlers):
-        if (
-            isinstance(existing, RotatingFileHandler)
-            and Path(getattr(existing, "baseFilename", "")) == log_path
-        ):
-            existing.setLevel(level)
-            logger.setLevel(level)
-            return logger
-    handler = RotatingFileHandler(
-        filename=str(log_path),
-        maxBytes=max_bytes,
-        backupCount=backup_count,
-        encoding="utf-8",
-        delay=True,
+    if _handler_already_attached(logger, log_path):
+        logger.setLevel(level)
+        return logger
+    handler = _build_handler(
+        log_path,
+        max_bytes=max_bytes,
+        backup_count=backup_count,
+        level=level,
     )
-    handler.setLevel(level)
-    handler.setFormatter(logging.Formatter(LOG_FORMAT, datefmt=LOG_DATEFMT))
     logger.addHandler(handler)
     logger.setLevel(level)
     logger.propagate = False
     return logger
+
+
+def configure_launcher_logging(
+    log_path: Path,
+    *,
+    max_bytes: int = DEFAULT_MAX_BYTES,
+    backup_count: int = DEFAULT_BACKUP_COUNT,
+    level: int = logging.INFO,
+) -> logging.Logger:
+    """Attach a rotating file handler to the root logger.
+
+    The desktop launcher is a separate process from the
+    CLI's :func:`configure_logging` invocation. Without an
+    explicit file handler on the root logger, any
+    :func:`logging.Logger.exception` call inside the
+    WebView startup path is silently dropped on a
+    windowless Windows process because there is no
+    ``StreamHandler`` and no parent logger with a file
+    handler.
+
+    The function attaches the rotating file handler to
+    the **root logger** rather than to every individual
+    logger. The root is the single propagation target:
+    every logger under ``lockverity.*``, ``pywebview``,
+    ``webview``, ``clr_loader``, ``urllib3``, etc. has
+    ``propagate = True`` (the Python default), so the
+    root handler sees every record once. Attaching
+    handlers to multiple specific loggers would
+    double-write the same record via the parent
+    propagation chain.
+
+    The function is idempotent: a second call with the
+    same ``log_path`` does not attach a second handler.
+    """
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    root = logging.getLogger()
+    if _handler_already_attached(root, log_path):
+        root.setLevel(level)
+        return logging.getLogger(LAUNCHER_LOGGER_NAME)
+    handler = _build_handler(
+        log_path,
+        max_bytes=max_bytes,
+        backup_count=backup_count,
+        level=level,
+    )
+    root.addHandler(handler)
+    root.setLevel(level)
+    return logging.getLogger(LAUNCHER_LOGGER_NAME)
 
 
 def get_cli_logger() -> logging.Logger:
@@ -107,6 +205,9 @@ __all__ = [
     "CLI_LOGGER_NAME",
     "DEFAULT_BACKUP_COUNT",
     "DEFAULT_MAX_BYTES",
+    "LAUNCHER_ATTACHED_LOGGERS",
+    "LAUNCHER_LOGGER_NAME",
+    "configure_launcher_logging",
     "configure_logging",
     "get_cli_logger",
 ]
